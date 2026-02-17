@@ -1,0 +1,1682 @@
+{
+  "address": "4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p",
+  "metadata": {
+    "name": "hardig",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "authorize_key",
+      "docs": [
+        "Authorize a new key NFT for a position (admin only)."
+      ],
+      "discriminator": [
+        152,
+        133,
+        99,
+        67,
+        84,
+        208,
+        76,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_nft_ata",
+          "docs": [
+            "The admin's key NFT token account (proves admin holds the key)."
+          ]
+        },
+        {
+          "name": "admin_key_auth",
+          "docs": [
+            "The admin's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to authorize a key for."
+          ]
+        },
+        {
+          "name": "new_key_mint",
+          "docs": [
+            "The mint for the new key NFT. Created fresh by the client, passed in as a signer."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "target_nft_ata",
+          "docs": [
+            "The target wallet's ATA for the new key NFT."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "target_wallet"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "new_key_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "target_wallet",
+          "docs": [
+            "The wallet that will receive the new key NFT."
+          ]
+        },
+        {
+          "name": "new_key_auth",
+          "docs": [
+            "The KeyAuthorization for the new key."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  121,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position"
+              },
+              {
+                "kind": "account",
+                "path": "new_key_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Program PDA used as mint authority."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "role",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "borrow",
+      "docs": [
+        "Borrow SOL against the navSOL floor (admin only)."
+      ],
+      "discriminator": [
+        228,
+        253,
+        131,
+        202,
+        207,
+        116,
+        89,
+        18
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "key_nft_ata",
+          "docs": [
+            "The admin's key NFT token account."
+          ]
+        },
+        {
+          "name": "key_auth",
+          "docs": [
+            "The admin's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to borrow against."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Mutable because Mayflower CPI marks user_wallet as writable."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "user_base_token_ata",
+          "docs": [
+            "Program PDA's wSOL ATA (receives borrowed funds)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tenant"
+        },
+        {
+          "name": "market_group"
+        },
+        {
+          "name": "market_meta"
+        },
+        {
+          "name": "market_base_vault",
+          "writable": true
+        },
+        {
+          "name": "market_nav_vault",
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint"
+        },
+        {
+          "name": "mayflower_market",
+          "writable": true
+        },
+        {
+          "name": "mayflower_program"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "log_account",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "buy",
+      "docs": [
+        "Buy navSOL by depositing SOL (admin, operator, or depositor)."
+      ],
+      "discriminator": [
+        102,
+        6,
+        61,
+        18,
+        1,
+        218,
+        235,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "key_nft_ata",
+          "docs": [
+            "The signer's key NFT token account."
+          ]
+        },
+        {
+          "name": "key_auth",
+          "docs": [
+            "The signer's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to buy navSOL for."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Program PDA (authority) that owns the Mayflower PersonalPosition.",
+            "Mutable because Mayflower CPI marks user_wallet as writable."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "personal_position",
+          "docs": [
+            "Mayflower PersonalPosition PDA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_shares",
+          "docs": [
+            "Mayflower user shares escrow."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_nav_sol_ata",
+          "docs": [
+            "Program PDA's navSOL ATA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_wsol_ata",
+          "docs": [
+            "Program PDA's wSOL ATA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tenant",
+          "docs": [
+            "Mayflower tenant."
+          ]
+        },
+        {
+          "name": "market_group",
+          "docs": [
+            "Mayflower market group."
+          ]
+        },
+        {
+          "name": "market_meta",
+          "docs": [
+            "Mayflower market metadata."
+          ]
+        },
+        {
+          "name": "mayflower_market",
+          "docs": [
+            "Mayflower market."
+          ],
+          "writable": true
+        },
+        {
+          "name": "nav_sol_mint",
+          "docs": [
+            "navSOL mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "market_base_vault",
+          "docs": [
+            "Mayflower market base vault."
+          ],
+          "writable": true
+        },
+        {
+          "name": "market_nav_vault",
+          "docs": [
+            "Mayflower market nav vault."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "docs": [
+            "Mayflower fee vault."
+          ],
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "docs": [
+            "wSOL mint (baseMint for Mayflower CPI)."
+          ]
+        },
+        {
+          "name": "mayflower_program",
+          "docs": [
+            "Mayflower program."
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "log_account",
+          "docs": [
+            "Mayflower log account."
+          ],
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_position",
+      "docs": [
+        "Create a new position with an admin key NFT."
+      ],
+      "discriminator": [
+        48,
+        215,
+        197,
+        153,
+        96,
+        203,
+        180,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_nft_mint",
+          "docs": [
+            "The mint for the admin key NFT. Created fresh by the client, passed in as a signer."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_nft_ata",
+          "docs": [
+            "The admin's ATA for the admin key NFT."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "admin"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "admin_nft_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position account."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "admin_nft_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin_key_auth",
+          "docs": [
+            "The KeyAuthorization for the admin key."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  121,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position"
+              },
+              {
+                "kind": "account",
+                "path": "admin_nft_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Program PDA used as mint authority."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_reinvest_spread_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "init_mayflower_position",
+      "docs": [
+        "Initialize a Mayflower PersonalPosition owned by this program's PDA.",
+        "Called once after create_position (admin only)."
+      ],
+      "discriminator": [
+        182,
+        3,
+        228,
+        23,
+        79,
+        67,
+        116,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_nft_ata",
+          "docs": [
+            "The admin's key NFT token account."
+          ]
+        },
+        {
+          "name": "admin_key_auth",
+          "docs": [
+            "The admin's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position (mutated to store Mayflower PersonalPosition PDA)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Program PDA that will own the Mayflower PersonalPosition."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mayflower_personal_position",
+          "docs": [
+            "The Mayflower PersonalPosition PDA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mayflower_user_shares",
+          "docs": [
+            "The Mayflower PersonalPosition escrow (user shares)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mayflower_market_meta",
+          "docs": [
+            "The Mayflower market metadata."
+          ]
+        },
+        {
+          "name": "nav_sol_mint",
+          "docs": [
+            "The navSOL mint."
+          ]
+        },
+        {
+          "name": "mayflower_log",
+          "docs": [
+            "The Mayflower log account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mayflower_program",
+          "docs": [
+            "The Mayflower program."
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_protocol",
+      "docs": [
+        "Initialize the global protocol config. Called once by the deployer."
+      ],
+      "discriminator": [
+        188,
+        233,
+        252,
+        106,
+        134,
+        146,
+        202,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "reinvest",
+      "docs": [
+        "Reinvest new borrow capacity into more navSOL (admin, operator, or keeper)."
+      ],
+      "discriminator": [
+        107,
+        29,
+        95,
+        200,
+        217,
+        52,
+        155,
+        76
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "key_nft_ata",
+          "docs": [
+            "The signer's key NFT token account."
+          ]
+        },
+        {
+          "name": "key_auth",
+          "docs": [
+            "The signer's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to reinvest for."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Mutable because Mayflower CPI marks user_wallet as writable."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "user_shares",
+          "writable": true
+        },
+        {
+          "name": "user_nav_sol_ata",
+          "writable": true
+        },
+        {
+          "name": "user_wsol_ata",
+          "docs": [
+            "Program PDA's wSOL ATA (used for buy CPI input)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_base_token_ata",
+          "docs": [
+            "Program PDA's wSOL ATA (used for borrow CPI output).",
+            "In practice this is the same address as user_wsol_ata."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tenant"
+        },
+        {
+          "name": "market_group"
+        },
+        {
+          "name": "market_meta"
+        },
+        {
+          "name": "mayflower_market",
+          "writable": true
+        },
+        {
+          "name": "nav_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "market_base_vault",
+          "writable": true
+        },
+        {
+          "name": "market_nav_vault",
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint"
+        },
+        {
+          "name": "mayflower_program"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "log_account",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "repay",
+      "docs": [
+        "Repay borrowed SOL (admin, operator, or depositor)."
+      ],
+      "discriminator": [
+        234,
+        103,
+        67,
+        82,
+        208,
+        234,
+        219,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "key_nft_ata",
+          "docs": [
+            "The signer's key NFT token account."
+          ]
+        },
+        {
+          "name": "key_auth",
+          "docs": [
+            "The signer's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to repay debt for."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Mutable because Mayflower CPI marks user_wallet as writable."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "user_base_token_ata",
+          "docs": [
+            "Program PDA's wSOL ATA (repays from this account)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tenant"
+        },
+        {
+          "name": "market_group"
+        },
+        {
+          "name": "market_meta"
+        },
+        {
+          "name": "market_base_vault",
+          "writable": true
+        },
+        {
+          "name": "market_nav_vault",
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint"
+        },
+        {
+          "name": "mayflower_market",
+          "writable": true
+        },
+        {
+          "name": "mayflower_program"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "log_account",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "revoke_key",
+      "docs": [
+        "Revoke a key by closing its KeyAuthorization (admin only)."
+      ],
+      "discriminator": [
+        162,
+        44,
+        180,
+        118,
+        135,
+        106,
+        115,
+        232
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_nft_ata",
+          "docs": [
+            "The admin's key NFT token account."
+          ]
+        },
+        {
+          "name": "admin_key_auth",
+          "docs": [
+            "The admin's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position."
+          ]
+        },
+        {
+          "name": "target_key_auth",
+          "docs": [
+            "The KeyAuthorization to revoke. Closed, rent refunded to admin."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw",
+      "docs": [
+        "Withdraw SOL/navSOL from the position (admin only)."
+      ],
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "key_nft_ata",
+          "docs": [
+            "The admin's key NFT token account."
+          ]
+        },
+        {
+          "name": "key_auth",
+          "docs": [
+            "The admin's KeyAuthorization."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to withdraw from."
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Mutable because Mayflower CPI marks user_wallet as writable."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "personal_position",
+          "writable": true
+        },
+        {
+          "name": "user_shares",
+          "writable": true
+        },
+        {
+          "name": "user_nav_sol_ata",
+          "writable": true
+        },
+        {
+          "name": "user_wsol_ata",
+          "writable": true
+        },
+        {
+          "name": "tenant"
+        },
+        {
+          "name": "market_group"
+        },
+        {
+          "name": "market_meta"
+        },
+        {
+          "name": "mayflower_market",
+          "writable": true
+        },
+        {
+          "name": "nav_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "market_base_vault",
+          "writable": true
+        },
+        {
+          "name": "market_nav_vault",
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint"
+        },
+        {
+          "name": "mayflower_program"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "log_account",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "KeyAuthorization",
+      "discriminator": [
+        224,
+        196,
+        58,
+        181,
+        100,
+        86,
+        61,
+        163
+      ]
+    },
+    {
+      "name": "PositionNFT",
+      "discriminator": [
+        110,
+        231,
+        174,
+        81,
+        107,
+        90,
+        24,
+        208
+      ]
+    },
+    {
+      "name": "ProtocolConfig",
+      "discriminator": [
+        207,
+        91,
+        250,
+        28,
+        152,
+        179,
+        215,
+        209
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Signer is not authorized for this action"
+    },
+    {
+      "code": 6001,
+      "name": "AdminOnly",
+      "msg": "This action requires admin key"
+    },
+    {
+      "code": 6002,
+      "name": "InsufficientPermission",
+      "msg": "Key role does not have permission for this instruction"
+    },
+    {
+      "code": 6003,
+      "name": "KeyNotHeld",
+      "msg": "Signer does not hold the key NFT"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidKey",
+      "msg": "Key NFT mint does not match KeyAuthorization"
+    },
+    {
+      "code": 6005,
+      "name": "WrongPosition",
+      "msg": "KeyAuthorization is for a different position"
+    },
+    {
+      "code": 6006,
+      "name": "CannotCreateSecondAdmin",
+      "msg": "Cannot create a second admin key"
+    },
+    {
+      "code": 6007,
+      "name": "CannotRevokeAdminKey",
+      "msg": "Cannot revoke the admin key"
+    },
+    {
+      "code": 6008,
+      "name": "KeyAlreadyAuthorized",
+      "msg": "Key is already authorized for this position"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidKeyRole",
+      "msg": "Invalid key role value"
+    },
+    {
+      "code": 6010,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds for this operation"
+    },
+    {
+      "code": 6011,
+      "name": "BorrowCapacityExceeded",
+      "msg": "Borrow amount exceeds available capacity"
+    },
+    {
+      "code": 6012,
+      "name": "ReinvestSpreadTooHigh",
+      "msg": "Market/floor spread exceeds max_reinvest_spread_bps"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidMayflowerAccount",
+      "msg": "Invalid Mayflower account address or derivation"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidNftMint",
+      "msg": "Invalid NFT mint"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidPositionPda",
+      "msg": "Invalid position PDA"
+    },
+    {
+      "code": 6016,
+      "name": "PositionAlreadyExists",
+      "msg": "Position already exists for this admin key"
+    }
+  ],
+  "types": [
+    {
+      "name": "KeyAuthorization",
+      "docs": [
+        "Links a key NFT to a position with a specific role.",
+        "PDA seeds = [b\"key_auth\", position, key_nft_mint]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "docs": [
+              "The position this key unlocks."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "key_nft_mint",
+            "docs": [
+              "The NFT mint that serves as the key."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "role",
+            "docs": [
+              "The role/permissions this key grants."
+            ],
+            "type": {
+              "defined": {
+                "name": "KeyRole"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for this PDA."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KeyRole",
+      "docs": [
+        "Role assigned to a key NFT."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Admin"
+          },
+          {
+            "name": "Operator"
+          },
+          {
+            "name": "Depositor"
+          },
+          {
+            "name": "Keeper"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionNFT",
+      "docs": [
+        "A navSOL position controlled by an NFT keyring.",
+        "PDA seeds = [b\"position\", admin_nft_mint]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin_nft_mint",
+            "docs": [
+              "The admin key NFT mint (master key, only one per position)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "position_pda",
+            "docs": [
+              "The Mayflower PersonalPosition PDA owned by this program."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "deposited_nav",
+            "docs": [
+              "navSOL deposited (local tracking, Mayflower is source of truth)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "user_debt",
+            "docs": [
+              "SOL borrowed by the user (local tracking)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "protocol_debt",
+            "docs": [
+              "SOL borrowed by the protocol for reinvestment."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_reinvest_spread_bps",
+            "docs": [
+              "Max market/floor spread ratio (in bps) allowed for reinvest."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "last_admin_activity",
+            "docs": [
+              "Last time the admin signed an instruction (unix timestamp).",
+              "Used for future time-locked recovery mechanism."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for the position PDA."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolConfig",
+      "docs": [
+        "Global protocol configuration. Singleton PDA (seeds = [b\"config\"])."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "The admin who initialized the protocol."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for the config PDA."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}
