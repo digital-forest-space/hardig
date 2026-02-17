@@ -39,7 +39,6 @@ export function ActionModal({ action, onClose, onRefresh }) {
 
   // Form fields
   const [amount, setAmount] = useState('');
-  const [spread, setSpread] = useState('500');
   const [targetWallet, setTargetWallet] = useState('');
   const [role, setRole] = useState('1');
   const [revokeIdx, setRevokeIdx] = useState('0');
@@ -62,7 +61,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
           built = await buildInitializeProtocol(program, walletPk);
           break;
         case 'createPosition':
-          built = await buildCreatePosition(program, walletPk, parseInt(spread));
+          built = await buildCreatePosition(program, walletPk);
           break;
         case 'setup':
           built = await buildSetup(program, walletPk);
@@ -251,17 +250,6 @@ export function ActionModal({ action, onClose, onRefresh }) {
               </div>
             )}
 
-            {action === 'createPosition' && (
-              <div class="form-group">
-                <label>Max Reinvest Spread (bps)</label>
-                <input
-                  type="number"
-                  value={spread}
-                  onInput={(e) => setSpread(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            )}
 
             {action === 'authorize' && (
               <>

@@ -7,7 +7,7 @@ import {
 } from '../constants.js';
 import { shortPubkey } from '../utils.js';
 
-export async function buildCreatePosition(program, wallet, maxSpreadBps) {
+export async function buildCreatePosition(program, wallet) {
   const mintKp = Keypair.generate();
   const mint = mintKp.publicKey;
   const adminAta = getAta(wallet, mint);
@@ -16,7 +16,7 @@ export async function buildCreatePosition(program, wallet, maxSpreadBps) {
   const [programPda] = deriveProgramPda();
 
   const ix = await program.methods
-    .createPosition(maxSpreadBps)
+    .createPosition(0)
     .accounts({
       admin: wallet,
       adminNftMint: mint,
@@ -32,7 +32,6 @@ export async function buildCreatePosition(program, wallet, maxSpreadBps) {
       'Create Position',
       `Admin NFT Mint: ${shortPubkey(mint)}`,
       `Position PDA: ${shortPubkey(positionPda)}`,
-      `Max Reinvest Spread: ${maxSpreadBps} bps`,
     ],
     instructions: [ix],
     extraSigners: [mintKp],

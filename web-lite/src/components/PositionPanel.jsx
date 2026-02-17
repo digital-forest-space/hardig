@@ -40,10 +40,6 @@ export function PositionPanel() {
           {lamportsToSol(mfBorrowCapacity.value)} SOL
         </span>
       </div>
-      <div class="data-row">
-        <span class="label">Max Reinvest Spread</span>
-        <span class="value">{pos.maxReinvestSpreadBps} bps</span>
-      </div>
     </div>
   );
 }

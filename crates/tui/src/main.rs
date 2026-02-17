@@ -40,11 +40,7 @@ enum Action {
     /// Initialize the protocol config
     InitProtocol,
     /// Create a new position NFT
-    CreatePosition {
-        /// Max reinvest spread in basis points
-        #[arg(long, default_value = "500")]
-        spread_bps: u16,
-    },
+    CreatePosition,
     /// One-time setup: init Mayflower position + create ATAs
     Setup,
     /// Buy navSOL with SOL
@@ -146,7 +142,6 @@ struct PositionInfo {
     user_debt: String,
     protocol_debt: String,
     borrow_capacity: String,
-    max_reinvest_spread_bps: u16,
 }
 
 #[derive(Serialize)]
@@ -290,14 +285,13 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             }
             app.build_init_protocol();
         }
-        Action::CreatePosition { spread_bps } => {
+        Action::CreatePosition => {
             if app.position_pda.is_some() {
                 return Some(CliOutput::Noop {
                     action: "create-position".into(),
                     message: "Position already exists for this keypair".into(),
                 });
             }
-            app.form_fields = vec![("Max Reinvest Spread (bps)".into(), spread_bps.to_string())];
             app.build_create_position();
         }
         Action::Setup => {
@@ -461,7 +455,6 @@ fn build_status_output(app: &app::App) -> CliOutput {
             user_debt: lamports_to_sol(pos.user_debt),
             protocol_debt: lamports_to_sol(pos.protocol_debt),
             borrow_capacity: lamports_to_sol(app.mf_borrow_capacity),
-            max_reinvest_spread_bps: pos.max_reinvest_spread_bps,
         }
     });
 

@@ -151,9 +151,6 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw("    "),
-            Span::styled("Max Reinvest Spread: ", Style::default().fg(Color::Gray)),
-            Span::raw(format!("{} bps", pos.max_reinvest_spread_bps)),
         ]),
     ];
 

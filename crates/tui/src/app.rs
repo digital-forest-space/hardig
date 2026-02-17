@@ -411,9 +411,9 @@ impl App {
     fn enter_create_position(&mut self) {
         self.screen = Screen::Form;
         self.form_kind = Some(FormKind::CreatePosition);
-        self.form_fields = vec![("Max Reinvest Spread (bps)".into(), "500".into())];
+        self.form_fields = vec![];
         self.input_field = 0;
-        self.input_buf = self.form_fields[0].1.clone();
+        self.input_buf.clear();
     }
 
     fn enter_authorize_key(&mut self) {
@@ -543,14 +543,6 @@ impl App {
     }
 
     pub fn build_create_position(&mut self) {
-        let spread: u16 = match self.form_fields[0].1.trim().parse() {
-            Ok(v) => v,
-            Err(_) => {
-                self.push_log("Invalid spread value");
-                return;
-            }
-        };
-
         let mint_kp = Keypair::new();
         let mint = mint_kp.pubkey();
         let admin = self.keypair.pubkey();
@@ -563,7 +555,7 @@ impl App {
         );
 
         let mut data = sighash("create_position");
-        data.extend_from_slice(&spread.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
 
         let accounts = vec![
             AccountMeta::new(admin, true),
@@ -582,7 +574,6 @@ impl App {
                 "Create Position".into(),
                 format!("Admin NFT Mint: {}", mint),
                 format!("Position PDA: {}", position_pda),
-                format!("Max Reinvest Spread: {} bps", spread),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![mint_kp],

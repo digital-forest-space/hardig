@@ -126,7 +126,7 @@ export async function discoverPosition(connection, wallet) {
       const depositedNav = Number(view.getBigUint64(72, true));
       const userDebt = Number(view.getBigUint64(80, true));
       const protocolDebt = Number(view.getBigUint64(88, true));
-      const maxReinvestSpreadBps = view.getUint16(96, true);
+      // bytes 96-97: max_reinvest_spread_bps (unused, skip)
       const lastAdminActivity = Number(view.getBigInt64(98, true));
       const bump = data[106];
 
@@ -136,7 +136,6 @@ export async function discoverPosition(connection, wallet) {
         depositedNav,
         userDebt,
         protocolDebt,
-        maxReinvestSpreadBps,
         lastAdminActivity,
         bump,
       };
