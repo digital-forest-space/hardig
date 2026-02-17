@@ -27,10 +27,6 @@ pub const MARKET_NAV_VAULT: Pubkey =
 pub const FEE_VAULT: Pubkey =
     pubkey!("B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf");
 
-/// Authority PDA (liq_vault_main).
-pub const AUTHORITY_PDA: Pubkey =
-    pubkey!("EKVkmuwDKRKHw85NPTbKSKuS75EY4NLcxe1qzSPixLdy");
-
 // Mints
 pub const NAV_SOL_MINT: Pubkey =
     pubkey!("navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo");
@@ -44,8 +40,7 @@ pub const IX_INIT_PERSONAL_POSITION: [u8; 8] = [146, 163, 167, 48, 30, 216, 179,
 pub const IX_BUY: [u8; 8] = [30, 205, 124, 67, 20, 142, 236, 136];
 pub const IX_BORROW: [u8; 8] = [228, 253, 131, 202, 207, 116, 89, 18];
 pub const IX_REPAY: [u8; 8] = [234, 103, 67, 82, 208, 234, 219, 166];
-// TODO: Derive from Mayflower IDL or on-chain inspection.
-pub const IX_SELL: [u8; 8] = [0; 8];
+pub const IX_SELL: [u8; 8] = [223, 239, 212, 254, 255, 120, 53, 1];
 
 // PDA seeds
 pub const PERSONAL_POSITION_SEED: &[u8] = b"personal_position";

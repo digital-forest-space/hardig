@@ -111,7 +111,6 @@ pub fn build_buy_ix(
 /// Build the `sell` (SellWithExactTokenIn) instruction for Mayflower.
 ///
 /// Mirror of buy — sells navSOL for SOL.
-/// TODO: IX_SELL discriminator must be derived from Mayflower IDL.
 pub fn build_sell_ix(
     user_wallet: Pubkey,
     personal_position: Pubkey,
