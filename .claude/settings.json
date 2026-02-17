@@ -1,5 +1,35 @@
 {
   "env": {
     "CLAUDE_CODE_TASK_LIST_ID": "hardig_tasks"
+  },
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(anchor init:*)",
+      "WebSearch",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo build:*)",
+      "Bash(grep:*)",
+      "Bash(cargo check:*)",
+      "Bash(find:*)",
+      "Bash(solana --version:*)",
+      "Bash(anchor --version:*)",
+      "Bash(cargo build-sbf:*)",
+      "Bash(rustc:*)",
+      "Bash(avm --version:*)",
+      "Bash(cargo search:*)",
+      "Bash(solana-keygen new:*)",
+      "Bash(anchor build:*)",
+      "Bash(rustup toolchain list:*)",
+      "Bash(cargo update:*)",
+      "Bash(cargo +solana --version:*)",
+      "Bash(cargo-build-sbf --version:*)",
+      "Bash(cargo-build-sbf:*)",
+      "Bash(ls:*)",
+      "Bash(cargo run:*)",
+      "Bash(solana account:*)",
+      "Bash(solana airdrop:*)"
+    ]
   }
 }
