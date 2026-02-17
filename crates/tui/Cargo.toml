@@ -1,0 +1,22 @@
+[package]
+name = "hardig-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hardig-tui"
+path = "src/main.rs"
+
+[dependencies]
+hardig = { path = "../../programs/hardig", features = ["cpi"] }
+ratatui = "0.29"
+crossterm = "0.28"
+solana-sdk = "2.3"
+solana-client = "2.3"
+solana-account-decoder = "2.3"
+spl-token = "8"
+spl-associated-token-account = "6"
+anchor-lang = "0.32.1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
