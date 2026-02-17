@@ -44,7 +44,7 @@ Anchor.toml               # Program ID: 4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThk
 | Reinvest   | Y     | Y        |           | Y      |
 | Auth/Revoke| Y     |          |           |        |
 
-**Mayflower CPI**: Buy, sell, borrow, repay, and reinvest instructions forward to the Mayflower protocol via `invoke_signed` using remaining_accounts. The program PDA (`seeds = [b"authority"]`) owns the Mayflower PersonalPosition.
+**Mayflower CPI**: Buy, sell, borrow, repay, and reinvest instructions forward to the Mayflower protocol via `invoke_signed` using named Anchor accounts. Each position has its own authority PDA (`seeds = [b"authority", admin_nft_mint]`) that owns a separate Mayflower PersonalPosition, ensuring complete fund isolation between positions. `PositionNFT` stores `authority_bump` to avoid recomputing the PDA bump on every instruction.
 
 **Borrow capacity**: Read from on-chain Mayflower `PersonalPosition` (deposited shares, debt) and `Market` (floor price). Not tracked in hardig accounting — Mayflower is source of truth.
 

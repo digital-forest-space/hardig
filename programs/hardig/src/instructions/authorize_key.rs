@@ -59,10 +59,10 @@ pub struct AuthorizeKey<'info> {
     )]
     pub new_key_auth: Account<'info, KeyAuthorization>,
 
-    /// Program PDA used as mint authority.
+    /// Per-position authority PDA used as mint authority.
     /// CHECK: PDA derived from program, not read.
     #[account(
-        seeds = [b"authority"],
+        seeds = [b"authority", position.admin_nft_mint.as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
@@ -90,7 +90,8 @@ pub fn handler(ctx: Context<AuthorizeKey>, role: u8) -> Result<()> {
 
     // Mint 1 key NFT to the target wallet
     let bump = ctx.bumps.program_pda;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", &[bump]]];
+    let mint_key = ctx.accounts.position.admin_nft_mint;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
     token::mint_to(
         CpiContext::new_with_signer(

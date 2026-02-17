@@ -35,7 +35,7 @@ pub struct Buy<'info> {
     /// CHECK: PDA derived from this program.
     #[account(
         mut,
-        seeds = [b"authority"],
+        seeds = [b"authority", position.admin_nft_mint.as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
@@ -188,7 +188,8 @@ pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
     );
 
     let bump = ctx.bumps.program_pda;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", &[bump]]];
+    let mint_key = ctx.accounts.position.admin_nft_mint;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
     invoke_signed(
         &ix,

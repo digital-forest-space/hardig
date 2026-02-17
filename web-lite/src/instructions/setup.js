@@ -8,7 +8,7 @@ import {
   NAV_SOL_MINT,
   TOKEN_PROGRAM_ID,
 } from '../constants.js';
-import { mayflowerInitialized, atasExist } from '../state.js';
+import { mayflowerInitialized, atasExist, position } from '../state.js';
 import { buildInitMayflowerPosition } from './initMayflowerPosition.js';
 import { shortPubkey } from '../utils.js';
 
@@ -25,7 +25,7 @@ export async function buildSetup(program, wallet) {
 
   // Step 2: Create ATAs if needed
   if (!atasExist.value) {
-    const [programPda] = deriveProgramPda();
+    const [programPda] = deriveProgramPda(position.value.adminNftMint);
     const wsolAta = getAta(programPda, WSOL_MINT);
     const navAta = getAta(programPda, NAV_SOL_MINT);
 

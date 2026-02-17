@@ -12,7 +12,6 @@ export const MAYFLOWER_MARKET = new PublicKey('A5M1nWfi6ATSamEJ1ASr2FC87BMwijthT
 export const MARKET_BASE_VAULT = new PublicKey('43vPhZeow3pgYa6zrPXASVQhdXTMfowyfNK87BYizhnL');
 export const MARKET_NAV_VAULT = new PublicKey('BCYzijbWwmqRnsTWjGhHbneST2emQY36WcRAkbkhsQMt');
 export const FEE_VAULT = new PublicKey('B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf');
-export const AUTHORITY_PDA = new PublicKey('EKVkmuwDKRKHw85NPTbKSKuS75EY4NLcxe1qzSPixLdy');
 export const NAV_SOL_MINT = new PublicKey('navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo');
 export const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 
@@ -33,9 +32,12 @@ export const MARKET_FLOOR_PRICE_OFFSET = 104;
 // KeyAuthorization
 export const KEY_AUTH_SIZE = 74; // 8 + 32 + 32 + 1 + 1
 
-// Derive program PDA (authority)
-export function deriveProgramPda() {
-  return PublicKey.findProgramAddressSync([Buffer.from('authority')], PROGRAM_ID);
+// Derive per-position program PDA (authority)
+export function deriveProgramPda(adminNftMint) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('authority'), adminNftMint.toBuffer()],
+    PROGRAM_ID
+  );
 }
 
 // Derive config PDA

@@ -32,7 +32,7 @@ pub struct Reinvest<'info> {
 
     /// Mutable because Mayflower CPI marks user_wallet as writable.
     /// CHECK: PDA derived from this program.
-    #[account(mut, seeds = [b"authority"], bump)]
+    #[account(mut, seeds = [b"authority", position.admin_nft_mint.as_ref()], bump)]
     pub program_pda: UncheckedAccount<'info>,
 
     /// CHECK: Validated in handler via seed derivation.
@@ -156,7 +156,8 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
     drop(pp_data);
 
     let bump = ctx.bumps.program_pda;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", &[bump]]];
+    let mint_key = ctx.accounts.position.admin_nft_mint;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
     // Step 1: Borrow the available capacity
     let borrow_ix = mayflower::build_borrow_ix(

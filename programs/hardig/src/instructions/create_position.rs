@@ -50,10 +50,10 @@ pub struct CreatePosition<'info> {
     )]
     pub admin_key_auth: Account<'info, KeyAuthorization>,
 
-    /// Program PDA used as mint authority.
+    /// Per-position authority PDA used as mint authority.
     /// CHECK: PDA derived from program, not read.
     #[account(
-        seeds = [b"authority"],
+        seeds = [b"authority", admin_nft_mint.key().as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
@@ -66,7 +66,8 @@ pub struct CreatePosition<'info> {
 pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Result<()> {
     // Mint 1 admin key NFT to the admin's ATA
     let bump = ctx.bumps.program_pda;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", &[bump]]];
+    let mint_key = ctx.accounts.admin_nft_mint.key();
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
     token::mint_to(
         CpiContext::new_with_signer(
@@ -91,6 +92,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
     position.max_reinvest_spread_bps = max_reinvest_spread_bps;
     position.last_admin_activity = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;
+    position.authority_bump = ctx.bumps.program_pda;
 
     // Initialize the admin KeyAuthorization
     let key_auth = &mut ctx.accounts.admin_key_auth;

@@ -158,13 +158,7 @@ impl App {
         let rpc =
             RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
 
-        // Compute Mayflower derived addresses (constant per program)
-        let (program_pda, _) = Pubkey::find_program_address(&[b"authority"], &hardig::ID);
-        let (pp_pda, _) = derive_personal_position(&program_pda);
-        let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
         let (log_pda, _) = derive_log_account();
-        let wsol_ata = get_ata(&program_pda, &WSOL_MINT);
-        let nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
 
         let mut app = Self {
             rpc,
@@ -180,12 +174,12 @@ impl App {
             my_key_auth_pda: None,
             my_nft_mint: None,
             keyring: Vec::new(),
-            program_pda,
-            pp_pda,
-            escrow_pda,
+            program_pda: Pubkey::default(),
+            pp_pda: Pubkey::default(),
+            escrow_pda: Pubkey::default(),
             log_pda,
-            wsol_ata,
-            nav_sol_ata,
+            wsol_ata: Pubkey::default(),
+            nav_sol_ata: Pubkey::default(),
             mayflower_initialized: false,
             wsol_balance: 0,
             nav_sol_balance: 0,
@@ -206,7 +200,6 @@ impl App {
         };
         app.push_log("Welcome to Härdig TUI");
         app.push_log(format!("Wallet: {}", app.keypair.pubkey()));
-        app.push_log(format!("Program PDA: {}", short_pubkey(&program_pda)));
         app.refresh();
         app
     }
@@ -543,6 +536,8 @@ impl App {
             &[KeyAuthorization::SEED, position_pda.as_ref(), mint.as_ref()],
             &hardig::ID,
         );
+        let (prog_pda, _) =
+            Pubkey::find_program_address(&[b"authority", mint.as_ref()], &hardig::ID);
 
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
@@ -553,7 +548,7 @@ impl App {
             AccountMeta::new(admin_ata, false),
             AccountMeta::new(position_pda, false),
             AccountMeta::new(key_auth_pda, false),
-            AccountMeta::new_readonly(self.program_pda, false),
+            AccountMeta::new_readonly(prog_pda, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
@@ -1188,6 +1183,21 @@ impl App {
             if let Ok(acc) = self.rpc.get_account(&pos_pda) {
                 if let Ok(pos) = PositionNFT::try_deserialize(&mut acc.data.as_slice()) {
                     self.mayflower_initialized = pos.position_pda != Pubkey::default();
+
+                    // Derive per-position Mayflower addresses from admin_nft_mint
+                    let admin_nft_mint = pos.admin_nft_mint;
+                    let (program_pda, _) = Pubkey::find_program_address(
+                        &[b"authority", admin_nft_mint.as_ref()],
+                        &hardig::ID,
+                    );
+                    let (pp_pda, _) = derive_personal_position(&program_pda);
+                    let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
+                    self.program_pda = program_pda;
+                    self.pp_pda = pp_pda;
+                    self.escrow_pda = escrow_pda;
+                    self.wsol_ata = get_ata(&program_pda, &WSOL_MINT);
+                    self.nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
+
                     self.position = Some(pos);
                 }
             }

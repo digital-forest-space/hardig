@@ -20,6 +20,7 @@ import {
   mfFloorPrice,
   mfBorrowCapacity,
   pushLog,
+  position,
 } from './state.js';
 
 // Read u64 LE from buffer at offset
@@ -68,7 +69,7 @@ export async function refreshMayflowerState(connection) {
 
   if (!mayflowerInitialized.value) return;
 
-  const [programPda] = deriveProgramPda();
+  const [programPda] = deriveProgramPda(position.value.adminNftMint);
   const [ppPda] = derivePersonalPosition(programPda);
   const wsolAta = getAta(programPda, WSOL_MINT);
   const navAta = getAta(programPda, NAV_SOL_MINT);

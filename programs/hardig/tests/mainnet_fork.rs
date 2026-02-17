@@ -107,8 +107,8 @@ fn key_auth_pda(position: &Pubkey, mint: &Pubkey) -> (Pubkey, u8) {
     )
 }
 
-fn authority_pda() -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"authority"], &program_id())
+fn authority_pda(admin_nft_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[b"authority", admin_nft_mint.as_ref()], &program_id())
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ fn ix_create_position(admin: &Pubkey, mint: &Pubkey, spread_bps: u16) -> Instruc
         &[KeyAuthorization::SEED, pos_pda.as_ref(), mint.as_ref()],
         &program_id(),
     );
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(mint);
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
@@ -173,7 +173,7 @@ fn ix_authorize_key(
         &[KeyAuthorization::SEED, position.as_ref(), new_mint.as_ref()],
         &program_id(),
     );
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(admin_nft_mint);
 
     let mut data = sighash("authorize_key");
     data.push(role);
@@ -236,7 +236,7 @@ fn ix_buy_with_cpi(
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(nft_mint);
     let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
     let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_account, _) = mayflower::derive_log_account();
@@ -284,7 +284,7 @@ fn ix_borrow_with_cpi(
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(nft_mint);
     let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
     let (log_account, _) = mayflower::derive_log_account();
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
@@ -327,7 +327,7 @@ fn ix_repay_with_cpi(
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(nft_mint);
     let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
     let (log_account, _) = mayflower::derive_log_account();
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
@@ -370,7 +370,7 @@ fn ix_init_mayflower_position(
     position: &Pubkey,
 ) -> Instruction {
     let admin_nft_ata = get_ata(admin, admin_nft_mint);
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(admin_nft_mint);
     let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
     let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_account, _) = mayflower::derive_log_account();
@@ -405,7 +405,7 @@ fn ix_reinvest_with_cpi(
     position: &Pubkey,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(nft_mint);
     let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
     let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_account, _) = mayflower::derive_log_account();
@@ -552,7 +552,7 @@ fn test_mainnet_fork_init_mayflower_position() {
 
     // Verify position_pda was stored
     let pos = get_position(&client, &harness.position_pda);
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
     let (expected_pp, _) = mayflower::derive_personal_position(&prog_pda);
     assert_eq!(pos.position_pda, expected_pp);
 
@@ -590,7 +590,7 @@ fn test_mainnet_fork_buy_with_cpi() {
     // Fund the program PDA's wSOL ATA for the buy.
     // In production, the user would wrap SOL → wSOL into the PDA's ATA.
     // For testing, we create and fund it manually.
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
 
     // Create wSOL ATA for program PDA and fund it
@@ -679,7 +679,7 @@ fn test_mainnet_fork_borrow_against_floor() {
     .unwrap();
 
     // Setup wSOL and navSOL ATAs + fund
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
     let _user_nav_ata = get_ata(&prog_pda, &mayflower::NAV_SOL_MINT);
 
@@ -782,7 +782,7 @@ fn test_mainnet_fork_repay_debt() {
     )
     .unwrap();
 
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
 
     let create_wsol = spl_associated_token_account::instruction::create_associated_token_account(
@@ -892,7 +892,7 @@ fn test_mainnet_fork_full_lifecycle() {
     )
     .unwrap();
 
-    let (prog_pda, _) = authority_pda();
+    let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
 
     // Setup ATAs

@@ -16,7 +16,7 @@ import {
   FEE_VAULT,
   MAYFLOWER_PROGRAM_ID,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda } from '../state.js';
+import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
 import { shortPubkey, lamportsToSol } from '../utils.js';
 
 export async function buildWithdraw(program, wallet, amountLamports) {
@@ -24,7 +24,7 @@ export async function buildWithdraw(program, wallet, amountLamports) {
   const keyAuth = myKeyAuthPda.value;
   const posPda = positionPda.value;
   const nftAta = getAta(wallet, nftMint);
-  const [programPda] = deriveProgramPda();
+  const [programPda] = deriveProgramPda(position.value.adminNftMint);
   const [ppPda] = derivePersonalPosition(programPda);
   const [escrowPda] = derivePersonalPositionEscrow(ppPda);
   const [logPda] = deriveLogAccount();

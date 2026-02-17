@@ -29,7 +29,7 @@ pub struct InitMayflowerPosition<'info> {
     /// Program PDA that will own the Mayflower PersonalPosition.
     /// CHECK: PDA derived from this program.
     #[account(
-        seeds = [b"authority"],
+        seeds = [b"authority", position.admin_nft_mint.as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
@@ -113,7 +113,8 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
     );
 
     let bump = ctx.bumps.program_pda;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", &[bump]]];
+    let mint_key = ctx.accounts.position.admin_nft_mint;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
     invoke_signed(
         &ix,

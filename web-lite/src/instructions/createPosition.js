@@ -13,7 +13,7 @@ export async function buildCreatePosition(program, wallet) {
   const adminAta = getAta(wallet, mint);
   const [positionPda] = derivePositionPda(mint);
   const [keyAuthPda] = deriveKeyAuthPda(positionPda, mint);
-  const [programPda] = deriveProgramPda();
+  const [programPda] = deriveProgramPda(mint);
 
   const ix = await program.methods
     .createPosition(0)

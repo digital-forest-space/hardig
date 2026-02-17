@@ -8,7 +8,7 @@ import {
   NAV_SOL_MINT,
   MAYFLOWER_PROGRAM_ID,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda } from '../state.js';
+import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
 import { shortPubkey } from '../utils.js';
 
 export async function buildInitMayflowerPosition(program, wallet) {
@@ -16,7 +16,7 @@ export async function buildInitMayflowerPosition(program, wallet) {
   const keyAuth = myKeyAuthPda.value;
   const posPda = positionPda.value;
   const nftAta = getAta(wallet, nftMint);
-  const [programPda] = deriveProgramPda();
+  const [programPda] = deriveProgramPda(position.value.adminNftMint);
   const [ppPda] = derivePersonalPosition(programPda);
   const [escrowPda] = derivePersonalPositionEscrow(ppPda);
   const [logPda] = deriveLogAccount();

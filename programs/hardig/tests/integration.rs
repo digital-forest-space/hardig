@@ -94,10 +94,13 @@ fn plant_mayflower_stubs(svm: &mut LiteSVM) {
     plant_account(svm, &log_pda, &owner, 256);
 }
 
-/// Plant the PersonalPosition and user_shares PDAs for a given program_pda.
-/// Must be called AFTER the program PDA is known (after setup, before financial ixs).
-fn plant_position_stubs(svm: &mut LiteSVM) {
-    let (program_pda, _) = Pubkey::find_program_address(&[b"authority"], &program_id());
+/// Plant the PersonalPosition and user_shares PDAs for a given admin_nft_mint.
+/// Must be called AFTER the position is created (admin_nft_mint is known).
+fn plant_position_stubs(svm: &mut LiteSVM, admin_nft_mint: &Pubkey) {
+    let (program_pda, _) = Pubkey::find_program_address(
+        &[b"authority", admin_nft_mint.as_ref()],
+        &program_id(),
+    );
     let (pp_pda, _) = mayflower::derive_personal_position(&program_pda);
     let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
 
@@ -177,7 +180,7 @@ fn ix_create_position(
         &program_id(),
     );
     let (program_pda, _) =
-        Pubkey::find_program_address(&[b"authority"], &program_id());
+        Pubkey::find_program_address(&[b"authority", mint.as_ref()], &program_id());
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
@@ -215,7 +218,7 @@ fn ix_authorize_key(
         &program_id(),
     );
     let (program_pda, _) =
-        Pubkey::find_program_address(&[b"authority"], &program_id());
+        Pubkey::find_program_address(&[b"authority", admin_nft_mint.as_ref()], &program_id());
 
     let mut data = sighash("authorize_key");
     data.push(role);
@@ -266,9 +269,12 @@ fn ix_revoke_key(
 // Financial instruction builders (with named Mayflower accounts)
 // ---------------------------------------------------------------------------
 
-/// Compute the common Mayflower derived addresses.
-fn mayflower_addrs() -> (Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Pubkey) {
-    let (program_pda, _) = Pubkey::find_program_address(&[b"authority"], &program_id());
+/// Compute the common Mayflower derived addresses for a given position's admin_nft_mint.
+fn mayflower_addrs(admin_nft_mint: &Pubkey) -> (Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Pubkey) {
+    let (program_pda, _) = Pubkey::find_program_address(
+        &[b"authority", admin_nft_mint.as_ref()],
+        &program_id(),
+    );
     let (pp_pda, _) = mayflower::derive_personal_position(&program_pda);
     let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_pda, _) = mayflower::derive_log_account();
@@ -282,10 +288,11 @@ fn ix_buy(
     nft_mint: &Pubkey,
     key_auth_pda: &Pubkey,
     position_pda: &Pubkey,
+    admin_nft_mint: &Pubkey,
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs();
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
 
     let mut data = sighash("buy");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -325,10 +332,11 @@ fn ix_withdraw(
     nft_mint: &Pubkey,
     key_auth_pda: &Pubkey,
     position_pda: &Pubkey,
+    admin_nft_mint: &Pubkey,
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(admin, nft_mint);
-    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs();
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
 
     let mut data = sighash("withdraw");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -368,10 +376,11 @@ fn ix_borrow(
     nft_mint: &Pubkey,
     key_auth_pda: &Pubkey,
     position_pda: &Pubkey,
+    admin_nft_mint: &Pubkey,
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(admin, nft_mint);
-    let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs();
+    let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs(admin_nft_mint);
 
     let mut data = sighash("borrow");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -408,10 +417,11 @@ fn ix_repay(
     nft_mint: &Pubkey,
     key_auth_pda: &Pubkey,
     position_pda: &Pubkey,
+    admin_nft_mint: &Pubkey,
     amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs();
+    let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs(admin_nft_mint);
 
     let mut data = sighash("repay");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -448,9 +458,10 @@ fn ix_reinvest(
     nft_mint: &Pubkey,
     key_auth_pda: &Pubkey,
     position_pda: &Pubkey,
+    admin_nft_mint: &Pubkey,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs();
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
 
     let data = sighash("reinvest");
 
@@ -558,7 +569,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
     let (admin_ka, _) = key_auth_pda(&pos_pda, &admin_nft_mint.pubkey());
 
     // Plant Mayflower position stubs (personal_position, escrow, ATAs)
-    plant_position_stubs(svm);
+    plant_position_stubs(svm, &admin_nft_mint.pubkey());
 
     // Authorize operator
     let operator = Keypair::new();
@@ -654,7 +665,7 @@ fn test_buy_admin_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -667,7 +678,7 @@ fn test_buy_operator_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_buy(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 500_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -680,7 +691,7 @@ fn test_buy_depositor_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_buy(
         &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, 250_000,
+        &h.depositor_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 250_000,
     );
     send_tx(&mut svm, &[ix], &[&h.depositor]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -693,7 +704,7 @@ fn test_buy_keeper_denied() {
     let h = full_setup(&mut svm);
     let ix = ix_buy(
         &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, 100_000,
+        &h.keeper_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -707,13 +718,13 @@ fn test_withdraw_admin_ok() {
     // First buy something
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     // Then withdraw
     let ix = ix_withdraw(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 500_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -726,12 +737,12 @@ fn test_withdraw_operator_denied() {
     let h = full_setup(&mut svm);
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     let ix = ix_withdraw(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 500_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator]).is_err());
 }
@@ -742,12 +753,12 @@ fn test_withdraw_depositor_denied() {
     let h = full_setup(&mut svm);
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     let ix = ix_withdraw(
         &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, 500_000,
+        &h.depositor_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -758,12 +769,12 @@ fn test_withdraw_keeper_denied() {
     let h = full_setup(&mut svm);
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     let ix = ix_withdraw(
         &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, 500_000,
+        &h.keeper_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -776,7 +787,7 @@ fn test_borrow_admin_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -789,7 +800,7 @@ fn test_borrow_operator_denied() {
     let h = full_setup(&mut svm);
     let ix = ix_borrow(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 100_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator]).is_err());
 }
@@ -800,7 +811,7 @@ fn test_borrow_depositor_denied() {
     let h = full_setup(&mut svm);
     let ix = ix_borrow(
         &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, 100_000,
+        &h.depositor_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -811,7 +822,7 @@ fn test_borrow_keeper_denied() {
     let h = full_setup(&mut svm);
     let ix = ix_borrow(
         &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, 100_000,
+        &h.keeper_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -825,13 +836,13 @@ fn test_repay_admin_ok() {
     // Borrow first
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     // Repay
     let ix = ix_repay(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 500_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -844,12 +855,12 @@ fn test_repay_operator_ok() {
     let h = full_setup(&mut svm);
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     let ix = ix_repay(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 500_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -862,12 +873,12 @@ fn test_repay_depositor_ok() {
     let h = full_setup(&mut svm);
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     let ix = ix_repay(
         &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, 300_000,
+        &h.depositor_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 300_000,
     );
     send_tx(&mut svm, &[ix], &[&h.depositor]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -880,12 +891,12 @@ fn test_repay_keeper_denied() {
     let h = full_setup(&mut svm);
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     let ix = ix_repay(
         &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, 100_000,
+        &h.keeper_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -898,7 +909,7 @@ fn test_reinvest_admin_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(),
     );
     // Reinvest with zero capacity should succeed (early return)
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
@@ -910,7 +921,7 @@ fn test_reinvest_operator_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(),
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
 }
@@ -921,7 +932,7 @@ fn test_reinvest_keeper_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda,
+        &h.keeper_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(),
     );
     send_tx(&mut svm, &[ix], &[&h.keeper]).unwrap();
 }
@@ -932,7 +943,7 @@ fn test_reinvest_depositor_denied() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda,
+        &h.depositor_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(),
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -1029,7 +1040,7 @@ fn test_wrong_position_key_rejected() {
     // Try to use admin1's key on position2
     let ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &pos2, 100_000,
+        &h.admin_key_auth, &pos2, &mint2.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -1121,7 +1132,7 @@ fn test_authorize_and_revoke_key() {
     // Operator can no longer buy
     let buy_ix = ix_buy(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 100_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[buy_ix], &[&h.operator]).is_err());
 }
@@ -1176,7 +1187,7 @@ fn test_buy_zero_rejected() {
     let h = full_setup(&mut svm);
     let ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 0,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -1188,13 +1199,13 @@ fn test_withdraw_more_than_deposited_rejected() {
     // Buy 1 SOL
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     // Try to withdraw 2 SOL
     let ix = ix_withdraw(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 2_000_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 2_000_000_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -1206,13 +1217,13 @@ fn test_repay_more_than_debt_rejected() {
     // Borrow 1 SOL
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 1_000_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     // Try to repay 2 SOL
     let ix = ix_repay(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 2_000_000_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 2_000_000_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -1244,7 +1255,7 @@ fn test_theft_recovery_operator_key_stolen() {
     // Step 2: The old operator key can no longer be used
     let buy_ix = ix_buy(
         &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 100_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[buy_ix], &[&h.operator]).is_err());
 
@@ -1265,7 +1276,7 @@ fn test_theft_recovery_operator_key_stolen() {
     let (new_op_ka, _) = key_auth_pda(&h.position_pda, &new_op_mint.pubkey());
     let buy_ix = ix_buy(
         &h.operator.pubkey(), &new_op_mint.pubkey(),
-        &new_op_ka, &h.position_pda, 100_000,
+        &new_op_ka, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.operator]).unwrap();
 
@@ -1303,7 +1314,7 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
     // Admin key still works
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 500_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
 
@@ -1330,7 +1341,7 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
     let (new_op_ka, _) = key_auth_pda(&h.position_pda, &new_op_mint.pubkey());
     let buy_ix = ix_buy(
         &new_operator.pubkey(), &new_op_mint.pubkey(),
-        &new_op_ka, &h.position_pda, 200_000,
+        &new_op_ka, &h.position_pda, &h.admin_nft_mint.pubkey(), 200_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&new_operator]).unwrap();
 
@@ -1349,7 +1360,7 @@ fn test_attacker_cannot_use_others_key_auth() {
 
     let ix = ix_buy(
         &attacker.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, 100_000,
+        &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&attacker]).is_err());
 }
@@ -1362,7 +1373,7 @@ fn test_privilege_escalation_denied() {
 
     let ix = ix_withdraw(
         &h.depositor.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, 100_000,
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }

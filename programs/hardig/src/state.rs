@@ -35,14 +35,16 @@ pub struct PositionNFT {
     pub last_admin_activity: i64,
     /// Bump seed for the position PDA.
     pub bump: u8,
+    /// Bump seed for the per-position authority PDA (seeds = [b"authority", admin_nft_mint]).
+    pub authority_bump: u8,
 }
 
 impl PositionNFT {
     pub const SEED: &'static [u8] = b"position";
     // discriminator(8) + admin_nft_mint(32) + position_pda(32) + deposited_nav(8)
     // + user_debt(8) + protocol_debt(8) + max_reinvest_spread_bps(2)
-    // + last_admin_activity(8) + bump(1)
-    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 2 + 8 + 1;
+    // + last_admin_activity(8) + bump(1) + authority_bump(1)
+    pub const SIZE: usize = 8 + 32 + 32 + 8 + 8 + 8 + 2 + 8 + 1 + 1;
 }
 
 /// Role assigned to a key NFT.

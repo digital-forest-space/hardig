@@ -19,7 +19,7 @@ import {
   MAYFLOWER_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, myRole } from '../state.js';
+import { myNftMint, myKeyAuthPda, positionPda, myRole, position } from '../state.js';
 import { shortPubkey, lamportsToSol, roleName } from '../utils.js';
 
 export async function buildBuy(program, wallet, amountLamports) {
@@ -27,7 +27,7 @@ export async function buildBuy(program, wallet, amountLamports) {
   const keyAuth = myKeyAuthPda.value;
   const posPda = positionPda.value;
   const nftAta = getAta(wallet, nftMint);
-  const [programPda] = deriveProgramPda();
+  const [programPda] = deriveProgramPda(position.value.adminNftMint);
   const [ppPda] = derivePersonalPosition(programPda);
   const [escrowPda] = derivePersonalPositionEscrow(ppPda);
   const [logPda] = deriveLogAccount();

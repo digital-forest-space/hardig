@@ -4,7 +4,7 @@ import {
   deriveProgramPda,
   getAta,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda } from '../state.js';
+import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
 import { shortPubkey, roleName } from '../utils.js';
 
 export async function buildAuthorizeKey(program, wallet, targetWalletStr, roleU8) {
@@ -13,7 +13,7 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, roleU8
   const adminNftMint = myNftMint.value;
   const adminKeyAuth = myKeyAuthPda.value;
   const adminNftAta = getAta(wallet, adminNftMint);
-  const [programPda] = deriveProgramPda();
+  const [programPda] = deriveProgramPda(position.value.adminNftMint);
 
   const mintKp = Keypair.generate();
   const newMint = mintKp.publicKey;
