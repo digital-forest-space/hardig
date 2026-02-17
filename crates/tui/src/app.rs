@@ -517,89 +517,6 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
-    // Mayflower remaining_accounts builders
-    // -----------------------------------------------------------------------
-
-    /// Build the remaining_accounts for a buy instruction (17 entries).
-    fn buy_remaining_accounts(&self) -> Vec<AccountMeta> {
-        vec![
-            AccountMeta::new(self.program_pda, false),            // [0]
-            AccountMeta::new(self.pp_pda, false),                 // [1]
-            AccountMeta::new(self.escrow_pda, false),             // [2]
-            AccountMeta::new(self.nav_sol_ata, false),            // [3]
-            AccountMeta::new(self.wsol_ata, false),               // [4]
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),   // [5]
-            AccountMeta::new_readonly(MARKET_GROUP, false),       // [6]
-            AccountMeta::new_readonly(MARKET_META, false),        // [7]
-            AccountMeta::new(MAYFLOWER_MARKET, false),            // [8]
-            AccountMeta::new(NAV_SOL_MINT, false),                // [9]
-            AccountMeta::new(MARKET_BASE_VAULT, false),           // [10]
-            AccountMeta::new(MARKET_NAV_VAULT, false),            // [11]
-            AccountMeta::new(FEE_VAULT, false),                   // [12]
-            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // [13]
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),       // [14]
-            AccountMeta::new(self.log_pda, false),                // [15]
-            AccountMeta::new_readonly(WSOL_MINT, false),          // [16] needed by CPI
-        ]
-    }
-
-    /// Build the remaining_accounts for a borrow instruction (14 entries).
-    fn borrow_remaining_accounts(&self) -> Vec<AccountMeta> {
-        vec![
-            AccountMeta::new(self.program_pda, false),            // [0]
-            AccountMeta::new(self.pp_pda, false),                 // [1]
-            AccountMeta::new(self.wsol_ata, false),               // [2]
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),   // [3]
-            AccountMeta::new_readonly(MARKET_GROUP, false),       // [4]
-            AccountMeta::new_readonly(MARKET_META, false),        // [5]
-            AccountMeta::new(MARKET_BASE_VAULT, false),           // [6]
-            AccountMeta::new(MARKET_NAV_VAULT, false),            // [7]
-            AccountMeta::new(FEE_VAULT, false),                   // [8]
-            AccountMeta::new(MAYFLOWER_MARKET, false),            // [9]
-            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // [10]
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),       // [11]
-            AccountMeta::new(self.log_pda, false),                // [12]
-            AccountMeta::new_readonly(WSOL_MINT, false),          // [13] needed by CPI
-        ]
-    }
-
-    /// Build the remaining_accounts for a repay instruction (13 entries).
-    /// Same layout as borrow (repay is the reverse operation on the same accounts).
-    fn repay_remaining_accounts(&self) -> Vec<AccountMeta> {
-        self.borrow_remaining_accounts()
-    }
-
-    /// Build the remaining_accounts for a withdraw/sell instruction (16 entries).
-    /// Same layout as buy (sell is the reverse of buy).
-    fn sell_remaining_accounts(&self) -> Vec<AccountMeta> {
-        self.buy_remaining_accounts()
-    }
-
-    /// Build the remaining_accounts for reinvest (18 entries).
-    fn reinvest_remaining_accounts(&self) -> Vec<AccountMeta> {
-        vec![
-            AccountMeta::new(self.program_pda, false),            // [0]
-            AccountMeta::new(MAYFLOWER_MARKET, false),            // [1] for floor price read
-            AccountMeta::new(self.pp_pda, false),                 // [2]
-            AccountMeta::new(self.escrow_pda, false),             // [3]
-            AccountMeta::new(self.nav_sol_ata, false),            // [4]
-            AccountMeta::new(self.wsol_ata, false),               // [5]
-            AccountMeta::new(self.wsol_ata, false),               // [6] same as [5] for borrow
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),   // [7]
-            AccountMeta::new_readonly(MARKET_GROUP, false),       // [8]
-            AccountMeta::new_readonly(MARKET_META, false),        // [9]
-            AccountMeta::new(MARKET_BASE_VAULT, false),           // [10]
-            AccountMeta::new(MARKET_NAV_VAULT, false),            // [11]
-            AccountMeta::new(FEE_VAULT, false),                   // [12]
-            AccountMeta::new(NAV_SOL_MINT, false),                // [13]
-            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // [14]
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),       // [15]
-            AccountMeta::new(self.log_pda, false),                // [16]
-            AccountMeta::new_readonly(WSOL_MINT, false),          // [17] needed by CPI
-        ]
-    }
-
-    // -----------------------------------------------------------------------
     // Instruction builders
     // -----------------------------------------------------------------------
 
@@ -878,26 +795,6 @@ impl App {
         });
     }
 
-    // -----------------------------------------------------------------------
-    // CPI-aware role-gated instruction builders
-    // -----------------------------------------------------------------------
-
-    /// Build base accounts for a role-gated instruction.
-    fn role_gated_base_accounts(&self) -> Vec<AccountMeta> {
-        let nft_mint = self.my_nft_mint.unwrap();
-        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
-        let key_auth = self.my_key_auth_pda.unwrap();
-        let position_pda = self.position_pda.unwrap();
-
-        vec![
-            AccountMeta::new(self.keypair.pubkey(), true),
-            AccountMeta::new_readonly(nft_ata, false),
-            AccountMeta::new_readonly(key_auth, false),
-            AccountMeta::new(position_pda, false),
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-        ]
-    }
-
     pub fn build_buy(&mut self) {
         let amount = match parse_sol_to_lamports(&self.form_fields[0].1) {
             Some(v) => v,
@@ -906,16 +803,45 @@ impl App {
                 return;
             }
         };
-        if self.position_pda.is_none() {
-            self.push_log("No position loaded");
-            return;
-        }
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        let nft_mint = self.my_nft_mint.unwrap();
+        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
+        let key_auth = self.my_key_auth_pda.unwrap();
 
         let mut data = sighash("buy");
         data.extend_from_slice(&amount.to_le_bytes());
 
-        let mut accounts = self.role_gated_base_accounts();
-        accounts.extend(self.buy_remaining_accounts());
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),       // signer
+            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),          // key_auth
+            AccountMeta::new(position_pda, false),               // position
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+            AccountMeta::new(self.program_pda, false),           // program_pda
+            AccountMeta::new(self.pp_pda, false),                // personal_position
+            AccountMeta::new(self.escrow_pda, false),            // user_shares
+            AccountMeta::new(self.nav_sol_ata, false),           // user_nav_sol_ata
+            AccountMeta::new(self.wsol_ata, false),              // user_wsol_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
+            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
+            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
+            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new(NAV_SOL_MINT, false),               // nav_sol_mint
+            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
+            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
+            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
+            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
+            AccountMeta::new(self.log_pda, false),               // log_account
+        ];
 
         // Prepend wrap: transfer SOL → wSOL ATA, then sync_native
         let transfer_ix = solana_sdk::system_instruction::transfer(
@@ -932,7 +858,7 @@ impl App {
             description: vec![
                 "Buy navSOL".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
-                format!("Position: {}", short_pubkey(&self.position_pda.unwrap())),
+                format!("Position: {}", short_pubkey(&position_pda)),
                 format!(
                     "Role: {}",
                     role_name(self.my_role.unwrap_or(KeyRole::Keeper))
@@ -951,22 +877,51 @@ impl App {
                 return;
             }
         };
-        if self.position_pda.is_none() {
-            self.push_log("No position loaded");
-            return;
-        }
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        let nft_mint = self.my_nft_mint.unwrap();
+        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
+        let key_auth = self.my_key_auth_pda.unwrap();
 
         let mut data = sighash("withdraw");
         data.extend_from_slice(&amount.to_le_bytes());
 
-        let mut accounts = self.role_gated_base_accounts();
-        accounts.extend(self.sell_remaining_accounts());
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),       // admin
+            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),          // key_auth
+            AccountMeta::new(position_pda, false),               // position
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+            AccountMeta::new(self.program_pda, false),           // program_pda
+            AccountMeta::new(self.pp_pda, false),                // personal_position
+            AccountMeta::new(self.escrow_pda, false),            // user_shares
+            AccountMeta::new(self.nav_sol_ata, false),           // user_nav_sol_ata
+            AccountMeta::new(self.wsol_ata, false),              // user_wsol_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
+            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
+            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
+            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new(NAV_SOL_MINT, false),               // nav_sol_mint
+            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
+            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
+            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
+            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
+            AccountMeta::new(self.log_pda, false),               // log_account
+        ];
 
         self.goto_confirm(PendingAction {
             description: vec![
                 "Sell navSOL (IX_SELL TODO)".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
-                format!("Position: {}", short_pubkey(&self.position_pda.unwrap())),
+                format!("Position: {}", short_pubkey(&position_pda)),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
@@ -981,22 +936,48 @@ impl App {
                 return;
             }
         };
-        if self.position_pda.is_none() {
-            self.push_log("No position loaded");
-            return;
-        }
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        let nft_mint = self.my_nft_mint.unwrap();
+        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
+        let key_auth = self.my_key_auth_pda.unwrap();
 
         let mut data = sighash("borrow");
         data.extend_from_slice(&amount.to_le_bytes());
 
-        let mut accounts = self.role_gated_base_accounts();
-        accounts.extend(self.borrow_remaining_accounts());
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),       // admin
+            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),          // key_auth
+            AccountMeta::new(position_pda, false),               // position
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+            AccountMeta::new(self.program_pda, false),           // program_pda
+            AccountMeta::new(self.pp_pda, false),                // personal_position
+            AccountMeta::new(self.wsol_ata, false),              // user_base_token_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
+            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
+            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
+            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
+            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
+            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
+            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
+            AccountMeta::new(self.log_pda, false),               // log_account
+        ];
 
         self.goto_confirm(PendingAction {
             description: vec![
                 "Borrow".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
-                format!("Position: {}", short_pubkey(&self.position_pda.unwrap())),
+                format!("Position: {}", short_pubkey(&position_pda)),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
@@ -1011,22 +992,48 @@ impl App {
                 return;
             }
         };
-        if self.position_pda.is_none() {
-            self.push_log("No position loaded");
-            return;
-        }
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        let nft_mint = self.my_nft_mint.unwrap();
+        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
+        let key_auth = self.my_key_auth_pda.unwrap();
 
         let mut data = sighash("repay");
         data.extend_from_slice(&amount.to_le_bytes());
 
-        let mut accounts = self.role_gated_base_accounts();
-        accounts.extend(self.repay_remaining_accounts());
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),       // signer
+            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),          // key_auth
+            AccountMeta::new(position_pda, false),               // position
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+            AccountMeta::new(self.program_pda, false),           // program_pda
+            AccountMeta::new(self.pp_pda, false),                // personal_position
+            AccountMeta::new(self.wsol_ata, false),              // user_base_token_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
+            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
+            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
+            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
+            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
+            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
+            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
+            AccountMeta::new(self.log_pda, false),               // log_account
+        ];
 
         self.goto_confirm(PendingAction {
             description: vec![
                 "Repay".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
-                format!("Position: {}", short_pubkey(&self.position_pda.unwrap())),
+                format!("Position: {}", short_pubkey(&position_pda)),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
@@ -1034,15 +1041,45 @@ impl App {
     }
 
     pub fn build_reinvest(&mut self) {
-        if self.position_pda.is_none() {
-            self.push_log("No position loaded");
-            return;
-        }
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        let nft_mint = self.my_nft_mint.unwrap();
+        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
+        let key_auth = self.my_key_auth_pda.unwrap();
 
         let data = sighash("reinvest");
 
-        let mut accounts = self.role_gated_base_accounts();
-        accounts.extend(self.reinvest_remaining_accounts());
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),       // signer
+            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),          // key_auth
+            AccountMeta::new(position_pda, false),               // position
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+            AccountMeta::new(self.program_pda, false),           // program_pda
+            AccountMeta::new(self.pp_pda, false),                // personal_position
+            AccountMeta::new(self.escrow_pda, false),            // user_shares
+            AccountMeta::new(self.nav_sol_ata, false),           // user_nav_sol_ata
+            AccountMeta::new(self.wsol_ata, false),              // user_wsol_ata
+            AccountMeta::new(self.wsol_ata, false),              // user_base_token_ata (same)
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
+            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
+            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
+            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new(NAV_SOL_MINT, false),               // nav_sol_mint
+            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
+            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
+            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
+            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
+            AccountMeta::new(self.log_pda, false),               // log_account
+        ];
 
         // Reinvest does borrow + buy CPIs in one tx — needs extra compute
         let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
@@ -1050,7 +1087,7 @@ impl App {
         self.goto_confirm(PendingAction {
             description: vec![
                 "Reinvest (CPI)".into(),
-                format!("Position: {}", short_pubkey(&self.position_pda.unwrap())),
+                format!("Position: {}", short_pubkey(&position_pda)),
                 format!(
                     "Role: {}",
                     role_name(self.my_role.unwrap_or(KeyRole::Keeper))

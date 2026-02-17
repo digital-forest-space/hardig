@@ -1,5 +1,6 @@
 use litesvm::LiteSVM;
 use solana_sdk::{
+    account::Account,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::Keypair,
@@ -8,6 +9,10 @@ use solana_sdk::{
 };
 
 use anchor_lang::AccountDeserialize;
+use hardig::mayflower::{
+    self, FEE_VAULT, MARKET_BASE_VAULT, MARKET_GROUP, MARKET_META, MARKET_NAV_VAULT,
+    MAYFLOWER_MARKET, MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, NAV_SOL_MINT, WSOL_MINT,
+};
 use hardig::state::{KeyAuthorization, KeyRole, PositionNFT, ProtocolConfig};
 
 const SPL_TOKEN_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -37,13 +42,91 @@ fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
 
 fn setup() -> (LiteSVM, Keypair) {
     let mut svm = LiteSVM::new();
+
+    // Load hardig program
     let program_bytes = std::fs::read("../../target/deploy/hardig.so")
         .expect("Run `anchor build` first");
     let _ = svm.add_program(program_id(), &program_bytes);
 
+    // Load mock Mayflower program
+    let mock_bytes = std::fs::read("../../target/deploy/mock_mayflower.so")
+        .expect("Run `anchor build` first (mock-mayflower)");
+    let _ = svm.add_program(MAYFLOWER_PROGRAM_ID, &mock_bytes);
+
+    // Plant stub accounts at all constant Mayflower addresses
+    plant_mayflower_stubs(&mut svm);
+
     let admin = Keypair::new();
     svm.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
     (svm, admin)
+}
+
+/// Create minimal accounts at all constant Mayflower addresses and derived PDAs.
+fn plant_mayflower_stubs(svm: &mut LiteSVM) {
+    let owner = MAYFLOWER_PROGRAM_ID;
+
+    // Constant addresses: tenant, market_group, market_meta, market, vaults, mints
+    for addr in [
+        MAYFLOWER_TENANT,
+        MARKET_GROUP,
+        MARKET_META,
+    ] {
+        plant_account(svm, &addr, &owner, 256);
+    }
+
+    // Mutable constant addresses
+    for addr in [
+        MAYFLOWER_MARKET,
+        MARKET_BASE_VAULT,
+        MARKET_NAV_VAULT,
+        FEE_VAULT,
+    ] {
+        plant_account(svm, &addr, &owner, 256);
+    }
+
+    // Mints (owned by token program)
+    for addr in [NAV_SOL_MINT, WSOL_MINT] {
+        plant_account(svm, &addr, &SPL_TOKEN_ID, 82);
+    }
+
+    // Derived PDAs: log account
+    let (log_pda, _) = mayflower::derive_log_account();
+    plant_account(svm, &log_pda, &owner, 256);
+}
+
+/// Plant the PersonalPosition and user_shares PDAs for a given program_pda.
+/// Must be called AFTER the program PDA is known (after setup, before financial ixs).
+fn plant_position_stubs(svm: &mut LiteSVM) {
+    let (program_pda, _) = Pubkey::find_program_address(&[b"authority"], &program_id());
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda);
+    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
+
+    // PersonalPosition — needs to be large enough for floor price / debt reads
+    // PP_SIZE is 121 bytes; MayflowerMarket also needs to be >= 120 bytes for floor price read
+    let owner = MAYFLOWER_PROGRAM_ID;
+    plant_account(svm, &pp_pda, &owner, 256);
+    plant_account(svm, &escrow_pda, &owner, 256);
+
+    // Ensure MAYFLOWER_MARKET has enough data for reinvest's floor price read
+    // (already planted in plant_mayflower_stubs with 256 bytes)
+
+    // ATAs for program PDA (wSOL and navSOL)
+    let wsol_ata = get_ata(&program_pda, &WSOL_MINT);
+    let nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
+    // Token accounts need 165 bytes (SPL token account size), owned by token program
+    plant_account(svm, &wsol_ata, &SPL_TOKEN_ID, 165);
+    plant_account(svm, &nav_sol_ata, &SPL_TOKEN_ID, 165);
+}
+
+fn plant_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usize) {
+    let account = Account {
+        lamports: 1_000_000_000,
+        data: vec![0u8; size],
+        owner: *owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(*address, account).unwrap();
 }
 
 fn send_tx(
@@ -179,19 +262,160 @@ fn ix_revoke_key(
     )
 }
 
-fn ix_role_gated(
-    ix_name: &str,
+// ---------------------------------------------------------------------------
+// Financial instruction builders (with named Mayflower accounts)
+// ---------------------------------------------------------------------------
+
+/// Compute the common Mayflower derived addresses.
+fn mayflower_addrs() -> (Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Pubkey) {
+    let (program_pda, _) = Pubkey::find_program_address(&[b"authority"], &program_id());
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda);
+    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
+    let (log_pda, _) = mayflower::derive_log_account();
+    let wsol_ata = get_ata(&program_pda, &WSOL_MINT);
+    let nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
+    (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata)
+}
+
+fn ix_buy(
     signer: &Pubkey,
     nft_mint: &Pubkey,
     key_auth_pda: &Pubkey,
     position_pda: &Pubkey,
-    amount: Option<u64>,
+    amount: u64,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
-    let mut data = sighash(ix_name);
-    if let Some(amt) = amount {
-        data.extend_from_slice(&amt.to_le_bytes());
-    }
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs();
+
+    let mut data = sighash("buy");
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*signer, true),                          // signer
+            AccountMeta::new_readonly(nft_ata, false),                // key_nft_ata
+            AccountMeta::new_readonly(*key_auth_pda, false),          // key_auth
+            AccountMeta::new(*position_pda, false),                   // position
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false), // system_program
+            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(pp_pda, false),                          // personal_position
+            AccountMeta::new(escrow_pda, false),                      // user_shares
+            AccountMeta::new(nav_sol_ata, false),                     // user_nav_sol_ata
+            AccountMeta::new(wsol_ata, false),                        // user_wsol_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),       // tenant
+            AccountMeta::new_readonly(MARKET_GROUP, false),           // market_group
+            AccountMeta::new_readonly(MARKET_META, false),            // market_meta
+            AccountMeta::new(MAYFLOWER_MARKET, false),                // mayflower_market
+            AccountMeta::new(NAV_SOL_MINT, false),                    // nav_sol_mint
+            AccountMeta::new(MARKET_BASE_VAULT, false),               // market_base_vault
+            AccountMeta::new(MARKET_NAV_VAULT, false),                // market_nav_vault
+            AccountMeta::new(FEE_VAULT, false),                       // fee_vault
+            AccountMeta::new_readonly(WSOL_MINT, false),              // wsol_mint
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),   // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),           // token_program
+            AccountMeta::new(log_pda, false),                         // log_account
+        ],
+    )
+}
+
+fn ix_withdraw(
+    admin: &Pubkey,
+    nft_mint: &Pubkey,
+    key_auth_pda: &Pubkey,
+    position_pda: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let nft_ata = get_ata(admin, nft_mint);
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs();
+
+    let mut data = sighash("withdraw");
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(nft_ata, false),
+            AccountMeta::new_readonly(*key_auth_pda, false),
+            AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(pp_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new(nav_sol_ata, false),
+            AccountMeta::new(wsol_ata, false),
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
+            AccountMeta::new_readonly(MARKET_GROUP, false),
+            AccountMeta::new_readonly(MARKET_META, false),
+            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new(NAV_SOL_MINT, false),
+            AccountMeta::new(MARKET_BASE_VAULT, false),
+            AccountMeta::new(MARKET_NAV_VAULT, false),
+            AccountMeta::new(FEE_VAULT, false),
+            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new(log_pda, false),
+        ],
+    )
+}
+
+fn ix_borrow(
+    admin: &Pubkey,
+    nft_mint: &Pubkey,
+    key_auth_pda: &Pubkey,
+    position_pda: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let nft_ata = get_ata(admin, nft_mint);
+    let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs();
+
+    let mut data = sighash("borrow");
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(nft_ata, false),
+            AccountMeta::new_readonly(*key_auth_pda, false),
+            AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(pp_pda, false),
+            AccountMeta::new(wsol_ata, false),              // user_base_token_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
+            AccountMeta::new_readonly(MARKET_GROUP, false),
+            AccountMeta::new_readonly(MARKET_META, false),
+            AccountMeta::new(MARKET_BASE_VAULT, false),
+            AccountMeta::new(MARKET_NAV_VAULT, false),
+            AccountMeta::new(FEE_VAULT, false),
+            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new(log_pda, false),
+        ],
+    )
+}
+
+fn ix_repay(
+    signer: &Pubkey,
+    nft_mint: &Pubkey,
+    key_auth_pda: &Pubkey,
+    position_pda: &Pubkey,
+    amount: u64,
+) -> Instruction {
+    let nft_ata = get_ata(signer, nft_mint);
+    let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs();
+
+    let mut data = sighash("repay");
+    data.extend_from_slice(&amount.to_le_bytes());
+
     Instruction::new_with_bytes(
         program_id(),
         &data,
@@ -201,6 +425,62 @@ fn ix_role_gated(
             AccountMeta::new_readonly(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(pp_pda, false),
+            AccountMeta::new(wsol_ata, false),              // user_base_token_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
+            AccountMeta::new_readonly(MARKET_GROUP, false),
+            AccountMeta::new_readonly(MARKET_META, false),
+            AccountMeta::new(MARKET_BASE_VAULT, false),
+            AccountMeta::new(MARKET_NAV_VAULT, false),
+            AccountMeta::new(FEE_VAULT, false),
+            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new(log_pda, false),
+        ],
+    )
+}
+
+fn ix_reinvest(
+    signer: &Pubkey,
+    nft_mint: &Pubkey,
+    key_auth_pda: &Pubkey,
+    position_pda: &Pubkey,
+) -> Instruction {
+    let nft_ata = get_ata(signer, nft_mint);
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs();
+
+    let data = sighash("reinvest");
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*signer, true),
+            AccountMeta::new_readonly(nft_ata, false),
+            AccountMeta::new_readonly(*key_auth_pda, false),
+            AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(pp_pda, false),                          // personal_position
+            AccountMeta::new(escrow_pda, false),                      // user_shares
+            AccountMeta::new(nav_sol_ata, false),                     // user_nav_sol_ata
+            AccountMeta::new(wsol_ata, false),                        // user_wsol_ata
+            AccountMeta::new(wsol_ata, false),                        // user_base_token_ata (same)
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
+            AccountMeta::new_readonly(MARKET_GROUP, false),
+            AccountMeta::new_readonly(MARKET_META, false),
+            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new(NAV_SOL_MINT, false),
+            AccountMeta::new(MARKET_BASE_VAULT, false),
+            AccountMeta::new(MARKET_NAV_VAULT, false),
+            AccountMeta::new(FEE_VAULT, false),
+            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new(log_pda, false),
         ],
     )
 }
@@ -231,7 +511,7 @@ fn read_key_auth(svm: &LiteSVM, pda: &Pubkey) -> KeyAuthorization {
 }
 
 /// Full setup: init protocol + create position + authorize operator/depositor/keeper.
-/// Returns all the keypairs and PDAs needed for permission testing.
+/// Also plants Mayflower position stubs for CPI.
 struct TestHarness {
     admin: Keypair,
     admin_nft_mint: Keypair,
@@ -276,6 +556,9 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
 
     let (pos_pda, _) = position_pda(&admin_nft_mint.pubkey());
     let (admin_ka, _) = key_auth_pda(&pos_pda, &admin_nft_mint.pubkey());
+
+    // Plant Mayflower position stubs (personal_position, escrow, ATAs)
+    plant_position_stubs(svm);
 
     // Authorize operator
     let operator = Keypair::new();
@@ -369,9 +652,9 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
 fn test_buy_admin_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -382,9 +665,9 @@ fn test_buy_admin_ok() {
 fn test_buy_operator_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "buy", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_buy(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -395,9 +678,9 @@ fn test_buy_operator_ok() {
 fn test_buy_depositor_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "buy", &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, Some(250_000),
+    let ix = ix_buy(
+        &h.depositor.pubkey(), &h.depositor_nft_mint,
+        &h.depositor_key_auth, &h.position_pda, 250_000,
     );
     send_tx(&mut svm, &[ix], &[&h.depositor]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -408,9 +691,9 @@ fn test_buy_depositor_ok() {
 fn test_buy_keeper_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "buy", &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_buy(
+        &h.keeper.pubkey(), &h.keeper_nft_mint,
+        &h.keeper_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -422,15 +705,15 @@ fn test_withdraw_admin_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
     // First buy something
-    let buy_ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     // Then withdraw
-    let ix = ix_role_gated(
-        "withdraw", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_withdraw(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -441,16 +724,14 @@ fn test_withdraw_admin_ok() {
 fn test_withdraw_operator_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    // Buy first
-    let buy_ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
-    // Operator tries to withdraw
-    let ix = ix_role_gated(
-        "withdraw", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_withdraw(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 500_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator]).is_err());
 }
@@ -459,14 +740,14 @@ fn test_withdraw_operator_denied() {
 fn test_withdraw_depositor_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let buy_ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
-    let ix = ix_role_gated(
-        "withdraw", &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_withdraw(
+        &h.depositor.pubkey(), &h.depositor_nft_mint,
+        &h.depositor_key_auth, &h.position_pda, 500_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -475,14 +756,14 @@ fn test_withdraw_depositor_denied() {
 fn test_withdraw_keeper_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let buy_ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
-    let ix = ix_role_gated(
-        "withdraw", &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_withdraw(
+        &h.keeper.pubkey(), &h.keeper_nft_mint,
+        &h.keeper_key_auth, &h.position_pda, 500_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -493,9 +774,9 @@ fn test_withdraw_keeper_denied() {
 fn test_borrow_admin_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "borrow", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let ix = ix_borrow(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -506,9 +787,9 @@ fn test_borrow_admin_ok() {
 fn test_borrow_operator_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "borrow", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_borrow(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator]).is_err());
 }
@@ -517,9 +798,9 @@ fn test_borrow_operator_denied() {
 fn test_borrow_depositor_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "borrow", &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_borrow(
+        &h.depositor.pubkey(), &h.depositor_nft_mint,
+        &h.depositor_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -528,9 +809,9 @@ fn test_borrow_depositor_denied() {
 fn test_borrow_keeper_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "borrow", &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_borrow(
+        &h.keeper.pubkey(), &h.keeper_nft_mint,
+        &h.keeper_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -542,15 +823,15 @@ fn test_repay_admin_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
     // Borrow first
-    let borrow_ix = ix_role_gated(
-        "borrow", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let borrow_ix = ix_borrow(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     // Repay
-    let ix = ix_role_gated(
-        "repay", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_repay(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -561,14 +842,14 @@ fn test_repay_admin_ok() {
 fn test_repay_operator_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let borrow_ix = ix_role_gated(
-        "borrow", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let borrow_ix = ix_borrow(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
-    let ix = ix_role_gated(
-        "repay", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(500_000),
+    let ix = ix_repay(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 500_000,
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -579,14 +860,14 @@ fn test_repay_operator_ok() {
 fn test_repay_depositor_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let borrow_ix = ix_role_gated(
-        "borrow", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let borrow_ix = ix_borrow(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
-    let ix = ix_role_gated(
-        "repay", &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, Some(300_000),
+    let ix = ix_repay(
+        &h.depositor.pubkey(), &h.depositor_nft_mint,
+        &h.depositor_key_auth, &h.position_pda, 300_000,
     );
     send_tx(&mut svm, &[ix], &[&h.depositor]).unwrap();
     let pos = read_position(&svm, &h.position_pda);
@@ -597,14 +878,14 @@ fn test_repay_depositor_ok() {
 fn test_repay_keeper_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let borrow_ix = ix_role_gated(
-        "borrow", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000),
+    let borrow_ix = ix_borrow(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
-    let ix = ix_role_gated(
-        "repay", &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_repay(
+        &h.keeper.pubkey(), &h.keeper_nft_mint,
+        &h.keeper_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.keeper]).is_err());
 }
@@ -615,10 +896,11 @@ fn test_repay_keeper_denied() {
 fn test_reinvest_admin_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "reinvest", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, None,
+    let ix = ix_reinvest(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda,
     );
+    // Reinvest with zero capacity should succeed (early return)
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
 }
 
@@ -626,9 +908,9 @@ fn test_reinvest_admin_ok() {
 fn test_reinvest_operator_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "reinvest", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, None,
+    let ix = ix_reinvest(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda,
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
 }
@@ -637,9 +919,9 @@ fn test_reinvest_operator_ok() {
 fn test_reinvest_keeper_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "reinvest", &h.keeper.pubkey(), &h.keeper_nft_mint,
-        &h.keeper_key_auth, &h.position_pda, None,
+    let ix = ix_reinvest(
+        &h.keeper.pubkey(), &h.keeper_nft_mint,
+        &h.keeper_key_auth, &h.position_pda,
     );
     send_tx(&mut svm, &[ix], &[&h.keeper]).unwrap();
 }
@@ -648,9 +930,9 @@ fn test_reinvest_keeper_ok() {
 fn test_reinvest_depositor_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "reinvest", &h.depositor.pubkey(), &h.depositor_nft_mint,
-        &h.depositor_key_auth, &h.position_pda, None,
+    let ix = ix_reinvest(
+        &h.depositor.pubkey(), &h.depositor_nft_mint,
+        &h.depositor_key_auth, &h.position_pda,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -745,9 +1027,9 @@ fn test_wrong_position_key_rejected() {
     let (pos2, _) = position_pda(&mint2.pubkey());
 
     // Try to use admin1's key on position2
-    let ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &pos2, Some(100_000),
+    let ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &pos2, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -837,9 +1119,9 @@ fn test_authorize_and_revoke_key() {
     assert!(svm.get_account(&h.operator_key_auth).is_none());
 
     // Operator can no longer buy
-    let buy_ix = ix_role_gated(
-        "buy", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(100_000),
+    let buy_ix = ix_buy(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[buy_ix], &[&h.operator]).is_err());
 }
@@ -850,7 +1132,6 @@ fn test_multiple_keys_per_position() {
     let h = full_setup(&mut svm);
 
     // We already have 4 keys (admin + operator + depositor + keeper).
-    // Verify all key auths exist and have correct roles.
     let admin_ka = read_key_auth(&svm, &h.admin_key_auth);
     assert_eq!(admin_ka.role, KeyRole::Admin);
 
@@ -893,9 +1174,9 @@ fn test_invalid_role_value_rejected() {
 fn test_buy_zero_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    let ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(0),
+    let ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -905,15 +1186,15 @@ fn test_withdraw_more_than_deposited_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
     // Buy 1 SOL
-    let buy_ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000_000),
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
     // Try to withdraw 2 SOL
-    let ix = ix_role_gated(
-        "withdraw", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(2_000_000_000),
+    let ix = ix_withdraw(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 2_000_000_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -923,15 +1204,15 @@ fn test_repay_more_than_debt_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
     // Borrow 1 SOL
-    let borrow_ix = ix_role_gated(
-        "borrow", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(1_000_000_000),
+    let borrow_ix = ix_borrow(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 1_000_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
     // Try to repay 2 SOL
-    let ix = ix_role_gated(
-        "repay", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(2_000_000_000),
+    let ix = ix_repay(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 2_000_000_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -961,9 +1242,9 @@ fn test_theft_recovery_operator_key_stolen() {
     assert!(svm.get_account(&h.operator_key_auth).is_none());
 
     // Step 2: The old operator key can no longer be used
-    let buy_ix = ix_role_gated(
-        "buy", &h.operator.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(100_000),
+    let buy_ix = ix_buy(
+        &h.operator.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[buy_ix], &[&h.operator]).is_err());
 
@@ -982,9 +1263,9 @@ fn test_theft_recovery_operator_key_stolen() {
 
     // Step 4: The new key works
     let (new_op_ka, _) = key_auth_pda(&h.position_pda, &new_op_mint.pubkey());
-    let buy_ix = ix_role_gated(
-        "buy", &h.operator.pubkey(), &new_op_mint.pubkey(),
-        &new_op_ka, &h.position_pda, Some(100_000),
+    let buy_ix = ix_buy(
+        &h.operator.pubkey(), &new_op_mint.pubkey(),
+        &new_op_ka, &h.position_pda, 100_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.operator]).unwrap();
 
@@ -1020,9 +1301,9 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
     assert!(svm.get_account(&h.keeper_key_auth).is_none());
 
     // Admin key still works
-    let buy_ix = ix_role_gated(
-        "buy", &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(500_000),
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 500_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
 
@@ -1047,9 +1328,9 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
 
     // New operator can act
     let (new_op_ka, _) = key_auth_pda(&h.position_pda, &new_op_mint.pubkey());
-    let buy_ix = ix_role_gated(
-        "buy", &new_operator.pubkey(), &new_op_mint.pubkey(),
-        &new_op_ka, &h.position_pda, Some(200_000),
+    let buy_ix = ix_buy(
+        &new_operator.pubkey(), &new_op_mint.pubkey(),
+        &new_op_ka, &h.position_pda, 200_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&new_operator]).unwrap();
 
@@ -1058,7 +1339,6 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
 }
 
 /// Scenario: Attacker has a random keypair and tries to use someone else's key auth.
-/// The validate_key check rejects because NFT ATA owner != signer.
 #[test]
 fn test_attacker_cannot_use_others_key_auth() {
     let (mut svm, _) = setup();
@@ -1067,10 +1347,9 @@ fn test_attacker_cannot_use_others_key_auth() {
     let attacker = Keypair::new();
     svm.airdrop(&attacker.pubkey(), 5_000_000_000).unwrap();
 
-    // Attacker signs, passes operator's key auth but their own derived ATA has no token.
-    let ix = ix_role_gated(
-        "buy", &attacker.pubkey(), &h.operator_nft_mint,
-        &h.operator_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_buy(
+        &attacker.pubkey(), &h.operator_nft_mint,
+        &h.operator_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&attacker]).is_err());
 }
@@ -1081,11 +1360,9 @@ fn test_privilege_escalation_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    // Depositor signs, but passes the admin's NFT mint / key auth.
-    // Depositor's ATA for admin NFT mint won't have a token.
-    let ix = ix_role_gated(
-        "withdraw", &h.depositor.pubkey(), &h.admin_nft_mint.pubkey(),
-        &h.admin_key_auth, &h.position_pda, Some(100_000),
+    let ix = ix_withdraw(
+        &h.depositor.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
