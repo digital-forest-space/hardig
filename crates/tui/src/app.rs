@@ -16,14 +16,15 @@ use solana_sdk::{
 };
 
 pub use hardig::state::KeyRole;
-use hardig::state::{KeyAuthorization, PositionNFT, ProtocolConfig};
+use hardig::state::{KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig};
 
 // Mayflower constants and helpers
 use hardig::mayflower::{
     calculate_borrow_capacity, derive_log_account, derive_personal_position,
     derive_personal_position_escrow, read_debt, read_deposited_shares, read_floor_price,
-    FEE_VAULT, MARKET_BASE_VAULT, MARKET_GROUP, MARKET_META, MARKET_NAV_VAULT,
-    MAYFLOWER_MARKET, MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, NAV_SOL_MINT, WSOL_MINT,
+    DEFAULT_FEE_VAULT, DEFAULT_MARKET_BASE_VAULT, DEFAULT_MARKET_GROUP, DEFAULT_MARKET_META,
+    DEFAULT_MARKET_NAV_VAULT, DEFAULT_MAYFLOWER_MARKET, DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT,
+    MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT,
 };
 
 use crate::ui;
@@ -116,6 +117,10 @@ pub struct App {
     pub my_nft_mint: Option<Pubkey>,
     pub keyring: Vec<KeyEntry>,
 
+    // Market config (loaded from position's market_config PDA)
+    pub market_config_pda: Option<Pubkey>,
+    pub market_config: Option<MarketConfig>,
+
     // Mayflower state
     pub program_pda: Pubkey,
     pub pp_pda: Pubkey,
@@ -174,6 +179,8 @@ impl App {
             my_key_auth_pda: None,
             my_nft_mint: None,
             keyring: Vec::new(),
+            market_config_pda: None,
+            market_config: None,
             program_pda: Pubkey::default(),
             pp_pda: Pubkey::default(),
             escrow_pda: Pubkey::default(),
@@ -704,11 +711,57 @@ impl App {
         let mut instructions = Vec::new();
         let mut description = vec!["Setup Mayflower Accounts".into()];
 
+        // Step 0: Create MarketConfig if it doesn't exist on-chain yet
+        let mc_pda = self.market_config_pda.unwrap_or_else(|| {
+            Pubkey::find_program_address(
+                &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
+                &hardig::ID,
+            )
+            .0
+        });
+        if self.market_config.is_none() {
+            let (config_pda, _) =
+                Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
+            let mut data = sighash("create_market_config");
+            data.extend_from_slice(DEFAULT_NAV_SOL_MINT.as_ref());
+            data.extend_from_slice(DEFAULT_WSOL_MINT.as_ref());
+            data.extend_from_slice(DEFAULT_MARKET_GROUP.as_ref());
+            data.extend_from_slice(DEFAULT_MARKET_META.as_ref());
+            data.extend_from_slice(DEFAULT_MAYFLOWER_MARKET.as_ref());
+            data.extend_from_slice(DEFAULT_MARKET_BASE_VAULT.as_ref());
+            data.extend_from_slice(DEFAULT_MARKET_NAV_VAULT.as_ref());
+            data.extend_from_slice(DEFAULT_FEE_VAULT.as_ref());
+
+            let accounts = vec![
+                AccountMeta::new(self.keypair.pubkey(), true),
+                AccountMeta::new_readonly(config_pda, false),
+                AccountMeta::new(mc_pda, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            ];
+            instructions.push(Instruction::new_with_bytes(hardig::ID, &data, accounts));
+            description.push(format!(
+                "Create MarketConfig: {}",
+                short_pubkey(&mc_pda)
+            ));
+        }
+
         // Step 1: Init Mayflower position if needed
         if !self.mayflower_initialized {
             let admin_nft_mint = self.my_nft_mint.unwrap();
             let admin_nft_ata = get_ata(&self.keypair.pubkey(), &admin_nft_mint);
             let admin_key_auth = self.my_key_auth_pda.unwrap();
+
+            let market_meta = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.market_meta)
+                .unwrap_or(DEFAULT_MARKET_META);
+            let nav_mint = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.nav_mint)
+                .unwrap_or(DEFAULT_NAV_SOL_MINT);
 
             let data = sighash("init_mayflower_position");
             let accounts = vec![
@@ -716,11 +769,12 @@ impl App {
                 AccountMeta::new_readonly(admin_nft_ata, false),
                 AccountMeta::new_readonly(admin_key_auth, false),
                 AccountMeta::new(position_pda, false),
+                AccountMeta::new_readonly(mc_pda, false),
                 AccountMeta::new_readonly(self.program_pda, false),
                 AccountMeta::new(self.pp_pda, false),
                 AccountMeta::new(self.escrow_pda, false),
-                AccountMeta::new_readonly(MARKET_META, false),
-                AccountMeta::new_readonly(NAV_SOL_MINT, false),
+                AccountMeta::new_readonly(market_meta, false),
+                AccountMeta::new_readonly(nav_mint, false),
                 AccountMeta::new(self.log_pda, false),
                 AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
                 AccountMeta::new_readonly(SPL_TOKEN_ID, false),
@@ -736,11 +790,21 @@ impl App {
         // Step 2: Create ATAs if needed
         if !self.atas_exist {
             let payer = self.keypair.pubkey();
+            let base_mint = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.base_mint)
+                .unwrap_or(DEFAULT_WSOL_MINT);
+            let nav_mint = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.nav_mint)
+                .unwrap_or(DEFAULT_NAV_SOL_MINT);
             instructions.push(
                 spl_associated_token_account::instruction::create_associated_token_account(
                     &payer,
                     &self.program_pda,
-                    &WSOL_MINT,
+                    &base_mint,
                     &SPL_TOKEN_ID,
                 ),
             );
@@ -748,7 +812,7 @@ impl App {
                 spl_associated_token_account::instruction::create_associated_token_account(
                     &payer,
                     &self.program_pda,
-                    &NAV_SOL_MINT,
+                    &nav_mint,
                     &SPL_TOKEN_ID,
                 ),
             );
@@ -790,33 +854,36 @@ impl App {
         let nft_mint = self.my_nft_mint.unwrap();
         let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
         let key_auth = self.my_key_auth_pda.unwrap();
+        let mc_pda = self.market_config_pda.unwrap();
+        let mc = self.market_config.as_ref().unwrap();
 
         let mut data = sighash("buy");
         data.extend_from_slice(&amount.to_le_bytes());
 
         let accounts = vec![
-            AccountMeta::new(self.keypair.pubkey(), true),       // signer
-            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),          // key_auth
-            AccountMeta::new(position_pda, false),               // position
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
-            AccountMeta::new(self.program_pda, false),           // program_pda
-            AccountMeta::new(self.pp_pda, false),                // personal_position
-            AccountMeta::new(self.escrow_pda, false),            // user_shares
-            AccountMeta::new(self.nav_sol_ata, false),           // user_nav_sol_ata
-            AccountMeta::new(self.wsol_ata, false),              // user_wsol_ata
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
-            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
-            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
-            AccountMeta::new(NAV_SOL_MINT, false),               // nav_sol_mint
-            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
-            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
-            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
-            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new(self.keypair.pubkey(), true),          // signer
+            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(mc_pda, false),               // market_config
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
+            AccountMeta::new(self.program_pda, false),              // program_pda
+            AccountMeta::new(self.pp_pda, false),                   // personal_position
+            AccountMeta::new(self.escrow_pda, false),               // user_shares
+            AccountMeta::new(self.nav_sol_ata, false),              // user_nav_sol_ata
+            AccountMeta::new(self.wsol_ata, false),                 // user_wsol_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // tenant
+            AccountMeta::new_readonly(mc.market_group, false),      // market_group
+            AccountMeta::new_readonly(mc.market_meta, false),       // market_meta
+            AccountMeta::new(mc.mayflower_market, false),           // mayflower_market
+            AccountMeta::new(mc.nav_mint, false),                   // nav_sol_mint
+            AccountMeta::new(mc.market_base_vault, false),          // market_base_vault
+            AccountMeta::new(mc.market_nav_vault, false),           // market_nav_vault
+            AccountMeta::new(mc.fee_vault, false),                  // fee_vault
+            AccountMeta::new_readonly(mc.base_mint, false),         // wsol_mint
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
-            AccountMeta::new(self.log_pda, false),               // log_account
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
+            AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
         // Prepend wrap: transfer SOL → wSOL ATA, then sync_native
@@ -864,33 +931,36 @@ impl App {
         let nft_mint = self.my_nft_mint.unwrap();
         let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
         let key_auth = self.my_key_auth_pda.unwrap();
+        let mc_pda = self.market_config_pda.unwrap();
+        let mc = self.market_config.as_ref().unwrap();
 
         let mut data = sighash("withdraw");
         data.extend_from_slice(&amount.to_le_bytes());
 
         let accounts = vec![
-            AccountMeta::new(self.keypair.pubkey(), true),       // admin
-            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),          // key_auth
-            AccountMeta::new(position_pda, false),               // position
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
-            AccountMeta::new(self.program_pda, false),           // program_pda
-            AccountMeta::new(self.pp_pda, false),                // personal_position
-            AccountMeta::new(self.escrow_pda, false),            // user_shares
-            AccountMeta::new(self.nav_sol_ata, false),           // user_nav_sol_ata
-            AccountMeta::new(self.wsol_ata, false),              // user_wsol_ata
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
-            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
-            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
-            AccountMeta::new(NAV_SOL_MINT, false),               // nav_sol_mint
-            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
-            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
-            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
-            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new(self.keypair.pubkey(), true),          // admin
+            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(mc_pda, false),               // market_config
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
+            AccountMeta::new(self.program_pda, false),              // program_pda
+            AccountMeta::new(self.pp_pda, false),                   // personal_position
+            AccountMeta::new(self.escrow_pda, false),               // user_shares
+            AccountMeta::new(self.nav_sol_ata, false),              // user_nav_sol_ata
+            AccountMeta::new(self.wsol_ata, false),                 // user_wsol_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // tenant
+            AccountMeta::new_readonly(mc.market_group, false),      // market_group
+            AccountMeta::new_readonly(mc.market_meta, false),       // market_meta
+            AccountMeta::new(mc.mayflower_market, false),           // mayflower_market
+            AccountMeta::new(mc.nav_mint, false),                   // nav_sol_mint
+            AccountMeta::new(mc.market_base_vault, false),          // market_base_vault
+            AccountMeta::new(mc.market_nav_vault, false),           // market_nav_vault
+            AccountMeta::new(mc.fee_vault, false),                  // fee_vault
+            AccountMeta::new_readonly(mc.base_mint, false),         // wsol_mint
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
-            AccountMeta::new(self.log_pda, false),               // log_account
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
+            AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
         self.goto_confirm(PendingAction {
@@ -923,30 +993,33 @@ impl App {
         let nft_mint = self.my_nft_mint.unwrap();
         let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
         let key_auth = self.my_key_auth_pda.unwrap();
+        let mc_pda = self.market_config_pda.unwrap();
+        let mc = self.market_config.as_ref().unwrap();
 
         let mut data = sighash("borrow");
         data.extend_from_slice(&amount.to_le_bytes());
 
         let accounts = vec![
-            AccountMeta::new(self.keypair.pubkey(), true),       // admin
-            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),          // key_auth
-            AccountMeta::new(position_pda, false),               // position
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
-            AccountMeta::new(self.program_pda, false),           // program_pda
-            AccountMeta::new(self.pp_pda, false),                // personal_position
-            AccountMeta::new(self.wsol_ata, false),              // user_base_token_ata
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
-            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
-            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
-            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
-            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
-            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
-            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new(self.keypair.pubkey(), true),          // admin
+            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(mc_pda, false),               // market_config
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
+            AccountMeta::new(self.program_pda, false),              // program_pda
+            AccountMeta::new(self.pp_pda, false),                   // personal_position
+            AccountMeta::new(self.wsol_ata, false),                 // user_base_token_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // tenant
+            AccountMeta::new_readonly(mc.market_group, false),      // market_group
+            AccountMeta::new_readonly(mc.market_meta, false),       // market_meta
+            AccountMeta::new(mc.market_base_vault, false),          // market_base_vault
+            AccountMeta::new(mc.market_nav_vault, false),           // market_nav_vault
+            AccountMeta::new(mc.fee_vault, false),                  // fee_vault
+            AccountMeta::new_readonly(mc.base_mint, false),         // wsol_mint
+            AccountMeta::new(mc.mayflower_market, false),           // mayflower_market
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
-            AccountMeta::new(self.log_pda, false),               // log_account
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
+            AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
         self.goto_confirm(PendingAction {
@@ -979,30 +1052,33 @@ impl App {
         let nft_mint = self.my_nft_mint.unwrap();
         let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
         let key_auth = self.my_key_auth_pda.unwrap();
+        let mc_pda = self.market_config_pda.unwrap();
+        let mc = self.market_config.as_ref().unwrap();
 
         let mut data = sighash("repay");
         data.extend_from_slice(&amount.to_le_bytes());
 
         let accounts = vec![
-            AccountMeta::new(self.keypair.pubkey(), true),       // signer
-            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),          // key_auth
-            AccountMeta::new(position_pda, false),               // position
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
-            AccountMeta::new(self.program_pda, false),           // program_pda
-            AccountMeta::new(self.pp_pda, false),                // personal_position
-            AccountMeta::new(self.wsol_ata, false),              // user_base_token_ata
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
-            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
-            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
-            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
-            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
-            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
-            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
+            AccountMeta::new(self.keypair.pubkey(), true),          // signer
+            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(mc_pda, false),               // market_config
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
+            AccountMeta::new(self.program_pda, false),              // program_pda
+            AccountMeta::new(self.pp_pda, false),                   // personal_position
+            AccountMeta::new(self.wsol_ata, false),                 // user_base_token_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // tenant
+            AccountMeta::new_readonly(mc.market_group, false),      // market_group
+            AccountMeta::new_readonly(mc.market_meta, false),       // market_meta
+            AccountMeta::new(mc.market_base_vault, false),          // market_base_vault
+            AccountMeta::new(mc.market_nav_vault, false),           // market_nav_vault
+            AccountMeta::new(mc.fee_vault, false),                  // fee_vault
+            AccountMeta::new_readonly(mc.base_mint, false),         // wsol_mint
+            AccountMeta::new(mc.mayflower_market, false),           // mayflower_market
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
-            AccountMeta::new(self.log_pda, false),               // log_account
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
+            AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
         self.goto_confirm(PendingAction {
@@ -1028,33 +1104,36 @@ impl App {
         let nft_mint = self.my_nft_mint.unwrap();
         let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
         let key_auth = self.my_key_auth_pda.unwrap();
+        let mc_pda = self.market_config_pda.unwrap();
+        let mc = self.market_config.as_ref().unwrap();
 
         let data = sighash("reinvest");
 
         let accounts = vec![
-            AccountMeta::new(self.keypair.pubkey(), true),       // signer
-            AccountMeta::new_readonly(nft_ata, false),           // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),          // key_auth
-            AccountMeta::new(position_pda, false),               // position
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
-            AccountMeta::new(self.program_pda, false),           // program_pda
-            AccountMeta::new(self.pp_pda, false),                // personal_position
-            AccountMeta::new(self.escrow_pda, false),            // user_shares
-            AccountMeta::new(self.nav_sol_ata, false),           // user_nav_sol_ata
-            AccountMeta::new(self.wsol_ata, false),              // user_wsol_ata
-            AccountMeta::new(self.wsol_ata, false),              // user_base_token_ata (same)
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),  // tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),      // market_group
-            AccountMeta::new_readonly(MARKET_META, false),       // market_meta
-            AccountMeta::new(MAYFLOWER_MARKET, false),           // mayflower_market
-            AccountMeta::new(NAV_SOL_MINT, false),               // nav_sol_mint
-            AccountMeta::new(MARKET_BASE_VAULT, false),          // market_base_vault
-            AccountMeta::new(MARKET_NAV_VAULT, false),           // market_nav_vault
-            AccountMeta::new(FEE_VAULT, false),                  // fee_vault
-            AccountMeta::new_readonly(WSOL_MINT, false),         // wsol_mint
+            AccountMeta::new(self.keypair.pubkey(), true),          // signer
+            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
+            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(mc_pda, false),               // market_config
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
+            AccountMeta::new(self.program_pda, false),              // program_pda
+            AccountMeta::new(self.pp_pda, false),                   // personal_position
+            AccountMeta::new(self.escrow_pda, false),               // user_shares
+            AccountMeta::new(self.nav_sol_ata, false),              // user_nav_sol_ata
+            AccountMeta::new(self.wsol_ata, false),                 // user_wsol_ata
+            AccountMeta::new(self.wsol_ata, false),                 // user_base_token_ata (same)
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // tenant
+            AccountMeta::new_readonly(mc.market_group, false),      // market_group
+            AccountMeta::new_readonly(mc.market_meta, false),       // market_meta
+            AccountMeta::new(mc.mayflower_market, false),           // mayflower_market
+            AccountMeta::new(mc.nav_mint, false),                   // nav_sol_mint
+            AccountMeta::new(mc.market_base_vault, false),          // market_base_vault
+            AccountMeta::new(mc.market_nav_vault, false),           // market_nav_vault
+            AccountMeta::new(mc.fee_vault, false),                  // fee_vault
+            AccountMeta::new_readonly(mc.base_mint, false),         // wsol_mint
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),      // token_program
-            AccountMeta::new(self.log_pda, false),               // log_account
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
+            AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
         // Reinvest does borrow + buy CPIs in one tx — needs extra compute
@@ -1071,6 +1150,52 @@ impl App {
                 "Borrows available capacity and buys more navSOL".into(),
             ],
             instructions: vec![compute_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
+    pub fn build_create_market_config(
+        &mut self,
+        nav_mint: Pubkey,
+        base_mint: Pubkey,
+        market_group: Pubkey,
+        market_meta: Pubkey,
+        mayflower_market: Pubkey,
+        market_base_vault: Pubkey,
+        market_nav_vault: Pubkey,
+        fee_vault: Pubkey,
+    ) {
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+        let (mc_pda, _) = Pubkey::find_program_address(
+            &[MarketConfig::SEED, nav_mint.as_ref()],
+            &hardig::ID,
+        );
+
+        let mut data = sighash("create_market_config");
+        data.extend_from_slice(nav_mint.as_ref());
+        data.extend_from_slice(base_mint.as_ref());
+        data.extend_from_slice(market_group.as_ref());
+        data.extend_from_slice(market_meta.as_ref());
+        data.extend_from_slice(mayflower_market.as_ref());
+        data.extend_from_slice(market_base_vault.as_ref());
+        data.extend_from_slice(market_nav_vault.as_ref());
+        data.extend_from_slice(fee_vault.as_ref());
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(mc_pda, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Create Market Config".into(),
+                format!("Nav Mint: {}", nav_mint),
+                format!("MarketConfig PDA: {}", mc_pda),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
         });
     }
@@ -1130,6 +1255,8 @@ impl App {
         self.my_key_auth_pda = None;
         self.my_nft_mint = None;
         self.keyring.clear();
+        self.market_config_pda = None;
+        self.market_config = None;
 
         // Get all KeyAuthorization accounts from the program
         let config = RpcProgramAccountsConfig {
@@ -1184,19 +1311,53 @@ impl App {
                 if let Ok(pos) = PositionNFT::try_deserialize(&mut acc.data.as_slice()) {
                     self.mayflower_initialized = pos.position_pda != Pubkey::default();
 
+                    // Fetch market config: from position if set, otherwise try default
+                    let mc_key = if pos.market_config != Pubkey::default() {
+                        pos.market_config
+                    } else {
+                        Pubkey::find_program_address(
+                            &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
+                            &hardig::ID,
+                        )
+                        .0
+                    };
+                    if let Ok(mc_acc) = self.rpc.get_account(&mc_key) {
+                        if let Ok(mc) =
+                            MarketConfig::try_deserialize(&mut mc_acc.data.as_slice())
+                        {
+                            self.market_config_pda = Some(mc_key);
+                            self.market_config = Some(mc);
+                        }
+                    }
+
                     // Derive per-position Mayflower addresses from admin_nft_mint
                     let admin_nft_mint = pos.admin_nft_mint;
                     let (program_pda, _) = Pubkey::find_program_address(
                         &[b"authority", admin_nft_mint.as_ref()],
                         &hardig::ID,
                     );
-                    let (pp_pda, _) = derive_personal_position(&program_pda);
+                    let market_meta = self
+                        .market_config
+                        .as_ref()
+                        .map(|mc| mc.market_meta)
+                        .unwrap_or(DEFAULT_MARKET_META);
+                    let (pp_pda, _) = derive_personal_position(&program_pda, &market_meta);
                     let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
                     self.program_pda = program_pda;
                     self.pp_pda = pp_pda;
                     self.escrow_pda = escrow_pda;
-                    self.wsol_ata = get_ata(&program_pda, &WSOL_MINT);
-                    self.nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
+                    let base_mint = self
+                        .market_config
+                        .as_ref()
+                        .map(|mc| mc.base_mint)
+                        .unwrap_or(DEFAULT_WSOL_MINT);
+                    let nav_mint = self
+                        .market_config
+                        .as_ref()
+                        .map(|mc| mc.nav_mint)
+                        .unwrap_or(DEFAULT_NAV_SOL_MINT);
+                    self.wsol_ata = get_ata(&program_pda, &base_mint);
+                    self.nav_sol_ata = get_ata(&program_pda, &nav_mint);
 
                     self.position = Some(pos);
                 }
@@ -1269,7 +1430,12 @@ impl App {
                 self.mf_debt = debt;
             }
         }
-        if let Ok(market_acc) = self.rpc.get_account(&MAYFLOWER_MARKET) {
+        let mf_market = self
+            .market_config
+            .as_ref()
+            .map(|mc| mc.mayflower_market)
+            .unwrap_or(DEFAULT_MAYFLOWER_MARKET);
+        if let Ok(market_acc) = self.rpc.get_account(&mf_market) {
             if let Ok(floor) = read_floor_price(&market_acc.data) {
                 self.mf_floor_price = floor;
             }

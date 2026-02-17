@@ -3,13 +3,26 @@ use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 
 use super::constants::*;
 
-/// Derive the PersonalPosition PDA for a given owner.
-/// Seeds: ["personal_position", MARKET_META, owner]
-pub fn derive_personal_position(owner: &Pubkey) -> (Pubkey, u8) {
+/// Market-specific addresses extracted from a MarketConfig account.
+/// Passed to CPI builders so they don't embed constants.
+pub struct MarketAddresses {
+    pub nav_mint: Pubkey,
+    pub base_mint: Pubkey,
+    pub market_group: Pubkey,
+    pub market_meta: Pubkey,
+    pub mayflower_market: Pubkey,
+    pub market_base_vault: Pubkey,
+    pub market_nav_vault: Pubkey,
+    pub fee_vault: Pubkey,
+}
+
+/// Derive the PersonalPosition PDA for a given owner and market_meta.
+/// Seeds: ["personal_position", market_meta, owner]
+pub fn derive_personal_position(owner: &Pubkey, market_meta: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[
             PERSONAL_POSITION_SEED,
-            MARKET_META.as_ref(),
+            market_meta.as_ref(),
             owner.as_ref(),
         ],
         &MAYFLOWER_PROGRAM_ID,
@@ -42,6 +55,7 @@ pub fn build_init_personal_position_ix(
     owner: Pubkey,
     personal_position: Pubkey,
     user_shares: Pubkey,
+    market: &MarketAddresses,
 ) -> Instruction {
     let (log_account, _) = derive_log_account();
 
@@ -50,8 +64,8 @@ pub fn build_init_personal_position_ix(
         accounts: vec![
             AccountMeta::new(payer, true),                          // 0: payer (signer)
             AccountMeta::new_readonly(owner, false),                // 1: owner
-            AccountMeta::new_readonly(MARKET_META, false),          // 2: marketMetadata
-            AccountMeta::new_readonly(NAV_SOL_MINT, false),         // 3: navToken mint
+            AccountMeta::new_readonly(market.market_meta, false),   // 2: marketMetadata
+            AccountMeta::new_readonly(market.nav_mint, false),      // 3: navToken mint
             AccountMeta::new(personal_position, false),             // 4: personalPosition PDA
             AccountMeta::new(user_shares, false),                   // 5: userShares PDA
             AccountMeta::new_readonly(anchor_spl::token::ID, false), // 6: Token Program
@@ -74,6 +88,7 @@ pub fn build_buy_ix(
     user_wsol_ata: Pubkey,
     input_amount: u64,
     min_output: u64,
+    market: &MarketAddresses,
 ) -> Instruction {
     let (log_account, _) = derive_log_account();
 
@@ -87,18 +102,18 @@ pub fn build_buy_ix(
         accounts: vec![
             AccountMeta::new(user_wallet, true),                    // 0: userWallet (signer)
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // 1: tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),         // 2: marketGroup
-            AccountMeta::new_readonly(MARKET_META, false),          // 3: marketMetadata
-            AccountMeta::new(MAYFLOWER_MARKET, false),              // 4: mayflowerMarket
+            AccountMeta::new_readonly(market.market_group, false),  // 2: marketGroup
+            AccountMeta::new_readonly(market.market_meta, false),   // 3: marketMetadata
+            AccountMeta::new(market.mayflower_market, false),       // 4: mayflowerMarket
             AccountMeta::new(personal_position, false),             // 5: personalPosition
             AccountMeta::new(user_shares, false),                   // 6: userShares
-            AccountMeta::new(NAV_SOL_MINT, false),                  // 7: navToken mint
-            AccountMeta::new_readonly(WSOL_MINT, false),            // 8: baseMint
+            AccountMeta::new(market.nav_mint, false),               // 7: navToken mint
+            AccountMeta::new_readonly(market.base_mint, false),     // 8: baseMint
             AccountMeta::new(user_nav_sol_ata, false),              // 9: userNavSolATA
             AccountMeta::new(user_wsol_ata, false),                 // 10: userWsolATA
-            AccountMeta::new(MARKET_BASE_VAULT, false),             // 11: marketBaseVault
-            AccountMeta::new(MARKET_NAV_VAULT, false),              // 12: marketNavVault
-            AccountMeta::new(FEE_VAULT, false),                     // 13: feeVault
+            AccountMeta::new(market.market_base_vault, false),      // 11: marketBaseVault
+            AccountMeta::new(market.market_nav_vault, false),       // 12: marketNavVault
+            AccountMeta::new(market.fee_vault, false),              // 13: feeVault
             AccountMeta::new_readonly(anchor_spl::token::ID, false), // 14: Token Program
             AccountMeta::new_readonly(anchor_spl::token::ID, false), // 15: Token Program (dup)
             AccountMeta::new(log_account, false),                   // 16: logAccount
@@ -119,6 +134,7 @@ pub fn build_sell_ix(
     user_wsol_ata: Pubkey,
     input_amount: u64,
     min_output: u64,
+    market: &MarketAddresses,
 ) -> Instruction {
     let (log_account, _) = derive_log_account();
 
@@ -132,18 +148,18 @@ pub fn build_sell_ix(
         accounts: vec![
             AccountMeta::new(user_wallet, true),
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(MARKET_GROUP, false),
-            AccountMeta::new_readonly(MARKET_META, false),
-            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new_readonly(market.market_group, false),
+            AccountMeta::new_readonly(market.market_meta, false),
+            AccountMeta::new(market.mayflower_market, false),
             AccountMeta::new(personal_position, false),
             AccountMeta::new(user_shares, false),
-            AccountMeta::new(NAV_SOL_MINT, false),
-            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new(market.nav_mint, false),
+            AccountMeta::new_readonly(market.base_mint, false),
             AccountMeta::new(user_nav_sol_ata, false),
             AccountMeta::new(user_wsol_ata, false),
-            AccountMeta::new(MARKET_BASE_VAULT, false),
-            AccountMeta::new(MARKET_NAV_VAULT, false),
-            AccountMeta::new(FEE_VAULT, false),
+            AccountMeta::new(market.market_base_vault, false),
+            AccountMeta::new(market.market_nav_vault, false),
+            AccountMeta::new(market.fee_vault, false),
             AccountMeta::new_readonly(anchor_spl::token::ID, false),
             AccountMeta::new_readonly(anchor_spl::token::ID, false),
             AccountMeta::new(log_account, false),
@@ -159,6 +175,7 @@ pub fn build_borrow_ix(
     personal_position: Pubkey,
     user_base_token_ata: Pubkey,
     borrow_amount: u64,
+    market: &MarketAddresses,
 ) -> Instruction {
     let (log_account, _) = derive_log_account();
 
@@ -171,14 +188,14 @@ pub fn build_borrow_ix(
         accounts: vec![
             AccountMeta::new(user_wallet, true),                    // 0: userWallet (signer)
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // 1: tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),         // 2: marketGroup
-            AccountMeta::new_readonly(MARKET_META, false),          // 3: marketMetadata
-            AccountMeta::new(MARKET_BASE_VAULT, false),             // 4: marketBaseVault
-            AccountMeta::new(MARKET_NAV_VAULT, false),              // 5: marketNavVault
-            AccountMeta::new(FEE_VAULT, false),                     // 6: feeVault
-            AccountMeta::new_readonly(WSOL_MINT, false),            // 7: baseMint
+            AccountMeta::new_readonly(market.market_group, false),  // 2: marketGroup
+            AccountMeta::new_readonly(market.market_meta, false),   // 3: marketMetadata
+            AccountMeta::new(market.market_base_vault, false),      // 4: marketBaseVault
+            AccountMeta::new(market.market_nav_vault, false),       // 5: marketNavVault
+            AccountMeta::new(market.fee_vault, false),              // 6: feeVault
+            AccountMeta::new_readonly(market.base_mint, false),     // 7: baseMint
             AccountMeta::new(user_base_token_ata, false),           // 8: userBaseTokenATA
-            AccountMeta::new(MAYFLOWER_MARKET, false),              // 9: mayflowerMarket
+            AccountMeta::new(market.mayflower_market, false),       // 9: mayflowerMarket
             AccountMeta::new(personal_position, false),             // 10: personalPosition
             AccountMeta::new_readonly(anchor_spl::token::ID, false), // 11: Token Program
             AccountMeta::new(log_account, false),                   // 12: logAccount
@@ -196,6 +213,7 @@ pub fn build_repay_ix(
     personal_position: Pubkey,
     user_base_token_ata: Pubkey,
     repay_amount: u64,
+    market: &MarketAddresses,
 ) -> Instruction {
     let (log_account, _) = derive_log_account();
 
@@ -208,14 +226,14 @@ pub fn build_repay_ix(
         accounts: vec![
             AccountMeta::new(user_wallet, true),
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(MARKET_GROUP, false),
-            AccountMeta::new_readonly(MARKET_META, false),
-            AccountMeta::new(MARKET_BASE_VAULT, false),
-            AccountMeta::new(MARKET_NAV_VAULT, false),
-            AccountMeta::new(FEE_VAULT, false),
-            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new_readonly(market.market_group, false),
+            AccountMeta::new_readonly(market.market_meta, false),
+            AccountMeta::new(market.market_base_vault, false),
+            AccountMeta::new(market.market_nav_vault, false),
+            AccountMeta::new(market.fee_vault, false),
+            AccountMeta::new_readonly(market.base_mint, false),
             AccountMeta::new(user_base_token_ata, false),
-            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new(market.mayflower_market, false),
             AccountMeta::new(personal_position, false),
             AccountMeta::new_readonly(anchor_spl::token::ID, false),
             AccountMeta::new(log_account, false),

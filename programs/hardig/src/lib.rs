@@ -66,4 +66,29 @@ pub mod hardig {
     pub fn init_mayflower_position(ctx: Context<InitMayflowerPosition>) -> Result<()> {
         instructions::init_mayflower_position::handler(ctx)
     }
+
+    /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
+    pub fn create_market_config(
+        ctx: Context<CreateMarketConfig>,
+        nav_mint: Pubkey,
+        base_mint: Pubkey,
+        market_group: Pubkey,
+        market_meta: Pubkey,
+        mayflower_market: Pubkey,
+        market_base_vault: Pubkey,
+        market_nav_vault: Pubkey,
+        fee_vault: Pubkey,
+    ) -> Result<()> {
+        instructions::create_market_config::handler(
+            ctx,
+            nav_mint,
+            base_mint,
+            market_group,
+            market_meta,
+            mayflower_market,
+            market_base_vault,
+            market_nav_vault,
+            fee_vault,
+        )
+    }
 }

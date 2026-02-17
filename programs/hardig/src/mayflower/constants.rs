@@ -8,30 +8,30 @@ pub const MAYFLOWER_PROGRAM_ID: Pubkey =
 pub const MAYFLOWER_TENANT: Pubkey =
     pubkey!("81JEJdJSZbaXixpD8WQSBWBfkDa6m6KpXpSErzYUHq6z");
 
-// navSOL market accounts
-pub const MARKET_GROUP: Pubkey =
+// Default navSOL market accounts — used for tests and initial MarketConfig seeding.
+pub const DEFAULT_MARKET_GROUP: Pubkey =
     pubkey!("Lmdgb4NE4T3ubmQZQZQZ7t4UP6A98NdVbmZPcoEdkdC");
 
-pub const MARKET_META: Pubkey =
+pub const DEFAULT_MARKET_META: Pubkey =
     pubkey!("DotD4dZAyr4Kb6AD3RHid8VgmsHUzWF6LRd4WvAMezRj");
 
-pub const MAYFLOWER_MARKET: Pubkey =
+pub const DEFAULT_MAYFLOWER_MARKET: Pubkey =
     pubkey!("A5M1nWfi6ATSamEJ1ASr2FC87BMwijthTbNRYG7BhYSc");
 
-pub const MARKET_BASE_VAULT: Pubkey =
+pub const DEFAULT_MARKET_BASE_VAULT: Pubkey =
     pubkey!("43vPhZeow3pgYa6zrPXASVQhdXTMfowyfNK87BYizhnL");
 
-pub const MARKET_NAV_VAULT: Pubkey =
+pub const DEFAULT_MARKET_NAV_VAULT: Pubkey =
     pubkey!("BCYzijbWwmqRnsTWjGhHbneST2emQY36WcRAkbkhsQMt");
 
-pub const FEE_VAULT: Pubkey =
+pub const DEFAULT_FEE_VAULT: Pubkey =
     pubkey!("B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf");
 
-// Mints
-pub const NAV_SOL_MINT: Pubkey =
+// Default mints
+pub const DEFAULT_NAV_SOL_MINT: Pubkey =
     pubkey!("navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo");
 
-pub const WSOL_MINT: Pubkey =
+pub const DEFAULT_WSOL_MINT: Pubkey =
     pubkey!("So11111111111111111111111111111111111111112");
 
 // Instruction discriminators (derived from Mayflower IDL).

@@ -85,7 +85,8 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
     // Initialize the position
     let position = &mut ctx.accounts.position;
     position.admin_nft_mint = ctx.accounts.admin_nft_mint.key();
-    position.position_pda = Pubkey::default(); // Set during Mayflower CPI integration
+    position.position_pda = Pubkey::default(); // Set during init_mayflower_position
+    position.market_config = Pubkey::default(); // Set during init_mayflower_position
     position.deposited_nav = 0;
     position.user_debt = 0;
     position.protocol_debt = 0;

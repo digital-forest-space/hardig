@@ -86,6 +86,33 @@ enum Action {
     },
     /// Show compact position balances
     Balances,
+    /// Create a MarketConfig PDA (protocol admin only)
+    CreateMarketConfig {
+        /// Nav token mint (e.g. navSOL)
+        #[arg(long)]
+        nav_mint: String,
+        /// Base token mint (e.g. wSOL)
+        #[arg(long)]
+        base_mint: String,
+        /// Mayflower market group
+        #[arg(long)]
+        market_group: String,
+        /// Mayflower market meta
+        #[arg(long)]
+        market_meta: String,
+        /// Mayflower market
+        #[arg(long)]
+        mayflower_market: String,
+        /// Market base vault
+        #[arg(long)]
+        market_base_vault: String,
+        /// Market nav vault
+        #[arg(long)]
+        market_nav_vault: String,
+        /// Fee vault
+        #[arg(long)]
+        fee_vault: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +292,7 @@ fn action_to_name(action: &Action) -> String {
         Action::AuthorizeKey { .. } => "authorize-key".into(),
         Action::RevokeKey { .. } => "revoke-key".into(),
         Action::Balances => "balances".into(),
+        Action::CreateMarketConfig { .. } => "create-market-config".into(),
     }
 }
 
@@ -339,6 +367,43 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 ("Key index to revoke".into(), index.to_string()),
             ];
             app.build_revoke_key();
+        }
+        Action::CreateMarketConfig {
+            nav_mint,
+            base_mint,
+            market_group,
+            market_meta,
+            mayflower_market,
+            market_base_vault,
+            market_nav_vault,
+            fee_vault,
+        } => {
+            use std::str::FromStr;
+            let parse = |s: &str| {
+                solana_sdk::pubkey::Pubkey::from_str(s).map_err(|_| format!("Invalid pubkey: {}", s))
+            };
+            match (|| -> Result<_, String> {
+                Ok((
+                    parse(nav_mint)?,
+                    parse(base_mint)?,
+                    parse(market_group)?,
+                    parse(market_meta)?,
+                    parse(mayflower_market)?,
+                    parse(market_base_vault)?,
+                    parse(market_nav_vault)?,
+                    parse(fee_vault)?,
+                ))
+            })() {
+                Ok((nm, bm, mg, mm, mfm, mbv, mnv, fv)) => {
+                    app.build_create_market_config(nm, bm, mg, mm, mfm, mbv, mnv, fv);
+                }
+                Err(e) => {
+                    return Some(CliOutput::Error {
+                        action: "create-market-config".into(),
+                        error: e,
+                    });
+                }
+            }
         }
     }
     None

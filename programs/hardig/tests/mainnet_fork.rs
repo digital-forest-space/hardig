@@ -26,7 +26,7 @@ use solana_sdk::{
 };
 
 use hardig::mayflower;
-use hardig::state::{KeyAuthorization, KeyRole, PositionNFT, ProtocolConfig};
+use hardig::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT, ProtocolConfig};
 
 const RPC_URL: &str = "http://127.0.0.1:8899";
 
@@ -49,6 +49,13 @@ fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
         &ATA_PROGRAM_ID,
     )
     .0
+}
+
+fn market_config_pda(nav_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[MarketConfig::SEED, nav_mint.as_ref()],
+        &program_id(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +130,33 @@ fn ix_init_protocol(admin: &Pubkey) -> Instruction {
         vec![
             AccountMeta::new(*admin, true),
             AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ],
+    )
+}
+
+fn ix_create_market_config(admin: &Pubkey) -> Instruction {
+    let (config_pda, _) =
+        Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id());
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
+
+    let mut data = sighash("create_market_config");
+    data.extend_from_slice(mayflower::DEFAULT_NAV_SOL_MINT.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_WSOL_MINT.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_MARKET_GROUP.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_MARKET_META.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_MAYFLOWER_MARKET.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_MARKET_BASE_VAULT.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_MARKET_NAV_VAULT.as_ref());
+    data.extend_from_slice(mayflower::DEFAULT_FEE_VAULT.as_ref());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(mc_pda, false),
             AccountMeta::new_readonly(system_program::ID, false),
         ],
     )
@@ -210,6 +244,7 @@ fn ix_role_gated(
     amount: Option<u64>,
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
     let mut data = sighash(ix_name);
     if let Some(amt) = amount {
         data.extend_from_slice(&amt.to_le_bytes());
@@ -222,6 +257,7 @@ fn ix_role_gated(
             AccountMeta::new_readonly(nft_ata, false),
             AccountMeta::new_readonly(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(mc_pda, false),
             AccountMeta::new_readonly(system_program::ID, false),
         ],
     )
@@ -237,11 +273,12 @@ fn ix_buy_with_cpi(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (prog_pda, _) = authority_pda(nft_mint);
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_account, _) = mayflower::derive_log_account();
-    let user_nav_sol_ata = get_ata(&prog_pda, &mayflower::NAV_SOL_MINT);
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_nav_sol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_NAV_SOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("buy");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -252,6 +289,7 @@ fn ix_buy_with_cpi(
         AccountMeta::new_readonly(nft_ata, false),
         AccountMeta::new_readonly(*key_auth, false),
         AccountMeta::new(*position, false),
+        AccountMeta::new_readonly(mc_pda, false),                    // market_config
         AccountMeta::new_readonly(system_program::ID, false),
         // remaining_accounts for Mayflower CPI (buy layout from buy.rs)
         AccountMeta::new(prog_pda, false),                          // [0] program_pda
@@ -260,16 +298,17 @@ fn ix_buy_with_cpi(
         AccountMeta::new(user_nav_sol_ata, false),                   // [3] user_nav_sol_ata
         AccountMeta::new(user_wsol_ata, false),                      // [4] user_wsol_ata
         AccountMeta::new_readonly(mayflower::MAYFLOWER_TENANT, false), // [5] tenant
-        AccountMeta::new_readonly(mayflower::MARKET_GROUP, false),   // [6] market_group
-        AccountMeta::new_readonly(mayflower::MARKET_META, false),    // [7] market_meta
-        AccountMeta::new(mayflower::MAYFLOWER_MARKET, false),        // [8] mayflower_market
-        AccountMeta::new(mayflower::NAV_SOL_MINT, false),            // [9] nav_sol_mint
-        AccountMeta::new(mayflower::MARKET_BASE_VAULT, false),       // [10] market_base_vault
-        AccountMeta::new(mayflower::MARKET_NAV_VAULT, false),        // [11] market_nav_vault
-        AccountMeta::new(mayflower::FEE_VAULT, false),               // [12] fee_vault
-        AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [13] mayflower_program
-        AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [14] token_program
-        AccountMeta::new(log_account, false),                        // [15] log_account
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_GROUP, false), // [6] market_group
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false),  // [7] market_meta
+        AccountMeta::new(mayflower::DEFAULT_MAYFLOWER_MARKET, false),      // [8] mayflower_market
+        AccountMeta::new(mayflower::DEFAULT_NAV_SOL_MINT, false),          // [9] nav_sol_mint
+        AccountMeta::new(mayflower::DEFAULT_MARKET_BASE_VAULT, false),     // [10] market_base_vault
+        AccountMeta::new(mayflower::DEFAULT_MARKET_NAV_VAULT, false),      // [11] market_nav_vault
+        AccountMeta::new(mayflower::DEFAULT_FEE_VAULT, false),             // [12] fee_vault
+        AccountMeta::new_readonly(mayflower::DEFAULT_WSOL_MINT, false),    // [13] wsol_mint
+        AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [14] mayflower_program
+        AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [15] token_program
+        AccountMeta::new(log_account, false),                        // [16] log_account
     ];
 
     Instruction::new_with_bytes(program_id(), &data, accounts)
@@ -285,9 +324,10 @@ fn ix_borrow_with_cpi(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (prog_pda, _) = authority_pda(nft_mint);
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let (log_account, _) = mayflower::derive_log_account();
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("borrow");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -298,21 +338,23 @@ fn ix_borrow_with_cpi(
         AccountMeta::new_readonly(nft_ata, false),
         AccountMeta::new_readonly(*key_auth, false),
         AccountMeta::new(*position, false),
+        AccountMeta::new_readonly(mc_pda, false),                    // market_config
         AccountMeta::new_readonly(system_program::ID, false),
         // remaining_accounts for Mayflower CPI (borrow layout from borrow.rs)
         AccountMeta::new(prog_pda, false),                          // [0] program_pda
         AccountMeta::new(pp_pda, false),                             // [1] personal_position
         AccountMeta::new(user_wsol_ata, false),                      // [2] user_base_token_ata
         AccountMeta::new_readonly(mayflower::MAYFLOWER_TENANT, false), // [3] tenant
-        AccountMeta::new_readonly(mayflower::MARKET_GROUP, false),   // [4] market_group
-        AccountMeta::new_readonly(mayflower::MARKET_META, false),    // [5] market_meta
-        AccountMeta::new(mayflower::MARKET_BASE_VAULT, false),       // [6] market_base_vault
-        AccountMeta::new(mayflower::MARKET_NAV_VAULT, false),        // [7] market_nav_vault
-        AccountMeta::new(mayflower::FEE_VAULT, false),               // [8] fee_vault
-        AccountMeta::new(mayflower::MAYFLOWER_MARKET, false),        // [9] mayflower_market
-        AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [10] mayflower_program
-        AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [11] token_program
-        AccountMeta::new(log_account, false),                        // [12] log_account
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_GROUP, false), // [4] market_group
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false),  // [5] market_meta
+        AccountMeta::new(mayflower::DEFAULT_MARKET_BASE_VAULT, false),     // [6] market_base_vault
+        AccountMeta::new(mayflower::DEFAULT_MARKET_NAV_VAULT, false),      // [7] market_nav_vault
+        AccountMeta::new(mayflower::DEFAULT_FEE_VAULT, false),             // [8] fee_vault
+        AccountMeta::new_readonly(mayflower::DEFAULT_WSOL_MINT, false),    // [9] wsol_mint
+        AccountMeta::new(mayflower::DEFAULT_MAYFLOWER_MARKET, false),      // [10] mayflower_market
+        AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [11] mayflower_program
+        AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [12] token_program
+        AccountMeta::new(log_account, false),                        // [13] log_account
     ];
 
     Instruction::new_with_bytes(program_id(), &data, accounts)
@@ -328,9 +370,10 @@ fn ix_repay_with_cpi(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (prog_pda, _) = authority_pda(nft_mint);
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let (log_account, _) = mayflower::derive_log_account();
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("repay");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -341,19 +384,20 @@ fn ix_repay_with_cpi(
         AccountMeta::new_readonly(nft_ata, false),
         AccountMeta::new_readonly(*key_auth, false),
         AccountMeta::new(*position, false),
+        AccountMeta::new_readonly(mc_pda, false),                    // market_config
         AccountMeta::new_readonly(system_program::ID, false),
         // remaining_accounts for Mayflower CPI (repay layout from repay.rs)
         AccountMeta::new(prog_pda, false),                          // [0] program_pda
         AccountMeta::new(pp_pda, false),                             // [1] personal_position
         AccountMeta::new(user_wsol_ata, false),                      // [2] user_base_token_ata
         AccountMeta::new_readonly(mayflower::MAYFLOWER_TENANT, false), // [3] tenant
-        AccountMeta::new_readonly(mayflower::MARKET_GROUP, false),   // [4] market_group
-        AccountMeta::new_readonly(mayflower::MARKET_META, false),    // [5] market_meta
-        AccountMeta::new(mayflower::MARKET_BASE_VAULT, false),       // [6] market_base_vault
-        AccountMeta::new(mayflower::MARKET_NAV_VAULT, false),        // [7] market_nav_vault
-        AccountMeta::new(mayflower::FEE_VAULT, false),               // [8] fee_vault
-        AccountMeta::new_readonly(mayflower::WSOL_MINT, false),      // [9] base_mint
-        AccountMeta::new(mayflower::MAYFLOWER_MARKET, false),        // [10] mayflower_market
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_GROUP, false), // [4] market_group
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false),  // [5] market_meta
+        AccountMeta::new(mayflower::DEFAULT_MARKET_BASE_VAULT, false),     // [6] market_base_vault
+        AccountMeta::new(mayflower::DEFAULT_MARKET_NAV_VAULT, false),      // [7] market_nav_vault
+        AccountMeta::new(mayflower::DEFAULT_FEE_VAULT, false),             // [8] fee_vault
+        AccountMeta::new_readonly(mayflower::DEFAULT_WSOL_MINT, false),    // [9] base_mint
+        AccountMeta::new(mayflower::DEFAULT_MAYFLOWER_MARKET, false),      // [10] mayflower_market
         AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [11] mayflower_program
         AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [12] token_program
         AccountMeta::new(log_account, false),                        // [13] log_account
@@ -371,9 +415,10 @@ fn ix_init_mayflower_position(
 ) -> Instruction {
     let admin_nft_ata = get_ata(admin, admin_nft_mint);
     let (prog_pda, _) = authority_pda(admin_nft_mint);
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_account, _) = mayflower::derive_log_account();
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
 
     Instruction::new_with_bytes(
         program_id(),
@@ -383,11 +428,12 @@ fn ix_init_mayflower_position(
             AccountMeta::new_readonly(admin_nft_ata, false),
             AccountMeta::new_readonly(*admin_key_auth, false),
             AccountMeta::new(*position, false),
+            AccountMeta::new_readonly(mc_pda, false),                // market_config
             AccountMeta::new_readonly(prog_pda, false),
             AccountMeta::new(pp_pda, false),
             AccountMeta::new(escrow, false),
-            AccountMeta::new_readonly(mayflower::MARKET_META, false),
-            AccountMeta::new_readonly(mayflower::NAV_SOL_MINT, false),
+            AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false),
+            AccountMeta::new_readonly(mayflower::DEFAULT_NAV_SOL_MINT, false),
             AccountMeta::new(log_account, false),
             AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
@@ -406,11 +452,12 @@ fn ix_reinvest_with_cpi(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (prog_pda, _) = authority_pda(nft_mint);
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_account, _) = mayflower::derive_log_account();
-    let user_nav_sol_ata = get_ata(&prog_pda, &mayflower::NAV_SOL_MINT);
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_nav_sol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_NAV_SOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
 
     let data = sighash("reinvest");
 
@@ -420,25 +467,27 @@ fn ix_reinvest_with_cpi(
         AccountMeta::new_readonly(nft_ata, false),
         AccountMeta::new_readonly(*key_auth, false),
         AccountMeta::new(*position, false),
+        AccountMeta::new_readonly(mc_pda, false),                    // market_config
         AccountMeta::new_readonly(system_program::ID, false),
         // remaining_accounts for reinvest (reinvest.rs layout)
         AccountMeta::new(prog_pda, false),                          // [0] program_pda
-        AccountMeta::new(mayflower::MAYFLOWER_MARKET, false),        // [1] mayflower_market
-        AccountMeta::new(pp_pda, false),                             // [2] personal_position
-        AccountMeta::new(escrow, false),                             // [3] user_shares
-        AccountMeta::new(user_nav_sol_ata, false),                   // [4] user_nav_sol_ata
-        AccountMeta::new(user_wsol_ata, false),                      // [5] user_wsol_ata
-        AccountMeta::new(user_wsol_ata, false),                      // [6] user_base_token_ata (same as wsol for borrow)
-        AccountMeta::new_readonly(mayflower::MAYFLOWER_TENANT, false), // [7] tenant
-        AccountMeta::new_readonly(mayflower::MARKET_GROUP, false),   // [8] market_group
-        AccountMeta::new_readonly(mayflower::MARKET_META, false),    // [9] market_meta
-        AccountMeta::new(mayflower::MARKET_BASE_VAULT, false),       // [10] market_base_vault
-        AccountMeta::new(mayflower::MARKET_NAV_VAULT, false),        // [11] market_nav_vault
-        AccountMeta::new(mayflower::FEE_VAULT, false),               // [12] fee_vault
-        AccountMeta::new(mayflower::NAV_SOL_MINT, false),            // [13] nav_sol_mint
-        AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [14] mayflower_program
-        AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [15] token_program
-        AccountMeta::new(log_account, false),                        // [16] log_account
+        AccountMeta::new(pp_pda, false),                             // [1] personal_position
+        AccountMeta::new(escrow, false),                             // [2] user_shares
+        AccountMeta::new(user_nav_sol_ata, false),                   // [3] user_nav_sol_ata
+        AccountMeta::new(user_wsol_ata, false),                      // [4] user_wsol_ata
+        AccountMeta::new(user_wsol_ata, false),                      // [5] user_base_token_ata (same as wsol for borrow)
+        AccountMeta::new_readonly(mayflower::MAYFLOWER_TENANT, false), // [6] tenant
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_GROUP, false), // [7] market_group
+        AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false),  // [8] market_meta
+        AccountMeta::new(mayflower::DEFAULT_MAYFLOWER_MARKET, false),      // [9] mayflower_market
+        AccountMeta::new(mayflower::DEFAULT_NAV_SOL_MINT, false),          // [10] nav_sol_mint
+        AccountMeta::new(mayflower::DEFAULT_MARKET_BASE_VAULT, false),     // [11] market_base_vault
+        AccountMeta::new(mayflower::DEFAULT_MARKET_NAV_VAULT, false),      // [12] market_nav_vault
+        AccountMeta::new(mayflower::DEFAULT_FEE_VAULT, false),             // [13] fee_vault
+        AccountMeta::new_readonly(mayflower::DEFAULT_WSOL_MINT, false),    // [14] wsol_mint
+        AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // [15] mayflower_program
+        AccountMeta::new_readonly(SPL_TOKEN_ID, false),              // [16] token_program
+        AccountMeta::new(log_account, false),                        // [17] log_account
     ];
 
     Instruction::new_with_bytes(program_id(), &data, accounts)
@@ -461,6 +510,9 @@ fn full_fork_setup(client: &RpcClient) -> ForkHarness {
 
     // Init protocol
     send_and_confirm(client, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Create MarketConfig for default navSOL market
+    send_and_confirm(client, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
 
     // Create position
     let admin_nft_mint = Keypair::new();
@@ -494,7 +546,7 @@ fn full_fork_setup(client: &RpcClient) -> ForkHarness {
 #[ignore]
 fn test_mainnet_fork_read_floor_price() {
     let client = rpc();
-    let market_data = client.get_account_data(&mayflower::MAYFLOWER_MARKET).unwrap();
+    let market_data = client.get_account_data(&mayflower::DEFAULT_MAYFLOWER_MARKET).unwrap();
     let floor = mayflower::read_floor_price(&market_data).unwrap();
 
     assert!(floor > 0, "Floor price should be positive, got {}", floor);
@@ -553,7 +605,7 @@ fn test_mainnet_fork_init_mayflower_position() {
     // Verify position_pda was stored
     let pos = get_position(&client, &harness.position_pda);
     let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
-    let (expected_pp, _) = mayflower::derive_personal_position(&prog_pda);
+    let (expected_pp, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     assert_eq!(pos.position_pda, expected_pp);
 
     // Verify the Mayflower PersonalPosition account exists
@@ -591,13 +643,13 @@ fn test_mainnet_fork_buy_with_cpi() {
     // In production, the user would wrap SOL → wSOL into the PDA's ATA.
     // For testing, we create and fund it manually.
     let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
 
     // Create wSOL ATA for program PDA and fund it
     let create_ata_ix = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::WSOL_MINT,
+        &mayflower::DEFAULT_WSOL_MINT,
         &SPL_TOKEN_ID,
     );
     send_and_confirm(&client, &[create_ata_ix], &[&harness.admin]).unwrap();
@@ -618,12 +670,12 @@ fn test_mainnet_fork_buy_with_cpi() {
     .unwrap();
 
     // Also create navSOL ATA for program PDA
-    let _user_nav_ata = get_ata(&prog_pda, &mayflower::NAV_SOL_MINT);
+    let _user_nav_ata = get_ata(&prog_pda, &mayflower::DEFAULT_NAV_SOL_MINT);
     let create_nav_ata_ix =
         spl_associated_token_account::instruction::create_associated_token_account(
             &harness.admin.pubkey(),
             &prog_pda,
-            &mayflower::NAV_SOL_MINT,
+            &mayflower::DEFAULT_NAV_SOL_MINT,
             &SPL_TOKEN_ID,
         );
     send_and_confirm(&client, &[create_nav_ata_ix], &[&harness.admin]).unwrap();
@@ -648,7 +700,7 @@ fn test_mainnet_fork_buy_with_cpi() {
     assert_eq!(pos.user_debt, 0);
 
     // Verify Mayflower PersonalPosition has deposited shares
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let pp_data = client.get_account_data(&pp_pda).unwrap();
     let shares = mayflower::read_deposited_shares(&pp_data).unwrap();
     assert!(shares > 0, "Should have deposited shares, got 0");
@@ -680,19 +732,19 @@ fn test_mainnet_fork_borrow_against_floor() {
 
     // Setup wSOL and navSOL ATAs + fund
     let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
-    let _user_nav_ata = get_ata(&prog_pda, &mayflower::NAV_SOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
+    let _user_nav_ata = get_ata(&prog_pda, &mayflower::DEFAULT_NAV_SOL_MINT);
 
     let create_wsol = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::WSOL_MINT,
+        &mayflower::DEFAULT_WSOL_MINT,
         &SPL_TOKEN_ID,
     );
     let create_nav = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::NAV_SOL_MINT,
+        &mayflower::DEFAULT_NAV_SOL_MINT,
         &SPL_TOKEN_ID,
     );
     send_and_confirm(&client, &[create_wsol, create_nav], &[&harness.admin]).unwrap();
@@ -721,10 +773,10 @@ fn test_mainnet_fork_borrow_against_floor() {
     .unwrap();
 
     // Read floor and calculate borrow capacity
-    let market_data = client.get_account_data(&mayflower::MAYFLOWER_MARKET).unwrap();
+    let market_data = client.get_account_data(&mayflower::DEFAULT_MAYFLOWER_MARKET).unwrap();
     let floor = mayflower::read_floor_price(&market_data).unwrap();
 
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let pp_data = client.get_account_data(&pp_pda).unwrap();
     let shares = mayflower::read_deposited_shares(&pp_data).unwrap();
     let debt = mayflower::read_debt(&pp_data).unwrap();
@@ -783,18 +835,18 @@ fn test_mainnet_fork_repay_debt() {
     .unwrap();
 
     let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
 
     let create_wsol = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::WSOL_MINT,
+        &mayflower::DEFAULT_WSOL_MINT,
         &SPL_TOKEN_ID,
     );
     let create_nav = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::NAV_SOL_MINT,
+        &mayflower::DEFAULT_NAV_SOL_MINT,
         &SPL_TOKEN_ID,
     );
     send_and_confirm(&client, &[create_wsol, create_nav], &[&harness.admin]).unwrap();
@@ -865,7 +917,7 @@ fn test_mainnet_fork_repay_debt() {
     assert_eq!(pos.user_debt, 0);
 
     // Verify Mayflower debt is 0
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let pp_data = client.get_account_data(&pp_pda).unwrap();
     let mf_debt = mayflower::read_debt(&pp_data).unwrap();
     assert_eq!(mf_debt, 0, "Mayflower debt should be 0 after full repay");
@@ -893,19 +945,19 @@ fn test_mainnet_fork_full_lifecycle() {
     .unwrap();
 
     let (prog_pda, _) = authority_pda(&harness.admin_nft_mint.pubkey());
-    let user_wsol_ata = get_ata(&prog_pda, &mayflower::WSOL_MINT);
+    let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
 
     // Setup ATAs
     let create_wsol = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::WSOL_MINT,
+        &mayflower::DEFAULT_WSOL_MINT,
         &SPL_TOKEN_ID,
     );
     let create_nav = spl_associated_token_account::instruction::create_associated_token_account(
         &harness.admin.pubkey(),
         &prog_pda,
-        &mayflower::NAV_SOL_MINT,
+        &mayflower::DEFAULT_NAV_SOL_MINT,
         &SPL_TOKEN_ID,
     );
     send_and_confirm(&client, &[create_wsol, create_nav], &[&harness.admin]).unwrap();
@@ -959,9 +1011,9 @@ fn test_mainnet_fork_full_lifecycle() {
     println!("[2] Operator authorized");
 
     // 4. Borrow against floor (as admin)
-    let market_data = client.get_account_data(&mayflower::MAYFLOWER_MARKET).unwrap();
+    let market_data = client.get_account_data(&mayflower::DEFAULT_MAYFLOWER_MARKET).unwrap();
     let floor = mayflower::read_floor_price(&market_data).unwrap();
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
     let pp_data = client.get_account_data(&pp_pda).unwrap();
     let shares = mayflower::read_deposited_shares(&pp_data).unwrap();
     let capacity = mayflower::calculate_borrow_capacity(shares, floor, 0).unwrap();
@@ -1027,7 +1079,7 @@ fn test_mainnet_fork_floor_price_vs_capacity() {
     let client = rpc();
 
     // Read current floor price
-    let market_data = client.get_account_data(&mayflower::MAYFLOWER_MARKET).unwrap();
+    let market_data = client.get_account_data(&mayflower::DEFAULT_MAYFLOWER_MARKET).unwrap();
     let floor = mayflower::read_floor_price(&market_data).unwrap();
     println!("Floor price: {} lamports/navSOL-lamport (scaled 1e9)", floor);
 

@@ -4,17 +4,11 @@ import {
   derivePersonalPosition,
   deriveLogAccount,
   getAta,
-  WSOL_MINT,
   MAYFLOWER_TENANT,
-  MARKET_GROUP,
-  MARKET_META,
-  MAYFLOWER_MARKET,
-  MARKET_BASE_VAULT,
-  MARKET_NAV_VAULT,
-  FEE_VAULT,
   MAYFLOWER_PROGRAM_ID,
+  DEFAULT_WSOL_MINT,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
+import { myNftMint, myKeyAuthPda, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
 import { shortPubkey, lamportsToSol } from '../utils.js';
 
 export async function buildBorrow(program, wallet, amountLamports) {
@@ -22,10 +16,14 @@ export async function buildBorrow(program, wallet, amountLamports) {
   const keyAuth = myKeyAuthPda.value;
   const posPda = positionPda.value;
   const nftAta = getAta(wallet, nftMint);
+  const mc = marketConfig.value;
+  const mcPda = marketConfigPda.value;
+  const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
+  const marketMeta = mc ? mc.marketMeta : undefined;
   const [programPda] = deriveProgramPda(position.value.adminNftMint);
-  const [ppPda] = derivePersonalPosition(programPda);
+  const [ppPda] = derivePersonalPosition(programPda, marketMeta);
   const [logPda] = deriveLogAccount();
-  const wsolAta = getAta(programPda, WSOL_MINT);
+  const wsolAta = getAta(programPda, baseMint);
 
   const ix = await program.methods
     .borrow(new BN(amountLamports))
@@ -34,17 +32,18 @@ export async function buildBorrow(program, wallet, amountLamports) {
       keyNftAta: nftAta,
       keyAuth: keyAuth,
       position: posPda,
+      marketConfig: mcPda,
       programPda: programPda,
       personalPosition: ppPda,
       userBaseTokenAta: wsolAta,
       tenant: MAYFLOWER_TENANT,
-      marketGroup: MARKET_GROUP,
-      marketMeta: MARKET_META,
-      marketBaseVault: MARKET_BASE_VAULT,
-      marketNavVault: MARKET_NAV_VAULT,
-      feeVault: FEE_VAULT,
-      wsolMint: WSOL_MINT,
-      mayflowerMarket: MAYFLOWER_MARKET,
+      marketGroup: mc.marketGroup,
+      marketMeta: mc.marketMeta,
+      marketBaseVault: mc.marketBaseVault,
+      marketNavVault: mc.marketNavVault,
+      feeVault: mc.feeVault,
+      wsolMint: mc.baseMint,
+      mayflowerMarket: mc.mayflowerMarket,
       mayflowerProgram: MAYFLOWER_PROGRAM_ID,
       logAccount: logPda,
     })

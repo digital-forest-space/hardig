@@ -4,7 +4,7 @@ use anchor_spl::token::TokenAccount;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, KeyRole, PositionNFT};
+use crate::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT};
 
 use super::validate_key::validate_key;
 
@@ -22,9 +22,12 @@ pub struct InitMayflowerPosition<'info> {
     )]
     pub admin_key_auth: Account<'info, KeyAuthorization>,
 
-    /// The position (mutated to store Mayflower PersonalPosition PDA).
+    /// The position (mutated to store Mayflower PersonalPosition PDA and MarketConfig).
     #[account(mut)]
     pub position: Account<'info, PositionNFT>,
+
+    /// The MarketConfig for the target market.
+    pub market_config: Account<'info, MarketConfig>,
 
     /// Program PDA that will own the Mayflower PersonalPosition.
     /// CHECK: PDA derived from this program.
@@ -45,11 +48,11 @@ pub struct InitMayflowerPosition<'info> {
     pub mayflower_user_shares: UncheckedAccount<'info>,
 
     /// The Mayflower market metadata.
-    /// CHECK: Constant address validated in handler.
+    /// CHECK: Validated against market_config in handler.
     pub mayflower_market_meta: UncheckedAccount<'info>,
 
     /// The navSOL mint.
-    /// CHECK: Constant address validated in handler.
+    /// CHECK: Validated against market_config in handler.
     pub nav_sol_mint: UncheckedAccount<'info>,
 
     /// The Mayflower log account.
@@ -75,23 +78,25 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
         &[KeyRole::Admin],
     )?;
 
-    // Validate Mayflower account addresses
+    let mc = &ctx.accounts.market_config;
+
+    // Validate Mayflower account addresses against MarketConfig
     require!(
-        ctx.accounts.mayflower_market_meta.key() == mayflower::MARKET_META,
-        HardigError::InvalidPositionPda
+        ctx.accounts.mayflower_market_meta.key() == mc.market_meta,
+        HardigError::InvalidMayflowerAccount
     );
     require!(
-        ctx.accounts.nav_sol_mint.key() == mayflower::NAV_SOL_MINT,
-        HardigError::InvalidPositionPda
+        ctx.accounts.nav_sol_mint.key() == mc.nav_mint,
+        HardigError::InvalidMayflowerAccount
     );
     require!(
         ctx.accounts.mayflower_program.key() == mayflower::MAYFLOWER_PROGRAM_ID,
-        HardigError::InvalidPositionPda
+        HardigError::InvalidMayflowerAccount
     );
 
     // Validate PersonalPosition PDA derivation
     let program_pda = ctx.accounts.program_pda.key();
-    let (expected_pp, _) = mayflower::derive_personal_position(&program_pda);
+    let (expected_pp, _) = mayflower::derive_personal_position(&program_pda, &mc.market_meta);
     require!(
         ctx.accounts.mayflower_personal_position.key() == expected_pp,
         HardigError::InvalidPositionPda
@@ -104,12 +109,25 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
         HardigError::InvalidPositionPda
     );
 
+    // Build MarketAddresses from MarketConfig
+    let market = mayflower::MarketAddresses {
+        nav_mint: mc.nav_mint,
+        base_mint: mc.base_mint,
+        market_group: mc.market_group,
+        market_meta: mc.market_meta,
+        mayflower_market: mc.mayflower_market,
+        market_base_vault: mc.market_base_vault,
+        market_nav_vault: mc.market_nav_vault,
+        fee_vault: mc.fee_vault,
+    };
+
     // Build and invoke CPI
     let ix = mayflower::build_init_personal_position_ix(
         ctx.accounts.admin.key(),
         program_pda,
         expected_pp,
         expected_escrow,
+        &market,
     );
 
     let bump = ctx.bumps.program_pda;
@@ -133,8 +151,9 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
         signer_seeds,
     )?;
 
-    // Store the Mayflower PersonalPosition PDA in our position
+    // Store the Mayflower PersonalPosition PDA and MarketConfig in our position
     ctx.accounts.position.position_pda = expected_pp;
+    ctx.accounts.position.market_config = ctx.accounts.market_config.key();
     ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
 
     Ok(())

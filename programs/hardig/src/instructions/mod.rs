@@ -1,6 +1,7 @@
 pub mod authorize_key;
 pub mod borrow;
 pub mod buy;
+pub mod create_market_config;
 pub mod create_position;
 pub mod init_mayflower_position;
 pub mod initialize_protocol;
@@ -14,6 +15,7 @@ pub mod withdraw;
 pub use authorize_key::*;
 pub use borrow::*;
 pub use buy::*;
+pub use create_market_config::*;
 pub use create_position::*;
 pub use init_mayflower_position::*;
 pub use initialize_protocol::*;

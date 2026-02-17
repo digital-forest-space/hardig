@@ -9,3 +9,4 @@ export { buildRepay } from './repay.js';
 export { buildReinvest } from './reinvest.js';
 export { buildAuthorizeKey } from './authorizeKey.js';
 export { buildRevokeKey } from './revokeKey.js';
+export { buildCreateMarketConfig } from './createMarketConfig.js';

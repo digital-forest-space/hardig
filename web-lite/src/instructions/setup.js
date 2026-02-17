@@ -4,17 +4,50 @@ import {
 import {
   deriveProgramPda,
   getAta,
-  WSOL_MINT,
-  NAV_SOL_MINT,
+  deriveConfigPda,
+  deriveMarketConfigPda,
+  DEFAULT_WSOL_MINT,
+  DEFAULT_NAV_SOL_MINT,
+  DEFAULT_MARKET_GROUP,
+  DEFAULT_MARKET_META,
+  DEFAULT_MAYFLOWER_MARKET,
+  DEFAULT_MARKET_BASE_VAULT,
+  DEFAULT_MARKET_NAV_VAULT,
+  DEFAULT_FEE_VAULT,
   TOKEN_PROGRAM_ID,
 } from '../constants.js';
-import { mayflowerInitialized, atasExist, position } from '../state.js';
+import { mayflowerInitialized, atasExist, position, marketConfig } from '../state.js';
 import { buildInitMayflowerPosition } from './initMayflowerPosition.js';
 import { shortPubkey } from '../utils.js';
 
 export async function buildSetup(program, wallet) {
   const instructions = [];
   const description = ['Setup Mayflower Accounts'];
+
+  // Step 0: Create MarketConfig if it doesn't exist on-chain yet
+  if (!marketConfig.value) {
+    const [configPda] = deriveConfigPda();
+    const [mcPda] = deriveMarketConfigPda(DEFAULT_NAV_SOL_MINT);
+    const ix = await program.methods
+      .createMarketConfig(
+        DEFAULT_NAV_SOL_MINT,
+        DEFAULT_WSOL_MINT,
+        DEFAULT_MARKET_GROUP,
+        DEFAULT_MARKET_META,
+        DEFAULT_MAYFLOWER_MARKET,
+        DEFAULT_MARKET_BASE_VAULT,
+        DEFAULT_MARKET_NAV_VAULT,
+        DEFAULT_FEE_VAULT,
+      )
+      .accounts({
+        admin: wallet,
+        config: configPda,
+        marketConfig: mcPda,
+      })
+      .instruction();
+    instructions.push(ix);
+    description.push(`Create MarketConfig: ${shortPubkey(mcPda)}`);
+  }
 
   // Step 1: Init Mayflower position if needed
   if (!mayflowerInitialized.value) {
@@ -25,16 +58,19 @@ export async function buildSetup(program, wallet) {
 
   // Step 2: Create ATAs if needed
   if (!atasExist.value) {
+    const mc = marketConfig.value;
+    const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
+    const navMint = mc ? mc.navMint : DEFAULT_NAV_SOL_MINT;
     const [programPda] = deriveProgramPda(position.value.adminNftMint);
-    const wsolAta = getAta(programPda, WSOL_MINT);
-    const navAta = getAta(programPda, NAV_SOL_MINT);
+    const wsolAta = getAta(programPda, baseMint);
+    const navAta = getAta(programPda, navMint);
 
     instructions.push(
       createAssociatedTokenAccountInstruction(
         wallet,
         wsolAta,
         programPda,
-        WSOL_MINT,
+        baseMint,
         TOKEN_PROGRAM_ID
       )
     );
@@ -43,7 +79,7 @@ export async function buildSetup(program, wallet) {
         wallet,
         navAta,
         programPda,
-        NAV_SOL_MINT,
+        navMint,
         TOKEN_PROGRAM_ID
       )
     );

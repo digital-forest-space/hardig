@@ -4,7 +4,7 @@ use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, KeyRole, PositionNFT};
+use crate::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT};
 
 use super::validate_key::validate_key;
 
@@ -25,6 +25,12 @@ pub struct Buy<'info> {
     /// The position to buy navSOL for.
     #[account(mut)]
     pub position: Account<'info, PositionNFT>,
+
+    /// The MarketConfig for this position's market.
+    #[account(
+        constraint = market_config.key() == position.market_config @ HardigError::InvalidMayflowerAccount,
+    )]
+    pub market_config: Account<'info, MarketConfig>,
 
     pub system_program: Program<'info, System>,
 
@@ -68,63 +74,63 @@ pub struct Buy<'info> {
     pub tenant: UncheckedAccount<'info>,
 
     /// Mayflower market group.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
-        constraint = market_group.key() == mayflower::MARKET_GROUP @ HardigError::InvalidMayflowerAccount,
+        constraint = market_group.key() == market_config.market_group @ HardigError::InvalidMayflowerAccount,
     )]
     pub market_group: UncheckedAccount<'info>,
 
     /// Mayflower market metadata.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
-        constraint = market_meta.key() == mayflower::MARKET_META @ HardigError::InvalidMayflowerAccount,
+        constraint = market_meta.key() == market_config.market_meta @ HardigError::InvalidMayflowerAccount,
     )]
     pub market_meta: UncheckedAccount<'info>,
 
     /// Mayflower market.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
         mut,
-        constraint = mayflower_market.key() == mayflower::MAYFLOWER_MARKET @ HardigError::InvalidMayflowerAccount,
+        constraint = mayflower_market.key() == market_config.mayflower_market @ HardigError::InvalidMayflowerAccount,
     )]
     pub mayflower_market: UncheckedAccount<'info>,
 
     /// navSOL mint.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
         mut,
-        constraint = nav_sol_mint.key() == mayflower::NAV_SOL_MINT @ HardigError::InvalidMayflowerAccount,
+        constraint = nav_sol_mint.key() == market_config.nav_mint @ HardigError::InvalidMayflowerAccount,
     )]
     pub nav_sol_mint: UncheckedAccount<'info>,
 
     /// Mayflower market base vault.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
         mut,
-        constraint = market_base_vault.key() == mayflower::MARKET_BASE_VAULT @ HardigError::InvalidMayflowerAccount,
+        constraint = market_base_vault.key() == market_config.market_base_vault @ HardigError::InvalidMayflowerAccount,
     )]
     pub market_base_vault: UncheckedAccount<'info>,
 
     /// Mayflower market nav vault.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
         mut,
-        constraint = market_nav_vault.key() == mayflower::MARKET_NAV_VAULT @ HardigError::InvalidMayflowerAccount,
+        constraint = market_nav_vault.key() == market_config.market_nav_vault @ HardigError::InvalidMayflowerAccount,
     )]
     pub market_nav_vault: UncheckedAccount<'info>,
 
     /// Mayflower fee vault.
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
         mut,
-        constraint = fee_vault.key() == mayflower::FEE_VAULT @ HardigError::InvalidMayflowerAccount,
+        constraint = fee_vault.key() == market_config.fee_vault @ HardigError::InvalidMayflowerAccount,
     )]
     pub fee_vault: UncheckedAccount<'info>,
 
     /// wSOL mint (baseMint for Mayflower CPI).
-    /// CHECK: Constant address validated by constraint.
+    /// CHECK: Validated against market_config.
     #[account(
-        constraint = wsol_mint.key() == mayflower::WSOL_MINT @ HardigError::InvalidMayflowerAccount,
+        constraint = wsol_mint.key() == market_config.base_mint @ HardigError::InvalidMayflowerAccount,
     )]
     pub wsol_mint: UncheckedAccount<'info>,
 
@@ -154,9 +160,11 @@ pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
 
     require!(amount > 0, HardigError::InsufficientFunds);
 
+    let mc = &ctx.accounts.market_config;
+
     // Validate PDA-derived accounts
     let program_pda = ctx.accounts.program_pda.key();
-    let (expected_pp, _) = mayflower::derive_personal_position(&program_pda);
+    let (expected_pp, _) = mayflower::derive_personal_position(&program_pda, &mc.market_meta);
     require!(
         ctx.accounts.personal_position.key() == expected_pp,
         HardigError::InvalidMayflowerAccount
@@ -176,6 +184,17 @@ pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
         ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
     }
 
+    let market = mayflower::MarketAddresses {
+        nav_mint: mc.nav_mint,
+        base_mint: mc.base_mint,
+        market_group: mc.market_group,
+        market_meta: mc.market_meta,
+        mayflower_market: mc.mayflower_market,
+        market_base_vault: mc.market_base_vault,
+        market_nav_vault: mc.market_nav_vault,
+        fee_vault: mc.fee_vault,
+    };
+
     // Build and invoke Mayflower buy CPI
     let ix = mayflower::build_buy_ix(
         program_pda,
@@ -185,6 +204,7 @@ pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
         ctx.accounts.user_wsol_ata.key(),
         amount,
         0, // min_output = 0 (accept any slippage for now)
+        &market,
     );
 
     let bump = ctx.bumps.program_pda;

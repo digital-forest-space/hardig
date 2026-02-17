@@ -10,10 +10,11 @@ use solana_sdk::{
 
 use anchor_lang::AccountDeserialize;
 use hardig::mayflower::{
-    self, FEE_VAULT, MARKET_BASE_VAULT, MARKET_GROUP, MARKET_META, MARKET_NAV_VAULT,
-    MAYFLOWER_MARKET, MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, NAV_SOL_MINT, WSOL_MINT,
+    self, DEFAULT_FEE_VAULT, DEFAULT_MARKET_BASE_VAULT, DEFAULT_MARKET_GROUP, DEFAULT_MARKET_META,
+    DEFAULT_MARKET_NAV_VAULT, DEFAULT_MAYFLOWER_MARKET, DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT,
+    MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT,
 };
-use hardig::state::{KeyAuthorization, KeyRole, PositionNFT, ProtocolConfig};
+use hardig::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT, ProtocolConfig};
 
 const SPL_TOKEN_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM_ID: Pubkey =
@@ -34,6 +35,13 @@ fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
         &ATA_PROGRAM_ID,
     )
     .0
+}
+
+fn market_config_pda(nav_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[MarketConfig::SEED, nav_mint.as_ref()],
+        &program_id(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -65,27 +73,27 @@ fn setup() -> (LiteSVM, Keypair) {
 fn plant_mayflower_stubs(svm: &mut LiteSVM) {
     let owner = MAYFLOWER_PROGRAM_ID;
 
-    // Constant addresses: tenant, market_group, market_meta, market, vaults, mints
+    // Constant addresses: tenant, market_group, market_meta
     for addr in [
         MAYFLOWER_TENANT,
-        MARKET_GROUP,
-        MARKET_META,
+        DEFAULT_MARKET_GROUP,
+        DEFAULT_MARKET_META,
     ] {
         plant_account(svm, &addr, &owner, 256);
     }
 
     // Mutable constant addresses
     for addr in [
-        MAYFLOWER_MARKET,
-        MARKET_BASE_VAULT,
-        MARKET_NAV_VAULT,
-        FEE_VAULT,
+        DEFAULT_MAYFLOWER_MARKET,
+        DEFAULT_MARKET_BASE_VAULT,
+        DEFAULT_MARKET_NAV_VAULT,
+        DEFAULT_FEE_VAULT,
     ] {
         plant_account(svm, &addr, &owner, 256);
     }
 
     // Mints (owned by token program)
-    for addr in [NAV_SOL_MINT, WSOL_MINT] {
+    for addr in [DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT] {
         plant_account(svm, &addr, &SPL_TOKEN_ID, 82);
     }
 
@@ -101,24 +109,40 @@ fn plant_position_stubs(svm: &mut LiteSVM, admin_nft_mint: &Pubkey) {
         &[b"authority", admin_nft_mint.as_ref()],
         &program_id(),
     );
-    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
     let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
 
     // PersonalPosition — needs to be large enough for floor price / debt reads
-    // PP_SIZE is 121 bytes; MayflowerMarket also needs to be >= 120 bytes for floor price read
     let owner = MAYFLOWER_PROGRAM_ID;
     plant_account(svm, &pp_pda, &owner, 256);
     plant_account(svm, &escrow_pda, &owner, 256);
 
-    // Ensure MAYFLOWER_MARKET has enough data for reinvest's floor price read
-    // (already planted in plant_mayflower_stubs with 256 bytes)
-
     // ATAs for program PDA (wSOL and navSOL)
-    let wsol_ata = get_ata(&program_pda, &WSOL_MINT);
-    let nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
+    let wsol_ata = get_ata(&program_pda, &DEFAULT_WSOL_MINT);
+    let nav_sol_ata = get_ata(&program_pda, &DEFAULT_NAV_SOL_MINT);
     // Token accounts need 165 bytes (SPL token account size), owned by token program
     plant_account(svm, &wsol_ata, &SPL_TOKEN_ID, 165);
     plant_account(svm, &nav_sol_ata, &SPL_TOKEN_ID, 165);
+}
+
+/// Patch the PositionNFT account to set `market_config` and `position_pda` fields,
+/// simulating what `init_mayflower_position` would do via CPI.
+fn patch_position_for_cpi(svm: &mut LiteSVM, admin_nft_mint: &Pubkey) {
+    let (pos_pda, _) = position_pda(admin_nft_mint);
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+
+    let (program_pda, _) = Pubkey::find_program_address(
+        &[b"authority", admin_nft_mint.as_ref()],
+        &program_id(),
+    );
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
+
+    let mut account = svm.get_account(&pos_pda).unwrap();
+    // position_pda at offset 40..72
+    account.data[40..72].copy_from_slice(pp_pda.as_ref());
+    // market_config at offset 72..104
+    account.data[72..104].copy_from_slice(mc_pda.as_ref());
+    svm.set_account(pos_pda, account).unwrap();
 }
 
 fn plant_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usize) {
@@ -162,6 +186,34 @@ fn ix_init_protocol(admin: &Pubkey) -> Instruction {
         vec![
             AccountMeta::new(*admin, true),
             AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ],
+    )
+}
+
+fn ix_create_market_config(admin: &Pubkey) -> Instruction {
+    let (config_pda, _) =
+        Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id());
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+
+    let mut data = sighash("create_market_config");
+    // 8 Pubkey args
+    data.extend_from_slice(DEFAULT_NAV_SOL_MINT.as_ref());
+    data.extend_from_slice(DEFAULT_WSOL_MINT.as_ref());
+    data.extend_from_slice(DEFAULT_MARKET_GROUP.as_ref());
+    data.extend_from_slice(DEFAULT_MARKET_META.as_ref());
+    data.extend_from_slice(DEFAULT_MAYFLOWER_MARKET.as_ref());
+    data.extend_from_slice(DEFAULT_MARKET_BASE_VAULT.as_ref());
+    data.extend_from_slice(DEFAULT_MARKET_NAV_VAULT.as_ref());
+    data.extend_from_slice(DEFAULT_FEE_VAULT.as_ref());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(mc_pda, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
     )
@@ -266,7 +318,7 @@ fn ix_revoke_key(
 }
 
 // ---------------------------------------------------------------------------
-// Financial instruction builders (with named Mayflower accounts)
+// Financial instruction builders (with MarketConfig)
 // ---------------------------------------------------------------------------
 
 /// Compute the common Mayflower derived addresses for a given position's admin_nft_mint.
@@ -275,11 +327,11 @@ fn mayflower_addrs(admin_nft_mint: &Pubkey) -> (Pubkey, Pubkey, Pubkey, Pubkey, 
         &[b"authority", admin_nft_mint.as_ref()],
         &program_id(),
     );
-    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda);
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
     let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
     let (log_pda, _) = mayflower::derive_log_account();
-    let wsol_ata = get_ata(&program_pda, &WSOL_MINT);
-    let nav_sol_ata = get_ata(&program_pda, &NAV_SOL_MINT);
+    let wsol_ata = get_ata(&program_pda, &DEFAULT_WSOL_MINT);
+    let nav_sol_ata = get_ata(&program_pda, &DEFAULT_NAV_SOL_MINT);
     (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata)
 }
 
@@ -293,6 +345,7 @@ fn ix_buy(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("buy");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -305,6 +358,7 @@ fn ix_buy(
             AccountMeta::new_readonly(nft_ata, false),                // key_nft_ata
             AccountMeta::new_readonly(*key_auth_pda, false),          // key_auth
             AccountMeta::new(*position_pda, false),                   // position
+            AccountMeta::new_readonly(mc_pda, false),                 // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false), // system_program
             AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
             AccountMeta::new(pp_pda, false),                          // personal_position
@@ -312,14 +366,14 @@ fn ix_buy(
             AccountMeta::new(nav_sol_ata, false),                     // user_nav_sol_ata
             AccountMeta::new(wsol_ata, false),                        // user_wsol_ata
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),       // tenant
-            AccountMeta::new_readonly(MARKET_GROUP, false),           // market_group
-            AccountMeta::new_readonly(MARKET_META, false),            // market_meta
-            AccountMeta::new(MAYFLOWER_MARKET, false),                // mayflower_market
-            AccountMeta::new(NAV_SOL_MINT, false),                    // nav_sol_mint
-            AccountMeta::new(MARKET_BASE_VAULT, false),               // market_base_vault
-            AccountMeta::new(MARKET_NAV_VAULT, false),                // market_nav_vault
-            AccountMeta::new(FEE_VAULT, false),                       // fee_vault
-            AccountMeta::new_readonly(WSOL_MINT, false),              // wsol_mint
+            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),   // market_group
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),    // market_meta
+            AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),        // mayflower_market
+            AccountMeta::new(DEFAULT_NAV_SOL_MINT, false),            // nav_sol_mint
+            AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),       // market_base_vault
+            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),        // market_nav_vault
+            AccountMeta::new(DEFAULT_FEE_VAULT, false),               // fee_vault
+            AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),      // wsol_mint
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),   // mayflower_program
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),           // token_program
             AccountMeta::new(log_pda, false),                         // log_account
@@ -337,6 +391,7 @@ fn ix_withdraw(
 ) -> Instruction {
     let nft_ata = get_ata(admin, nft_mint);
     let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("withdraw");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -349,21 +404,22 @@ fn ix_withdraw(
             AccountMeta::new_readonly(nft_ata, false),
             AccountMeta::new_readonly(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
-            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(program_pda, false),
             AccountMeta::new(pp_pda, false),
             AccountMeta::new(escrow_pda, false),
             AccountMeta::new(nav_sol_ata, false),
             AccountMeta::new(wsol_ata, false),
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(MARKET_GROUP, false),
-            AccountMeta::new_readonly(MARKET_META, false),
-            AccountMeta::new(MAYFLOWER_MARKET, false),
-            AccountMeta::new(NAV_SOL_MINT, false),
-            AccountMeta::new(MARKET_BASE_VAULT, false),
-            AccountMeta::new(MARKET_NAV_VAULT, false),
-            AccountMeta::new(FEE_VAULT, false),
-            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
+            AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),
+            AccountMeta::new(DEFAULT_NAV_SOL_MINT, false),
+            AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),
+            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),
+            AccountMeta::new(DEFAULT_FEE_VAULT, false),
+            AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new(log_pda, false),
@@ -381,6 +437,7 @@ fn ix_borrow(
 ) -> Instruction {
     let nft_ata = get_ata(admin, nft_mint);
     let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs(admin_nft_mint);
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("borrow");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -393,18 +450,19 @@ fn ix_borrow(
             AccountMeta::new_readonly(nft_ata, false),
             AccountMeta::new_readonly(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
-            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(program_pda, false),
             AccountMeta::new(pp_pda, false),
             AccountMeta::new(wsol_ata, false),              // user_base_token_ata
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(MARKET_GROUP, false),
-            AccountMeta::new_readonly(MARKET_META, false),
-            AccountMeta::new(MARKET_BASE_VAULT, false),
-            AccountMeta::new(MARKET_NAV_VAULT, false),
-            AccountMeta::new(FEE_VAULT, false),
-            AccountMeta::new_readonly(WSOL_MINT, false),
-            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
+            AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),
+            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),
+            AccountMeta::new(DEFAULT_FEE_VAULT, false),
+            AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),
+            AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new(log_pda, false),
@@ -422,6 +480,7 @@ fn ix_repay(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (program_pda, pp_pda, _escrow_pda, log_pda, wsol_ata, _nav_sol_ata) = mayflower_addrs(admin_nft_mint);
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("repay");
     data.extend_from_slice(&amount.to_le_bytes());
@@ -434,18 +493,19 @@ fn ix_repay(
             AccountMeta::new_readonly(nft_ata, false),
             AccountMeta::new_readonly(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
-            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(program_pda, false),
             AccountMeta::new(pp_pda, false),
             AccountMeta::new(wsol_ata, false),              // user_base_token_ata
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(MARKET_GROUP, false),
-            AccountMeta::new_readonly(MARKET_META, false),
-            AccountMeta::new(MARKET_BASE_VAULT, false),
-            AccountMeta::new(MARKET_NAV_VAULT, false),
-            AccountMeta::new(FEE_VAULT, false),
-            AccountMeta::new_readonly(WSOL_MINT, false),
-            AccountMeta::new(MAYFLOWER_MARKET, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
+            AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),
+            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),
+            AccountMeta::new(DEFAULT_FEE_VAULT, false),
+            AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),
+            AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new(log_pda, false),
@@ -462,6 +522,7 @@ fn ix_reinvest(
 ) -> Instruction {
     let nft_ata = get_ata(signer, nft_mint);
     let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
     let data = sighash("reinvest");
 
@@ -473,22 +534,23 @@ fn ix_reinvest(
             AccountMeta::new_readonly(nft_ata, false),
             AccountMeta::new_readonly(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
-            AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
+            AccountMeta::new(program_pda, false),
             AccountMeta::new(pp_pda, false),                          // personal_position
             AccountMeta::new(escrow_pda, false),                      // user_shares
             AccountMeta::new(nav_sol_ata, false),                     // user_nav_sol_ata
             AccountMeta::new(wsol_ata, false),                        // user_wsol_ata
             AccountMeta::new(wsol_ata, false),                        // user_base_token_ata (same)
             AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(MARKET_GROUP, false),
-            AccountMeta::new_readonly(MARKET_META, false),
-            AccountMeta::new(MAYFLOWER_MARKET, false),
-            AccountMeta::new(NAV_SOL_MINT, false),
-            AccountMeta::new(MARKET_BASE_VAULT, false),
-            AccountMeta::new(MARKET_NAV_VAULT, false),
-            AccountMeta::new(FEE_VAULT, false),
-            AccountMeta::new_readonly(WSOL_MINT, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
+            AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),
+            AccountMeta::new(DEFAULT_NAV_SOL_MINT, false),
+            AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),
+            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),
+            AccountMeta::new(DEFAULT_FEE_VAULT, false),
+            AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new(log_pda, false),
@@ -521,7 +583,12 @@ fn read_key_auth(svm: &LiteSVM, pda: &Pubkey) -> KeyAuthorization {
     KeyAuthorization::try_deserialize(&mut account.data.as_slice()).unwrap()
 }
 
-/// Full setup: init protocol + create position + authorize operator/depositor/keeper.
+fn read_market_config(svm: &LiteSVM, pda: &Pubkey) -> MarketConfig {
+    let account = svm.get_account(pda).unwrap();
+    MarketConfig::try_deserialize(&mut account.data.as_slice()).unwrap()
+}
+
+/// Full setup: init protocol + create market config + create position + authorize operator/depositor/keeper.
 /// Also plants Mayflower position stubs for CPI.
 struct TestHarness {
     admin: Keypair,
@@ -552,6 +619,9 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
     // Init protocol
     send_tx(svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
 
+    // Create MarketConfig for default navSOL market
+    send_tx(svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
     // Create position
     let admin_nft_mint = Keypair::new();
     send_tx(
@@ -570,6 +640,9 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
 
     // Plant Mayflower position stubs (personal_position, escrow, ATAs)
     plant_position_stubs(svm, &admin_nft_mint.pubkey());
+
+    // Patch PositionNFT to set market_config and position_pda (simulates init_mayflower_position)
+    patch_position_for_cpi(svm, &admin_nft_mint.pubkey());
 
     // Authorize operator
     let operator = Keypair::new();
@@ -651,6 +724,38 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
         keeper_key_auth: keep_ka,
         outsider,
     }
+}
+
+// ===========================================================================
+// MarketConfig tests
+// ===========================================================================
+
+#[test]
+fn test_create_market_config() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    let mc = read_market_config(&svm, &mc_pda);
+    assert_eq!(mc.nav_mint, DEFAULT_NAV_SOL_MINT);
+    assert_eq!(mc.base_mint, DEFAULT_WSOL_MINT);
+    assert_eq!(mc.market_group, DEFAULT_MARKET_GROUP);
+    assert_eq!(mc.market_meta, DEFAULT_MARKET_META);
+    assert_eq!(mc.mayflower_market, DEFAULT_MAYFLOWER_MARKET);
+    assert_eq!(mc.market_base_vault, DEFAULT_MARKET_BASE_VAULT);
+    assert_eq!(mc.market_nav_vault, DEFAULT_MARKET_NAV_VAULT);
+    assert_eq!(mc.fee_vault, DEFAULT_FEE_VAULT);
+}
+
+#[test]
+fn test_create_market_config_non_admin_denied() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let non_admin = Keypair::new();
+    svm.airdrop(&non_admin.pubkey(), 5_000_000_000).unwrap();
+    assert!(send_tx(&mut svm, &[ix_create_market_config(&non_admin.pubkey())], &[&non_admin]).is_err());
 }
 
 // ===========================================================================
@@ -833,13 +938,11 @@ fn test_borrow_keeper_denied() {
 fn test_repay_admin_ok() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    // Borrow first
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
-    // Repay
     let ix = ix_repay(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
@@ -1084,6 +1187,7 @@ fn test_create_position_and_admin_nft() {
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
     assert_eq!(pos.protocol_debt, 0);
+    assert_eq!(pos.market_config, Pubkey::default());
 
     // Check admin key auth
     let (ka_pda, _) = key_auth_pda(&pos_pda, &mint_kp.pubkey());
@@ -1142,7 +1246,6 @@ fn test_multiple_keys_per_position() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    // We already have 4 keys (admin + operator + depositor + keeper).
     let admin_ka = read_key_auth(&svm, &h.admin_key_auth);
     assert_eq!(admin_ka.role, KeyRole::Admin);
 
@@ -1155,7 +1258,6 @@ fn test_multiple_keys_per_position() {
     let keep_ka = read_key_auth(&svm, &h.keeper_key_auth);
     assert_eq!(keep_ka.role, KeyRole::Keeper);
 
-    // All point to the same position
     assert_eq!(op_ka.position, h.position_pda);
     assert_eq!(dep_ka.position, h.position_pda);
     assert_eq!(keep_ka.position, h.position_pda);
@@ -1196,13 +1298,11 @@ fn test_buy_zero_rejected() {
 fn test_withdraw_more_than_deposited_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    // Buy 1 SOL
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
-    // Try to withdraw 2 SOL
     let ix = ix_withdraw(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 2_000_000_000,
@@ -1214,13 +1314,11 @@ fn test_withdraw_more_than_deposited_rejected() {
 fn test_repay_more_than_debt_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
-    // Borrow 1 SOL
     let borrow_ix = ix_borrow(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
     );
     send_tx(&mut svm, &[borrow_ix], &[&h.admin]).unwrap();
-    // Try to repay 2 SOL
     let ix = ix_repay(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 2_000_000_000,
@@ -1232,14 +1330,11 @@ fn test_repay_more_than_debt_rejected() {
 // #18: Theft recovery scenario tests
 // ===========================================================================
 
-/// Scenario: Operator key NFT is stolen (transferred to attacker).
-/// Admin revokes the stolen key, re-issues a new one to the legitimate operator.
 #[test]
 fn test_theft_recovery_operator_key_stolen() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    // Step 1: Admin revokes the compromised operator key
     let ix = ix_revoke_key(
         &h.admin.pubkey(),
         &h.admin_nft_mint.pubkey(),
@@ -1248,18 +1343,14 @@ fn test_theft_recovery_operator_key_stolen() {
         &h.operator_key_auth,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
-
-    // The key auth is now closed
     assert!(svm.get_account(&h.operator_key_auth).is_none());
 
-    // Step 2: The old operator key can no longer be used
     let buy_ix = ix_buy(
         &h.operator.pubkey(), &h.operator_nft_mint,
         &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[buy_ix], &[&h.operator]).is_err());
 
-    // Step 3: Admin re-issues a new key to the same operator wallet
     let new_op_mint = Keypair::new();
     let ix = ix_authorize_key(
         &h.admin.pubkey(),
@@ -1268,11 +1359,10 @@ fn test_theft_recovery_operator_key_stolen() {
         &h.admin_key_auth,
         &new_op_mint.pubkey(),
         &h.operator.pubkey(),
-        1, // Operator
+        1,
     );
     send_tx(&mut svm, &[ix], &[&h.admin, &new_op_mint]).unwrap();
 
-    // Step 4: The new key works
     let (new_op_ka, _) = key_auth_pda(&h.position_pda, &new_op_mint.pubkey());
     let buy_ix = ix_buy(
         &h.operator.pubkey(), &new_op_mint.pubkey(),
@@ -1284,13 +1374,11 @@ fn test_theft_recovery_operator_key_stolen() {
     assert_eq!(pos.deposited_nav, 100_000);
 }
 
-/// Scenario: Multiple keys stolen at once — admin revokes all, re-issues fresh set.
 #[test]
 fn test_theft_recovery_mass_revoke_and_reissue() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    // Revoke all non-admin keys
     for ka_pda in [
         h.operator_key_auth,
         h.depositor_key_auth,
@@ -1306,19 +1394,16 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
         send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     }
 
-    // All key auths closed
     assert!(svm.get_account(&h.operator_key_auth).is_none());
     assert!(svm.get_account(&h.depositor_key_auth).is_none());
     assert!(svm.get_account(&h.keeper_key_auth).is_none());
 
-    // Admin key still works
     let buy_ix = ix_buy(
         &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 500_000,
     );
     send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
 
-    // Re-issue fresh key to new operator wallet
     let new_operator = Keypair::new();
     svm.airdrop(&new_operator.pubkey(), 5_000_000_000).unwrap();
     let new_op_mint = Keypair::new();
@@ -1337,7 +1422,6 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
     )
     .unwrap();
 
-    // New operator can act
     let (new_op_ka, _) = key_auth_pda(&h.position_pda, &new_op_mint.pubkey());
     let buy_ix = ix_buy(
         &new_operator.pubkey(), &new_op_mint.pubkey(),
@@ -1346,10 +1430,9 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
     send_tx(&mut svm, &[buy_ix], &[&new_operator]).unwrap();
 
     let pos = read_position(&svm, &h.position_pda);
-    assert_eq!(pos.deposited_nav, 700_000); // 500k + 200k
+    assert_eq!(pos.deposited_nav, 700_000);
 }
 
-/// Scenario: Attacker has a random keypair and tries to use someone else's key auth.
 #[test]
 fn test_attacker_cannot_use_others_key_auth() {
     let (mut svm, _) = setup();
@@ -1365,7 +1448,6 @@ fn test_attacker_cannot_use_others_key_auth() {
     assert!(send_tx(&mut svm, &[ix], &[&attacker]).is_err());
 }
 
-/// Scenario: Depositor tries to escalate privileges by passing admin's key auth.
 #[test]
 fn test_privilege_escalation_denied() {
     let (mut svm, _) = setup();

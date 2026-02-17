@@ -1,14 +1,13 @@
 import {
-  MAYFLOWER_MARKET,
   PP_DEPOSITED_SHARES_OFFSET,
   PP_DEBT_OFFSET,
   MARKET_FLOOR_PRICE_OFFSET,
   getAta,
-  NAV_SOL_MINT,
-  WSOL_MINT,
+  DEFAULT_NAV_SOL_MINT,
+  DEFAULT_WSOL_MINT,
+  DEFAULT_MAYFLOWER_MARKET,
   deriveProgramPda,
   derivePersonalPosition,
-  derivePersonalPositionEscrow,
 } from './constants.js';
 import {
   mayflowerInitialized,
@@ -21,6 +20,7 @@ import {
   mfBorrowCapacity,
   pushLog,
   position,
+  marketConfig,
 } from './state.js';
 
 // Read u64 LE from buffer at offset
@@ -69,17 +69,23 @@ export async function refreshMayflowerState(connection) {
 
   if (!mayflowerInitialized.value) return;
 
+  const mc = marketConfig.value;
+  const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
+  const navMint = mc ? mc.navMint : DEFAULT_NAV_SOL_MINT;
+  const marketMeta = mc ? mc.marketMeta : undefined;
+  const mfMarket = mc ? mc.mayflowerMarket : DEFAULT_MAYFLOWER_MARKET;
+
   const [programPda] = deriveProgramPda(position.value.adminNftMint);
-  const [ppPda] = derivePersonalPosition(programPda);
-  const wsolAta = getAta(programPda, WSOL_MINT);
-  const navAta = getAta(programPda, NAV_SOL_MINT);
+  const [ppPda] = derivePersonalPosition(programPda, marketMeta);
+  const wsolAta = getAta(programPda, baseMint);
+  const navAta = getAta(programPda, navMint);
 
   // Batch fetch all accounts
   const infos = await connection.getMultipleAccountsInfo([
     wsolAta,
     navAta,
     ppPda,
-    MAYFLOWER_MARKET,
+    mfMarket,
   ]);
 
   const [wsolInfo, navInfo, ppInfo, marketInfo] = infos;

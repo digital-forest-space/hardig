@@ -3,17 +3,19 @@ import { PublicKey } from '@solana/web3.js';
 
 export const PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
 
-// Mayflower
+// Mayflower (protocol-global)
 export const MAYFLOWER_PROGRAM_ID = new PublicKey('AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v');
 export const MAYFLOWER_TENANT = new PublicKey('81JEJdJSZbaXixpD8WQSBWBfkDa6m6KpXpSErzYUHq6z');
-export const MARKET_GROUP = new PublicKey('Lmdgb4NE4T3ubmQZQZQZ7t4UP6A98NdVbmZPcoEdkdC');
-export const MARKET_META = new PublicKey('DotD4dZAyr4Kb6AD3RHid8VgmsHUzWF6LRd4WvAMezRj');
-export const MAYFLOWER_MARKET = new PublicKey('A5M1nWfi6ATSamEJ1ASr2FC87BMwijthTbNRYG7BhYSc');
-export const MARKET_BASE_VAULT = new PublicKey('43vPhZeow3pgYa6zrPXASVQhdXTMfowyfNK87BYizhnL');
-export const MARKET_NAV_VAULT = new PublicKey('BCYzijbWwmqRnsTWjGhHbneST2emQY36WcRAkbkhsQMt');
-export const FEE_VAULT = new PublicKey('B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf');
-export const NAV_SOL_MINT = new PublicKey('navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo');
-export const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+
+// Default market addresses (navSOL market) — used as fallbacks and for initial MarketConfig creation
+export const DEFAULT_MARKET_GROUP = new PublicKey('Lmdgb4NE4T3ubmQZQZQZ7t4UP6A98NdVbmZPcoEdkdC');
+export const DEFAULT_MARKET_META = new PublicKey('DotD4dZAyr4Kb6AD3RHid8VgmsHUzWF6LRd4WvAMezRj');
+export const DEFAULT_MAYFLOWER_MARKET = new PublicKey('A5M1nWfi6ATSamEJ1ASr2FC87BMwijthTbNRYG7BhYSc');
+export const DEFAULT_MARKET_BASE_VAULT = new PublicKey('43vPhZeow3pgYa6zrPXASVQhdXTMfowyfNK87BYizhnL');
+export const DEFAULT_MARKET_NAV_VAULT = new PublicKey('BCYzijbWwmqRnsTWjGhHbneST2emQY36WcRAkbkhsQMt');
+export const DEFAULT_FEE_VAULT = new PublicKey('B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf');
+export const DEFAULT_NAV_SOL_MINT = new PublicKey('navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo');
+export const DEFAULT_WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ATA_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
@@ -61,10 +63,18 @@ export function deriveKeyAuthPda(positionPda, keyNftMint) {
   );
 }
 
-// Derive Mayflower PersonalPosition PDA
-export function derivePersonalPosition(programPda) {
+// Derive MarketConfig PDA
+export function deriveMarketConfigPda(navMint) {
   return PublicKey.findProgramAddressSync(
-    [PERSONAL_POSITION_SEED, MARKET_META.toBuffer(), programPda.toBuffer()],
+    [Buffer.from('market_config'), navMint.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+// Derive Mayflower PersonalPosition PDA
+export function derivePersonalPosition(programPda, marketMeta = DEFAULT_MARKET_META) {
+  return PublicKey.findProgramAddressSync(
+    [PERSONAL_POSITION_SEED, marketMeta.toBuffer(), programPda.toBuffer()],
     MAYFLOWER_PROGRAM_ID
   );
 }

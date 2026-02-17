@@ -18,6 +18,10 @@ export const myKeyAuthPda = signal(null);
 export const myNftMint = signal(null);
 export const keyring = signal([]);
 
+// Market config (loaded from position's market_config PDA)
+export const marketConfigPda = signal(null);
+export const marketConfig = signal(null);
+
 // Mayflower state
 export const mayflowerInitialized = signal(false);
 export const atasExist = signal(false);
@@ -110,6 +114,8 @@ export function resetPositionState() {
   myKeyAuthPda.value = null;
   myNftMint.value = null;
   keyring.value = [];
+  marketConfigPda.value = null;
+  marketConfig.value = null;
   mayflowerInitialized.value = false;
   atasExist.value = false;
   wsolBalance.value = 0;

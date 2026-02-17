@@ -188,7 +188,7 @@
         {
           "name": "program_pda",
           "docs": [
-            "Program PDA used as mint authority."
+            "Per-position authority PDA used as mint authority."
           ],
           "pda": {
             "seeds": [
@@ -205,6 +205,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -270,6 +275,12 @@
           "writable": true
         },
         {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for this position's market."
+          ]
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -294,6 +305,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -397,6 +413,12 @@
           "writable": true
         },
         {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for this position's market."
+          ]
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -422,6 +444,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -535,6 +562,118 @@
         {
           "name": "amount",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_market_config",
+      "docs": [
+        "Create a MarketConfig PDA for a Mayflower market (protocol admin only)."
+      ],
+      "discriminator": [
+        33,
+        94,
+        138,
+        19,
+        111,
+        112,
+        91,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The global protocol config — used to verify the signer is the protocol admin."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "nav_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nav_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "base_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_group",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_meta",
+          "type": "pubkey"
+        },
+        {
+          "name": "mayflower_market",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_base_vault",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_nav_vault",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_vault",
+          "type": "pubkey"
         }
       ]
     },
@@ -723,7 +862,7 @@
         {
           "name": "program_pda",
           "docs": [
-            "Program PDA used as mint authority."
+            "Per-position authority PDA used as mint authority."
           ],
           "pda": {
             "seeds": [
@@ -740,6 +879,10 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "admin_nft_mint"
               }
             ]
           }
@@ -801,9 +944,15 @@
         {
           "name": "position",
           "docs": [
-            "The position (mutated to store Mayflower PersonalPosition PDA)."
+            "The position (mutated to store Mayflower PersonalPosition PDA and MarketConfig)."
           ],
           "writable": true
+        },
+        {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for the target market."
+          ]
         },
         {
           "name": "program_pda",
@@ -825,6 +974,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -967,6 +1121,12 @@
           "writable": true
         },
         {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for this position's market."
+          ]
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -991,6 +1151,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -1109,6 +1274,12 @@
           "writable": true
         },
         {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for this position's market."
+          ]
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -1133,6 +1304,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -1289,6 +1465,12 @@
           "writable": true
         },
         {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for this position's market."
+          ]
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -1313,6 +1495,11 @@
                   116,
                   121
                 ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_nft_mint",
+                "account": "PositionNFT"
               }
             ]
           }
@@ -1397,6 +1584,19 @@
         86,
         61,
         163
+      ]
+    },
+    {
+      "name": "MarketConfig",
+      "discriminator": [
+        119,
+        255,
+        200,
+        88,
+        252,
+        82,
+        128,
+        24
       ]
     },
     {
@@ -1585,6 +1785,81 @@
       }
     },
     {
+      "name": "MarketConfig",
+      "docs": [
+        "On-chain configuration for a Mayflower market.",
+        "PDA seeds = [b\"market_config\", nav_mint]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nav_mint",
+            "docs": [
+              "The nav token mint (e.g. navSOL) — also the PDA seed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "base_mint",
+            "docs": [
+              "The base mint (e.g. wSOL) — included for markets with non-SOL base."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "market_group",
+            "docs": [
+              "Mayflower market group account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "market_meta",
+            "docs": [
+              "Mayflower market metadata account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "mayflower_market",
+            "docs": [
+              "Mayflower market account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "market_base_vault",
+            "docs": [
+              "Mayflower market base vault."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "market_nav_vault",
+            "docs": [
+              "Mayflower market nav vault."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_vault",
+            "docs": [
+              "Mayflower fee vault."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for the MarketConfig PDA."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "PositionNFT",
       "docs": [
         "A navSOL position controlled by an NFT keyring.",
@@ -1604,6 +1879,13 @@
             "name": "position_pda",
             "docs": [
               "The Mayflower PersonalPosition PDA owned by this program."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "market_config",
+            "docs": [
+              "The MarketConfig PDA this position is bound to (set during init_mayflower_position)."
             ],
             "type": "pubkey"
           },
@@ -1647,6 +1929,13 @@
             "name": "bump",
             "docs": [
               "Bump seed for the position PDA."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "authority_bump",
+            "docs": [
+              "Bump seed for the per-position authority PDA (seeds = [b\"authority\", admin_nft_mint])."
             ],
             "type": "u8"
           }

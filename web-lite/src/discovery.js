@@ -4,6 +4,8 @@ import {
   KEY_AUTH_SIZE,
   getAta,
   derivePositionPda,
+  deriveMarketConfigPda,
+  DEFAULT_NAV_SOL_MINT,
 } from './constants.js';
 import {
   positionPda,
@@ -14,6 +16,8 @@ import {
   keyring,
   protocolExists,
   mayflowerInitialized,
+  marketConfigPda,
+  marketConfig,
   pushLog,
   resetPositionState,
 } from './state.js';
@@ -118,21 +122,24 @@ export async function discoverPosition(connection, wallet) {
     const posInfo = await connection.getAccountInfo(bestPos);
     if (posInfo) {
       const data = posInfo.data;
-      // Parse PositionNFT: discriminator(8) + admin_nft_mint(32) + position_pda(32) + deposited_nav(8)
-      // + user_debt(8) + protocol_debt(8) + max_reinvest_spread_bps(2) + last_admin_activity(8) + bump(1)
+      // Parse PositionNFT: discriminator(8) + admin_nft_mint(32) + position_pda(32) + market_config(32)
+      // + deposited_nav(8) + user_debt(8) + protocol_debt(8) + max_reinvest_spread_bps(2)
+      // + last_admin_activity(8) + bump(1) + authority_bump(1)
       const view = new DataView(data.buffer, data.byteOffset);
       const adminNftMint = new PublicKey(data.slice(8, 40));
       const mfPositionPda = new PublicKey(data.slice(40, 72));
-      const depositedNav = Number(view.getBigUint64(72, true));
-      const userDebt = Number(view.getBigUint64(80, true));
-      const protocolDebt = Number(view.getBigUint64(88, true));
-      // bytes 96-97: max_reinvest_spread_bps (unused, skip)
-      const lastAdminActivity = Number(view.getBigInt64(98, true));
-      const bump = data[106];
+      const mcPda = new PublicKey(data.slice(72, 104));
+      const depositedNav = Number(view.getBigUint64(104, true));
+      const userDebt = Number(view.getBigUint64(112, true));
+      const protocolDebt = Number(view.getBigUint64(120, true));
+      // bytes 128-129: max_reinvest_spread_bps (unused, skip)
+      const lastAdminActivity = Number(view.getBigInt64(130, true));
+      const bump = data[138];
 
       const posData = {
         adminNftMint,
         positionPda: mfPositionPda,
+        marketConfig: mcPda,
         depositedNav,
         userDebt,
         protocolDebt,
@@ -143,6 +150,30 @@ export async function discoverPosition(connection, wallet) {
       position.value = posData;
       mayflowerInitialized.value =
         !mfPositionPda.equals(PublicKey.default);
+
+      // Fetch MarketConfig: from position if set, otherwise try default
+      const mcToFetch = !mcPda.equals(PublicKey.default)
+        ? mcPda
+        : deriveMarketConfigPda(DEFAULT_NAV_SOL_MINT)[0];
+      try {
+        const mcInfo = await connection.getAccountInfo(mcToFetch);
+        if (mcInfo && mcInfo.data.length >= 265) {
+          const mcData = mcInfo.data;
+          marketConfigPda.value = mcToFetch;
+          marketConfig.value = {
+            navMint: new PublicKey(mcData.slice(8, 40)),
+            baseMint: new PublicKey(mcData.slice(40, 72)),
+            marketGroup: new PublicKey(mcData.slice(72, 104)),
+            marketMeta: new PublicKey(mcData.slice(104, 136)),
+            mayflowerMarket: new PublicKey(mcData.slice(136, 168)),
+            marketBaseVault: new PublicKey(mcData.slice(168, 200)),
+            marketNavVault: new PublicKey(mcData.slice(200, 232)),
+            feeVault: new PublicKey(mcData.slice(232, 264)),
+          };
+        }
+      } catch (e) {
+        pushLog('Failed to load MarketConfig: ' + e.message);
+      }
     }
   } catch (e) {
     pushLog('Failed to load position: ' + e.message);
