@@ -1,5 +1,7 @@
 # Härdig
 
+*Swedish — hardy, resilient; able to endure difficult conditions.*
+
 Solana program implementing an NFT keyring model for managing navSOL positions on the Mayflower protocol.
 
 Each position is controlled by a set of NFT keys with different permission levels (Admin, Operator, Depositor, Keeper). Keys are standard SPL tokens held in wallets — transfer the NFT and you transfer the permission.

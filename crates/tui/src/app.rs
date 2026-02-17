@@ -62,7 +62,6 @@ pub enum Screen {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
-    CreatePosition,
     AuthorizeKey,
     RevokeKey,
     Buy,
@@ -263,7 +262,7 @@ impl App {
             KeyCode::Char('I') if !self.protocol_exists => self.build_init_protocol(),
 
             KeyCode::Char('n') if self.position_pda.is_none() && self.protocol_exists => {
-                self.enter_create_position()
+                self.build_create_position()
             }
 
             // One-time Mayflower setup (admin only)
@@ -408,14 +407,6 @@ impl App {
     // Form entry points
     // -----------------------------------------------------------------------
 
-    fn enter_create_position(&mut self) {
-        self.screen = Screen::Form;
-        self.form_kind = Some(FormKind::CreatePosition);
-        self.form_fields = vec![];
-        self.input_field = 0;
-        self.input_buf.clear();
-    }
-
     fn enter_authorize_key(&mut self) {
         self.screen = Screen::Form;
         self.form_kind = Some(FormKind::AuthorizeKey);
@@ -500,7 +491,6 @@ impl App {
 
     fn submit_form(&mut self) {
         match self.form_kind {
-            Some(FormKind::CreatePosition) => self.build_create_position(),
             Some(FormKind::AuthorizeKey) => self.build_authorize_key(),
             Some(FormKind::RevokeKey) => self.build_revoke_key(),
             Some(FormKind::Buy) => self.build_buy(),

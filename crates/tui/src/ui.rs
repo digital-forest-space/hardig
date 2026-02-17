@@ -262,7 +262,6 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     let title = match app.form_kind {
-        Some(FormKind::CreatePosition) => " Create Position ",
         Some(FormKind::AuthorizeKey) => " Authorize Key ",
         Some(FormKind::RevokeKey) => " Revoke Key ",
         Some(FormKind::Buy) => " Buy navSOL ",

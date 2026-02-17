@@ -127,7 +127,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
   }
 
   // Auto-submit for no-form actions (useEffect, not during render)
-  const noFormActions = ['initProtocol', 'reinvest', 'setup'];
+  const noFormActions = ['initProtocol', 'createPosition', 'reinvest', 'setup'];
   useEffect(() => {
     if (noFormActions.includes(action) && !didAutoSubmit.current) {
       didAutoSubmit.current = true;
