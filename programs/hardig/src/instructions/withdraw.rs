@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::associated_token::get_associated_token_address;
 use anchor_spl::token::{Token, TokenAccount};
@@ -253,6 +254,26 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     };
     let sol_received = wsol_after.saturating_sub(wsol_before);
     require!(sol_received >= min_out, HardigError::SlippageExceeded);
+
+    // Close PDA's wSOL ATA — returns all wSOL + rent as native SOL to admin
+    let close_ix = Instruction {
+        program_id: anchor_spl::token::ID,
+        accounts: vec![
+            AccountMeta::new(ctx.accounts.user_wsol_ata.key(), false),
+            AccountMeta::new(ctx.accounts.admin.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
+        ],
+        data: vec![9], // SPL Token CloseAccount
+    };
+    invoke_signed(
+        &close_ix,
+        &[
+            ctx.accounts.user_wsol_ata.to_account_info(),
+            ctx.accounts.admin.to_account_info(),
+            ctx.accounts.program_pda.to_account_info(),
+        ],
+        signer_seeds,
+    )?;
 
     ctx.accounts.position.deposited_nav = ctx
         .accounts

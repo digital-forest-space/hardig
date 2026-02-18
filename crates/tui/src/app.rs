@@ -49,6 +49,22 @@ fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
     .0
 }
 
+fn create_ata_idempotent_ix(payer: &Pubkey, wallet: &Pubkey, mint: &Pubkey) -> Instruction {
+    let ata = get_ata(wallet, mint);
+    Instruction::new_with_bytes(
+        ATA_PROGRAM_ID,
+        &[1], // CreateIdempotent
+        vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(ata, false),
+            AccountMeta::new_readonly(*wallet, false),
+            AccountMeta::new_readonly(*mint, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+        ],
+    )
+}
+
 fn metadata_pda(mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref()],
@@ -1085,7 +1101,14 @@ impl App {
             AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
-        // Prepend wrap: transfer SOL → wSOL ATA, then sync_native
+        // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell)
+        let create_ata_ix = create_ata_idempotent_ix(
+            &self.keypair.pubkey(),
+            &self.program_pda,
+            &mc.base_mint,
+        );
+
+        // Wrap SOL → wSOL ATA, then sync_native
         let transfer_ix = solana_sdk::system_instruction::transfer(
             &self.keypair.pubkey(),
             &self.wsol_ata,
@@ -1106,7 +1129,7 @@ impl App {
                     permissions_name(self.my_permissions.unwrap_or(0))
                 ),
             ],
-            instructions: vec![transfer_ix, sync_ix, buy_ix],
+            instructions: vec![create_ata_ix, transfer_ix, sync_ix, buy_ix],
             extra_signers: vec![],
         });
     }
@@ -1163,16 +1186,23 @@ impl App {
             AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
-        // Sell CPI uses ~170K CUs inside Mayflower — needs extra compute
+        // Sell CPI uses ~170K CUs inside Mayflower + close_account — needs extra compute
         let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+
+        // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell)
+        let create_ata_ix = create_ata_idempotent_ix(
+            &self.keypair.pubkey(),
+            &self.program_pda,
+            &mc.base_mint,
+        );
 
         self.goto_confirm(PendingAction {
             description: vec![
                 "Sell navSOL".into(),
-                format!("Amount: {} SOL", lamports_to_sol(amount)),
+                format!("Amount: {} navSOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
             ],
-            instructions: vec![compute_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            instructions: vec![compute_ix, create_ata_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
         });
     }
@@ -1225,13 +1255,20 @@ impl App {
             AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
+        // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell/borrow)
+        let create_ata_ix = create_ata_idempotent_ix(
+            &self.keypair.pubkey(),
+            &self.program_pda,
+            &mc.base_mint,
+        );
+
         self.goto_confirm(PendingAction {
             description: vec![
                 "Borrow".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
             ],
-            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            instructions: vec![create_ata_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
         });
     }
@@ -1280,7 +1317,14 @@ impl App {
             AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
-        // Prepend wrap: transfer SOL → PDA's wSOL ATA, then sync_native
+        // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell/borrow)
+        let create_ata_ix = create_ata_idempotent_ix(
+            &self.keypair.pubkey(),
+            &self.program_pda,
+            &mc.base_mint,
+        );
+
+        // Wrap SOL → PDA's wSOL ATA, then sync_native
         let transfer_ix = solana_sdk::system_instruction::transfer(
             &self.keypair.pubkey(),
             &self.wsol_ata,
@@ -1297,7 +1341,7 @@ impl App {
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
             ],
-            instructions: vec![transfer_ix, sync_ix, repay_ix],
+            instructions: vec![create_ata_ix, transfer_ix, sync_ix, repay_ix],
             extra_signers: vec![],
         });
     }
@@ -1350,6 +1394,13 @@ impl App {
         // Reinvest does borrow + buy CPIs in one tx — needs extra compute
         let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
 
+        // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell/borrow)
+        let create_ata_ix = create_ata_idempotent_ix(
+            &self.keypair.pubkey(),
+            &self.program_pda,
+            &mc.base_mint,
+        );
+
         self.goto_confirm(PendingAction {
             description: vec![
                 "Reinvest (CPI)".into(),
@@ -1360,7 +1411,7 @@ impl App {
                 ),
                 "Borrows available capacity and buys more navSOL".into(),
             ],
-            instructions: vec![compute_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            instructions: vec![compute_ix, create_ata_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
         });
     }
@@ -1761,18 +1812,14 @@ pub fn parse_sol_to_lamports(s: &str) -> Option<u64> {
 }
 
 pub fn lamports_to_sol(lamports: u64) -> String {
-    let whole = lamports / 1_000_000_000;
-    let frac = lamports % 1_000_000_000;
     if lamports == 0 {
         "0".to_string()
-    } else if lamports < 1_000_000 {
-        // Sub-milliSOL: show full 9-digit precision, trim trailing zeros
+    } else {
+        let whole = lamports / 1_000_000_000;
+        let frac = lamports % 1_000_000_000;
+        // Full precision, trim trailing zeros — lossless round-trip with parse_sol_to_lamports
         let s = format!("{}.{:09}", whole, frac);
         s.trim_end_matches('0').to_string()
-    } else {
-        // Floor to 4 decimal places (never rounds up, ensures lossless repay)
-        let frac4 = frac / 100_000; // floor to 4 decimals
-        format!("{}.{:04}", whole, frac4)
     }
 }
 

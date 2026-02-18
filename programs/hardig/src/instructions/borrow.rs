@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::associated_token::get_associated_token_address;
 use anchor_spl::token::{Token, TokenAccount};
@@ -182,6 +183,26 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.log_account.to_account_info(),
             ctx.accounts.mayflower_program.to_account_info(),
+        ],
+        signer_seeds,
+    )?;
+
+    // Close PDA's wSOL ATA — returns borrowed wSOL + rent as native SOL to admin
+    let close_ix = Instruction {
+        program_id: anchor_spl::token::ID,
+        accounts: vec![
+            AccountMeta::new(ctx.accounts.user_base_token_ata.key(), false),
+            AccountMeta::new(ctx.accounts.admin.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
+        ],
+        data: vec![9], // SPL Token CloseAccount
+    };
+    invoke_signed(
+        &close_ix,
+        &[
+            ctx.accounts.user_base_token_ata.to_account_info(),
+            ctx.accounts.admin.to_account_info(),
+            ctx.accounts.program_pda.to_account_info(),
         ],
         signer_seeds,
     )?;
