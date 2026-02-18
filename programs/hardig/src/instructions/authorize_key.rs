@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount};
+use anchor_spl::token::spl_token::instruction::AuthorityType;
 
 use crate::errors::HardigError;
 use crate::state::{KeyAuthorization, KeyRole, PositionNFT};
@@ -29,6 +30,7 @@ pub struct AuthorizeKey<'info> {
         payer = admin,
         mint::decimals = 0,
         mint::authority = program_pda,
+        mint::freeze_authority = program_pda,
     )]
     pub new_key_mint: Account<'info, Mint>,
 
@@ -104,6 +106,20 @@ pub fn handler(ctx: Context<AuthorizeKey>, role: u8) -> Result<()> {
             signer_seeds,
         ),
         1,
+    )?;
+
+    // Disable mint authority so no additional tokens can ever be minted
+    token::set_authority(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::SetAuthority {
+                account_or_mint: ctx.accounts.new_key_mint.to_account_info(),
+                current_authority: ctx.accounts.program_pda.to_account_info(),
+            },
+            signer_seeds,
+        ),
+        AuthorityType::MintTokens,
+        None,
     )?;
 
     // Create the KeyAuthorization
