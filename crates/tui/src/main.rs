@@ -5,6 +5,7 @@ use std::io::{self, stdout};
 
 use clap::{Parser, Subcommand};
 use crossterm::{
+
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -42,7 +43,12 @@ enum Action {
     /// Create a new position NFT
     CreatePosition,
     /// One-time setup: init Mayflower position + create ATAs
-    Setup,
+    Setup {
+        /// Nav token mint to use (defaults to navSOL).
+        /// When specified, the MarketConfig for this mint must already exist on-chain.
+        #[arg(long)]
+        nav_mint: Option<String>,
+    },
     /// Buy navSOL with SOL
     Buy {
         /// Amount in SOL
@@ -283,7 +289,7 @@ fn action_to_name(action: &Action) -> String {
         Action::Status => "status".into(),
         Action::InitProtocol => "init-protocol".into(),
         Action::CreatePosition { .. } => "create-position".into(),
-        Action::Setup => "setup".into(),
+        Action::Setup { .. } => "setup".into(),
         Action::Buy { .. } => "buy".into(),
         Action::Sell { .. } => "sell".into(),
         Action::Borrow { .. } => "borrow".into(),
@@ -322,14 +328,29 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             }
             app.build_create_position();
         }
-        Action::Setup => {
+        Action::Setup { ref nav_mint } => {
             if app.cpi_ready() {
                 return Some(CliOutput::Noop {
                     action: "setup".into(),
                     message: "Mayflower position and ATAs already initialized".into(),
                 });
             }
-            app.build_setup();
+            let parsed_mint = match nav_mint {
+                Some(s) => {
+                    use std::str::FromStr;
+                    match solana_sdk::pubkey::Pubkey::from_str(s) {
+                        Ok(pk) => Some(pk),
+                        Err(_) => {
+                            return Some(CliOutput::Error {
+                                action: "setup".into(),
+                                error: format!("Invalid --nav-mint pubkey: {}", s),
+                            });
+                        }
+                    }
+                }
+                None => None,
+            };
+            app.build_setup(parsed_mint);
         }
         Action::Buy { amount } => {
             app.form_fields = vec![("Amount (SOL)".into(), sol_amount_to_field(*amount))];

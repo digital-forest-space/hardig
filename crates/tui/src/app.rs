@@ -269,7 +269,7 @@ impl App {
             KeyCode::Char('S')
                 if self.my_role == Some(KeyRole::Admin) && !self.cpi_ready() =>
             {
-                self.build_setup()
+                self.build_setup(None)
             }
             // Admin actions
             KeyCode::Char('a') if self.my_role == Some(KeyRole::Admin) => {
@@ -699,7 +699,14 @@ impl App {
 
     /// Combined one-time setup: init Mayflower position + create ATAs.
     /// Only includes instructions for steps not yet completed.
-    pub fn build_setup(&mut self) {
+    ///
+    /// When `nav_mint` is `Some(mint)`, use that mint for deriving the
+    /// MarketConfig PDA.  The MarketConfig must already exist on-chain
+    /// (auto-creation only happens for the default navSOL mint).
+    ///
+    /// When `nav_mint` is `None`, keep existing behaviour: use defaults and
+    /// auto-create if needed.
+    pub fn build_setup(&mut self, nav_mint: Option<Pubkey>) {
         let position_pda = match self.position_pda {
             Some(p) => p,
             None => {
@@ -708,10 +715,65 @@ impl App {
             }
         };
 
+        // If a custom nav-mint was supplied, try to load its MarketConfig now
+        // (discover_position only loaded the default or position-stored one).
+        if let Some(custom_mint) = nav_mint {
+            let (custom_mc_pda, _) = Pubkey::find_program_address(
+                &[MarketConfig::SEED, custom_mint.as_ref()],
+                &hardig::ID,
+            );
+            // Only reload if we don't already have this exact MarketConfig
+            if self.market_config_pda != Some(custom_mc_pda) {
+                match self.rpc.get_account(&custom_mc_pda) {
+                    Ok(mc_acc) => {
+                        match MarketConfig::try_deserialize(&mut mc_acc.data.as_slice()) {
+                            Ok(mc) => {
+                                self.market_config_pda = Some(custom_mc_pda);
+                                self.market_config = Some(mc);
+                                // Re-derive Mayflower addresses with the new market config
+                                if self.position.is_some() {
+                                    let mc = self.market_config.as_ref().unwrap();
+                                    let (pp_pda, _) = derive_personal_position(&self.program_pda, &mc.market_meta);
+                                    let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
+                                    self.pp_pda = pp_pda;
+                                    self.escrow_pda = escrow_pda;
+                                    self.wsol_ata = get_ata(&self.program_pda, &mc.base_mint);
+                                    self.nav_sol_ata = get_ata(&self.program_pda, &mc.nav_mint);
+                                    // Re-check whether the Mayflower position is initialized
+                                    self.mayflower_initialized = self.rpc.get_account(&pp_pda).is_ok();
+                                    self.refresh_mayflower_state();
+                                    self.push_log(format!(
+                                        "Using custom nav-mint MarketConfig: {}",
+                                        short_pubkey(&custom_mc_pda),
+                                    ));
+                                }
+                            }
+                            Err(_) => {
+                                self.push_log(format!(
+                                    "MarketConfig at {} exists but failed to deserialize",
+                                    custom_mc_pda,
+                                ));
+                                return;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        self.push_log(format!(
+                            "No MarketConfig found for nav-mint {}. Create it first with create-market-config.",
+                            custom_mint,
+                        ));
+                        return;
+                    }
+                }
+            }
+        }
+
         let mut instructions = Vec::new();
         let mut description = vec!["Setup Mayflower Accounts".into()];
 
-        // Step 0: Create MarketConfig if it doesn't exist on-chain yet
+        // Step 0: Create MarketConfig if it doesn't exist on-chain yet.
+        // Auto-creation only happens when using the default nav-mint (no custom
+        // --nav-mint was provided, or it matches the default).
         let mc_pda = self.market_config_pda.unwrap_or_else(|| {
             Pubkey::find_program_address(
                 &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
@@ -720,6 +782,9 @@ impl App {
             .0
         });
         if self.market_config.is_none() {
+            // When a custom nav-mint is specified the MarketConfig must already
+            // exist — we returned early above if it didn't.  So reaching here
+            // means we are using the default and can auto-create.
             let (config_pda, _) =
                 Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
 
