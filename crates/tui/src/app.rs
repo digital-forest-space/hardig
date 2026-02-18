@@ -15,8 +15,11 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-pub use hardig::state::KeyRole;
-use hardig::state::{KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig};
+use hardig::state::{
+    KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_BUY,
+    PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY, PERM_SELL, PRESET_ADMIN, PRESET_DEPOSITOR,
+    PRESET_KEEPER, PRESET_OPERATOR,
+};
 
 // Mayflower constants and helpers
 use hardig::mayflower::{
@@ -74,7 +77,7 @@ pub enum FormKind {
 pub struct KeyEntry {
     pub pda: Pubkey,
     pub mint: Pubkey,
-    pub role: KeyRole,
+    pub permissions: u8,
     pub held_by_signer: bool,
 }
 
@@ -112,7 +115,7 @@ pub struct App {
     // Position state (single position mode)
     pub position_pda: Option<Pubkey>,
     pub position: Option<PositionNFT>,
-    pub my_role: Option<KeyRole>,
+    pub my_permissions: Option<u8>,
     pub my_key_auth_pda: Option<Pubkey>,
     pub my_nft_mint: Option<Pubkey>,
     pub keyring: Vec<KeyEntry>,
@@ -147,6 +150,10 @@ pub struct App {
     pub input_field: usize,
     pub input_buf: String,
 
+    // Permission checkboxes for authorize_key form
+    pub perm_bits: u8,
+    pub perm_cursor: usize,
+
     // Key cursor for keyring navigation
     pub key_cursor: usize,
 
@@ -175,7 +182,7 @@ impl App {
             protocol_exists: false,
             position_pda: None,
             position: None,
-            my_role: None,
+            my_permissions: None,
             my_key_auth_pda: None,
             my_nft_mint: None,
             keyring: Vec::new(),
@@ -200,6 +207,8 @@ impl App {
             form_fields: Vec::new(),
             input_field: 0,
             input_buf: String::new(),
+            perm_bits: PRESET_OPERATOR,
+            perm_cursor: 0,
             key_cursor: 0,
             pending_action: None,
             pre_tx_snapshot: None,
@@ -267,15 +276,15 @@ impl App {
 
             // One-time Mayflower setup (admin only)
             KeyCode::Char('S')
-                if self.my_role == Some(KeyRole::Admin) && !self.cpi_ready() =>
+                if self.has_perm(PERM_MANAGE_KEYS) && !self.cpi_ready() =>
             {
                 self.build_setup(None)
             }
             // Admin actions
-            KeyCode::Char('a') if self.my_role == Some(KeyRole::Admin) => {
+            KeyCode::Char('a') if self.has_perm(PERM_MANAGE_KEYS) => {
                 self.enter_authorize_key()
             }
-            KeyCode::Char('x') if self.my_role == Some(KeyRole::Admin) => self.enter_revoke_key(),
+            KeyCode::Char('x') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_revoke_key(),
             KeyCode::Char('s') if self.can_sell() => self.enter_sell(),
             KeyCode::Char('d') if self.can_borrow() => self.enter_borrow(),
 
@@ -299,36 +308,28 @@ impl App {
         }
     }
 
+    pub fn has_perm(&self, perm: u8) -> bool {
+        self.my_permissions.map_or(false, |p| p & perm != 0)
+    }
     pub fn cpi_ready(&self) -> bool {
         self.mayflower_initialized && self.atas_exist
     }
     pub fn can_buy(&self) -> bool {
-        self.cpi_ready()
-            && matches!(
-                self.my_role,
-                Some(KeyRole::Admin) | Some(KeyRole::Operator) | Some(KeyRole::Depositor)
-            )
+        self.cpi_ready() && self.has_perm(PERM_BUY)
     }
     pub fn can_sell(&self) -> bool {
-        self.cpi_ready() && self.my_role == Some(KeyRole::Admin)
+        self.cpi_ready() && self.has_perm(PERM_SELL)
     }
     pub fn can_borrow(&self) -> bool {
-        self.cpi_ready() && self.my_role == Some(KeyRole::Admin)
+        self.cpi_ready() && self.has_perm(PERM_BORROW)
     }
     pub fn can_repay(&self) -> bool {
         self.cpi_ready()
             && self.position.as_ref().map(|p| p.user_debt > 0).unwrap_or(false)
-            && matches!(
-                self.my_role,
-                Some(KeyRole::Admin) | Some(KeyRole::Operator) | Some(KeyRole::Depositor)
-            )
+            && self.has_perm(PERM_REPAY)
     }
     pub fn can_reinvest(&self) -> bool {
-        self.cpi_ready()
-            && matches!(
-                self.my_role,
-                Some(KeyRole::Admin) | Some(KeyRole::Operator) | Some(KeyRole::Keeper)
-            )
+        self.cpi_ready() && self.has_perm(PERM_REINVEST)
     }
 
     // -----------------------------------------------------------------------
@@ -336,6 +337,9 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_form(&mut self, key: KeyCode) {
+        let is_perm_field =
+            matches!(self.form_kind, Some(FormKind::AuthorizeKey)) && self.input_field == 1;
+
         match key {
             KeyCode::Esc => {
                 self.screen = Screen::Dashboard;
@@ -354,14 +358,41 @@ impl App {
                 }
                 self.submit_form();
             }
-            KeyCode::Backspace => {
+            KeyCode::Left | KeyCode::Up if is_perm_field => {
+                self.perm_cursor = self.perm_cursor.saturating_sub(1);
+            }
+            KeyCode::Right | KeyCode::Down if is_perm_field => {
+                if self.perm_cursor < 4 {
+                    self.perm_cursor += 1;
+                }
+            }
+            KeyCode::Backspace if !is_perm_field => {
                 self.input_buf.pop();
+            }
+            KeyCode::Char(c) if is_perm_field => {
+                const PERM_ORDER: [u8; 5] =
+                    [PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST];
+                match c {
+                    ' ' => { self.perm_bits ^= PERM_ORDER[self.perm_cursor]; self.sync_perm_field(); }
+                    '1' => { self.perm_bits ^= PERM_BUY; self.sync_perm_field(); }
+                    '2' => { self.perm_bits ^= PERM_SELL; self.sync_perm_field(); }
+                    '3' => { self.perm_bits ^= PERM_BORROW; self.sync_perm_field(); }
+                    '4' => { self.perm_bits ^= PERM_REPAY; self.sync_perm_field(); }
+                    '5' => { self.perm_bits ^= PERM_REINVEST; self.sync_perm_field(); }
+                    _ => {}
+                }
             }
             KeyCode::Char(c) => {
                 self.input_buf.push(c);
             }
             _ => {}
         }
+    }
+
+    fn sync_perm_field(&mut self) {
+        let val = self.perm_bits.to_string();
+        self.form_fields[1].1 = val.clone();
+        self.input_buf = val;
     }
 
     // -----------------------------------------------------------------------
@@ -408,25 +439,26 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn enter_authorize_key(&mut self) {
+        self.perm_bits = PRESET_OPERATOR;
+        self.perm_cursor = 0;
         self.screen = Screen::Form;
         self.form_kind = Some(FormKind::AuthorizeKey);
+        let my_wallet = self.keypair.pubkey().to_string();
         self.form_fields = vec![
-            ("Target Wallet (pubkey)".into(), String::new()),
-            (
-                "Role (1=Operator, 2=Depositor, 3=Keeper)".into(),
-                "1".into(),
-            ),
+            ("Target Wallet (pubkey)".into(), my_wallet.clone()),
+            ("Permissions".into(), PRESET_OPERATOR.to_string()),
         ];
         self.input_field = 0;
-        self.input_buf = self.form_fields[0].1.clone();
+        self.input_buf = my_wallet;
     }
 
     fn enter_revoke_key(&mut self) {
+        let admin_mint = self.position.as_ref().map(|p| p.admin_nft_mint);
         let revocable: Vec<(usize, &KeyEntry)> = self
             .keyring
             .iter()
             .enumerate()
-            .filter(|(_, k)| k.role != KeyRole::Admin)
+            .filter(|(_, k)| Some(k.mint) != admin_mint)
             .collect();
         if revocable.is_empty() {
             self.push_log("No non-admin keys to revoke.");
@@ -440,7 +472,7 @@ impl App {
                 "{}: {} ({})\n",
                 idx,
                 short_pubkey(&k.mint),
-                role_name(k.role)
+                permissions_name(k.permissions)
             ));
         }
         self.form_fields = vec![
@@ -580,15 +612,19 @@ impl App {
                 return;
             }
         };
-        let role_u8: u8 = match self.form_fields[1].1.trim().parse() {
+        let permissions_u8: u8 = match self.form_fields[1].1.trim().parse() {
             Ok(v) => v,
             Err(_) => {
-                self.push_log("Invalid role");
+                self.push_log("Invalid permissions");
                 return;
             }
         };
-        if role_u8 == 0 {
-            self.push_log("Cannot create a second admin key");
+        if permissions_u8 == 0 {
+            self.push_log("Permissions cannot be zero");
+            return;
+        }
+        if permissions_u8 & PERM_MANAGE_KEYS != 0 {
+            self.push_log("Cannot grant PERM_MANAGE_KEYS to delegated keys");
             return;
         }
 
@@ -616,7 +652,7 @@ impl App {
         );
 
         let mut data = sighash("authorize_key");
-        data.push(role_u8);
+        data.push(permissions_u8);
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
@@ -633,18 +669,11 @@ impl App {
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
 
-        let rn = match role_u8 {
-            1 => "Operator",
-            2 => "Depositor",
-            3 => "Keeper",
-            _ => "Unknown",
-        };
-
         self.goto_confirm(PendingAction {
             description: vec![
                 "Authorize Key".into(),
                 format!("Target: {}", target_wallet),
-                format!("Role: {} ({})", rn, role_u8),
+                format!("Permissions: {} (0x{:02X})", permissions_name(permissions_u8), permissions_u8),
                 format!("Key NFT Mint: {}", new_mint),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
@@ -653,10 +682,11 @@ impl App {
     }
 
     pub fn build_revoke_key(&mut self) {
+        let admin_mint = self.position.as_ref().map(|p| p.admin_nft_mint);
         let revocable: Vec<&KeyEntry> = self
             .keyring
             .iter()
-            .filter(|k| k.role != KeyRole::Admin)
+            .filter(|k| Some(k.mint) != admin_mint)
             .collect();
         let idx: usize = match self.form_fields[1].1.trim().parse() {
             Ok(v) => v,
@@ -702,7 +732,7 @@ impl App {
             description: vec![
                 "Revoke Key".into(),
                 format!("Key Mint: {}", target.mint),
-                format!("Role: {}", role_name(target.role)),
+                format!("Permissions: {}", permissions_name(target.permissions)),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
@@ -981,8 +1011,8 @@ impl App {
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
                 format!(
-                    "Role: {}",
-                    role_name(self.my_role.unwrap_or(KeyRole::Keeper))
+                    "Permissions: {}",
+                    permissions_name(self.my_permissions.unwrap_or(0))
                 ),
             ],
             instructions: vec![transfer_ix, sync_ix, buy_ix],
@@ -1224,8 +1254,8 @@ impl App {
                 "Reinvest (CPI)".into(),
                 format!("Position: {}", short_pubkey(&position_pda)),
                 format!(
-                    "Role: {}",
-                    role_name(self.my_role.unwrap_or(KeyRole::Keeper))
+                    "Permissions: {}",
+                    permissions_name(self.my_permissions.unwrap_or(0))
                 ),
                 "Borrows available capacity and buys more navSOL".into(),
             ],
@@ -1353,7 +1383,7 @@ impl App {
     fn discover_position(&mut self) {
         self.position_pda = None;
         self.position = None;
-        self.my_role = None;
+        self.my_permissions = None;
         self.my_key_auth_pda = None;
         self.my_nft_mint = None;
         self.keyring.clear();
@@ -1381,9 +1411,11 @@ impl App {
             }
         };
 
-        // Find KeyAuthorizations where the signer holds the NFT
+        // Find KeyAuthorizations where the signer holds the NFT.
+        // Prefer the key with the most permissions (highest popcount),
+        // tie-break by PERM_MANAGE_KEYS.
         let mut found_position: Option<Pubkey> = None;
-        let mut best: Option<(KeyRole, Pubkey, Pubkey)> = None;
+        let mut best: Option<(u8, Pubkey, Pubkey)> = None; // (permissions, auth_pda, mint)
 
         for (pubkey, account) in &accounts {
             let ka = match KeyAuthorization::try_deserialize(&mut account.data.as_slice()) {
@@ -1394,18 +1426,25 @@ impl App {
             if self.check_holds_nft(&ka.key_nft_mint) {
                 let is_better = match &best {
                     None => true,
-                    Some((r, _, _)) => (ka.role as u8) < (*r as u8),
+                    Some((p, _, _)) => {
+                        let new_pop = ka.permissions.count_ones();
+                        let old_pop = p.count_ones();
+                        new_pop > old_pop
+                            || (new_pop == old_pop
+                                && ka.permissions & PERM_MANAGE_KEYS != 0
+                                && *p & PERM_MANAGE_KEYS == 0)
+                    }
                 };
                 if is_better {
                     found_position = Some(ka.position);
-                    best = Some((ka.role, *pubkey, ka.key_nft_mint));
+                    best = Some((ka.permissions, *pubkey, ka.key_nft_mint));
                 }
             }
         }
 
-        if let (Some(pos_pda), Some((role, auth_pda, mint))) = (found_position, best) {
+        if let (Some(pos_pda), Some((perms, auth_pda, mint))) = (found_position, best) {
             self.position_pda = Some(pos_pda);
-            self.my_role = Some(role);
+            self.my_permissions = Some(perms);
             self.my_key_auth_pda = Some(auth_pda);
             self.my_nft_mint = Some(mint);
 
@@ -1472,7 +1511,7 @@ impl App {
                         self.keyring.push(KeyEntry {
                             pda: *pubkey,
                             mint: ka.key_nft_mint,
-                            role: ka.role,
+                            permissions: ka.permissions,
                             held_by_signer: self.check_holds_nft(&ka.key_nft_mint),
                         });
                     }
@@ -1480,9 +1519,9 @@ impl App {
             }
 
             self.push_log(format!(
-                "Found position {} (role: {}{})",
+                "Found position {} (permissions: {}{})",
                 short_pubkey(&pos_pda),
-                role_name(role),
+                permissions_name(perms),
                 if self.mayflower_initialized {
                     ", Mayflower OK"
                 } else {
@@ -1584,12 +1623,14 @@ impl App {
 // Helpers
 // ---------------------------------------------------------------------------
 
-pub fn role_name(role: KeyRole) -> &'static str {
-    match role {
-        KeyRole::Admin => "Admin",
-        KeyRole::Operator => "Operator",
-        KeyRole::Depositor => "Depositor",
-        KeyRole::Keeper => "Keeper",
+pub fn permissions_name(permissions: u8) -> &'static str {
+    match permissions {
+        p if p == PRESET_ADMIN => "Admin",
+        p if p == PRESET_OPERATOR => "Operator",
+        p if p == PRESET_DEPOSITOR => "Depositor",
+        p if p == PRESET_KEEPER => "Keeper",
+        0 => "None",
+        _ => "Custom",
     }
 }
 

@@ -11,8 +11,8 @@ import {
   DEFAULT_WSOL_MINT,
   DEFAULT_NAV_SOL_MINT,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, myRole, position, marketConfigPda, marketConfig } from '../state.js';
-import { shortPubkey, roleName } from '../utils.js';
+import { myNftMint, myKeyAuthPda, positionPda, myPermissions, position, marketConfigPda, marketConfig } from '../state.js';
+import { shortPubkey, permissionsName } from '../utils.js';
 
 export async function buildReinvest(program, wallet) {
   const nftMint = myNftMint.value;
@@ -67,7 +67,7 @@ export async function buildReinvest(program, wallet) {
     description: [
       'Reinvest',
       `Position: ${shortPubkey(posPda)}`,
-      `Role: ${roleName(myRole.value)}`,
+      `Permissions: ${permissionsName(myPermissions.value)}`,
       'Borrows available capacity and buys more navSOL',
     ],
     instructions: [computeIx, ix],

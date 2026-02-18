@@ -32,8 +32,8 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
     let wallet = app.keypair.pubkey().to_string();
     let short_wallet = format!("{}..{}", &wallet[..4], &wallet[wallet.len() - 4..]);
     let role_str = app
-        .my_role
-        .map(app::role_name)
+        .my_permissions
+        .map(app::permissions_name)
         .unwrap_or("No Position");
     let refresh_str = app
         .last_refresh
@@ -194,7 +194,7 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
                 "Not initialized",
                 Style::default().fg(Color::DarkGray),
             ),
-            if app.my_role == Some(app::KeyRole::Admin) {
+            if app.has_perm(hardig::state::PERM_MANAGE_KEYS) {
                 Span::styled(
                     " - Press [S] to setup",
                     Style::default().fg(Color::Yellow),
@@ -241,7 +241,7 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
             };
             Row::new(vec![
                 marker.to_string(),
-                app::role_name(k.role).to_string(),
+                app::permissions_name(k.permissions).to_string(),
                 app::short_pubkey(&k.mint),
                 held.to_string(),
             ])
@@ -282,8 +282,6 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
 
     for (i, (label, value)) in app.form_fields.iter().enumerate() {
         let is_active = i == app.input_field;
-        let display_value = if is_active { &app.input_buf } else { value };
-
         let label_style = if is_active {
             Style::default()
                 .fg(Color::Cyan)
@@ -292,6 +290,45 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Gray)
         };
 
+        // Special rendering for permissions checkboxes in AuthorizeKey form
+        if matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && i == 1 {
+            lines.push(Line::from(Span::styled("  Permissions:", label_style)));
+            let bits = app.perm_bits;
+            let perms: [(u8, &str); 5] = [
+                (hardig::state::PERM_BUY, "1 Buy"),
+                (hardig::state::PERM_SELL, "2 Sell"),
+                (hardig::state::PERM_BORROW, "3 Borrow"),
+                (hardig::state::PERM_REPAY, "4 Repay"),
+                (hardig::state::PERM_REINVEST, "5 Reinvest"),
+            ];
+            let mut spans = vec![Span::raw("    ")];
+            for (idx, (perm, name)) in perms.iter().enumerate() {
+                let checked = bits & perm != 0;
+                let focused = is_active && idx == app.perm_cursor;
+                let marker = if checked { "x" } else { " " };
+                let mut style = if checked {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                if focused {
+                    style = style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                }
+                spans.push(Span::styled(format!("[{}] {}  ", marker, name), style));
+            }
+            lines.push(Line::from(spans));
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(
+                    format!("= {} (0x{:02X})", app::permissions_name(bits), bits),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+            lines.push(Line::from(""));
+            continue;
+        }
+
+        let display_value = if is_active { &app.input_buf } else { value };
         let cursor = if is_active { "_" } else { "" };
 
         // Handle multiline values (for revoke key list)
@@ -313,8 +350,15 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     lines.push(Line::from(""));
+    let on_perm_field =
+        matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && app.input_field == 1;
+    let hints = if on_perm_field {
+        "  [\u{2190}\u{2192}] Navigate  [Space/1-5] Toggle  [Enter] Submit  [Tab] Next  [Esc] Cancel"
+    } else {
+        "  [Enter] Submit  [Tab] Next field  [Esc] Cancel"
+    };
     lines.push(Line::from(Span::styled(
-        "  [Enter] Submit  [Tab] Next field  [Esc] Cancel",
+        hints,
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -482,7 +526,7 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 let mut parts: Vec<&str> = Vec::new();
 
                 // One-time setup (admin only)
-                if app.my_role == Some(app::KeyRole::Admin) && !app.cpi_ready() {
+                if app.has_perm(hardig::state::PERM_MANAGE_KEYS) && !app.cpi_ready() {
                     parts.push("[S]etup");
                 }
 
@@ -494,7 +538,7 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 if app.can_reinvest() { parts.push("[i]reinvest"); }
 
                 // Admin key management (always available for admin)
-                if app.my_role == Some(app::KeyRole::Admin) {
+                if app.has_perm(hardig::state::PERM_MANAGE_KEYS) {
                     parts.push("[a]uth");
                     parts.push("[x]revoke");
                 }

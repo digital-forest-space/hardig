@@ -2,10 +2,10 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import {
   protocolExists,
   positionPda,
-  myRole,
+  myPermissions,
   connected,
 } from '../state.js';
-import { roleName } from '../utils.js';
+import { permissionsName } from '../utils.js';
 import { PositionPanel } from './PositionPanel.jsx';
 import { MayflowerPanel } from './MayflowerPanel.jsx';
 import { KeyringTable } from './KeyringTable.jsx';
@@ -56,8 +56,8 @@ export function Dashboard({ onAction }) {
         <div class="data-row">
           <span class="label">Your Role</span>
           <span class="value">
-            <span class={`badge badge-${roleName(myRole.value).toLowerCase()}`}>
-              {roleName(myRole.value)}
+            <span class={`badge badge-${permissionsName(myPermissions.value).toLowerCase()}`}>
+              {permissionsName(myPermissions.value)}
             </span>
           </span>
         </div>

@@ -229,7 +229,7 @@
       ],
       "args": [
         {
-          "name": "role",
+          "name": "permissions",
           "type": "u8"
         }
       ]
@@ -375,7 +375,8 @@
     {
       "name": "buy",
       "docs": [
-        "Buy navSOL by depositing SOL (admin, operator, or depositor)."
+        "Buy navSOL by depositing SOL (admin, operator, or depositor).",
+        "`min_out`: minimum navSOL shares to receive (slippage protection, 0 = no check)."
       ],
       "discriminator": [
         102,
@@ -561,6 +562,10 @@
       "args": [
         {
           "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "min_out",
           "type": "u64"
         }
       ]
@@ -1083,7 +1088,8 @@
     {
       "name": "reinvest",
       "docs": [
-        "Reinvest new borrow capacity into more navSOL (admin, operator, or keeper)."
+        "Reinvest new borrow capacity into more navSOL (admin, operator, or keeper).",
+        "`min_out`: minimum navSOL shares to receive from the buy (slippage protection, 0 = no check)."
       ],
       "discriminator": [
         107,
@@ -1231,7 +1237,12 @@
           "writable": true
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "min_out",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "repay",
@@ -1418,6 +1429,29 @@
           "writable": true
         },
         {
+          "name": "target_nft_mint",
+          "docs": [
+            "The mint of the key NFT being revoked."
+          ],
+          "writable": true
+        },
+        {
+          "name": "target_nft_ata",
+          "docs": [
+            "The ATA holding the key NFT. Optional — only needed when the admin holds",
+            "the target NFT and wants it burned during revoke. When provided and the",
+            "admin is the token account owner, the NFT is burned and the ATA closed.",
+            "When omitted (or when the admin is not the owner), only the",
+            "KeyAuthorization PDA is closed."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -1425,9 +1459,57 @@
       "args": []
     },
     {
+      "name": "transfer_admin",
+      "docs": [
+        "Transfer protocol admin rights to a new pubkey (current admin only)."
+      ],
+      "discriminator": [
+        42,
+        242,
+        66,
+        106,
+        228,
+        10,
+        111,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "withdraw",
       "docs": [
-        "Withdraw SOL/navSOL from the position (admin only)."
+        "Withdraw SOL/navSOL from the position (admin only).",
+        "`min_out`: minimum wSOL to receive (slippage protection, 0 = no check)."
       ],
       "discriminator": [
         183,
@@ -1568,6 +1650,10 @@
         {
           "name": "amount",
           "type": "u64"
+        },
+        {
+          "name": "min_out",
+          "type": "u64"
         }
       ]
     }
@@ -1640,7 +1726,7 @@
     {
       "code": 6002,
       "name": "InsufficientPermission",
-      "msg": "Key role does not have permission for this instruction"
+      "msg": "Key does not have the required permission for this instruction"
     },
     {
       "code": 6003,
@@ -1660,7 +1746,7 @@
     {
       "code": 6006,
       "name": "CannotCreateSecondAdmin",
-      "msg": "Cannot create a second admin key"
+      "msg": "Cannot grant PERM_MANAGE_KEYS to delegated keys"
     },
     {
       "code": 6007,
@@ -1675,7 +1761,7 @@
     {
       "code": 6009,
       "name": "InvalidKeyRole",
-      "msg": "Invalid key role value"
+      "msg": "Invalid permissions value (zero or reserved bits set)"
     },
     {
       "code": 6010,
@@ -1699,16 +1785,26 @@
     },
     {
       "code": 6014,
+      "name": "SlippageExceeded",
+      "msg": "Output amount is less than minimum specified (slippage exceeded)"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidAta",
+      "msg": "Token account is not the correct ATA for the program PDA"
+    },
+    {
+      "code": 6016,
       "name": "InvalidNftMint",
       "msg": "Invalid NFT mint"
     },
     {
-      "code": 6015,
+      "code": 6017,
       "name": "InvalidPositionPda",
       "msg": "Invalid position PDA"
     },
     {
-      "code": 6016,
+      "code": 6018,
       "name": "PositionAlreadyExists",
       "msg": "Position already exists for this admin key"
     }
@@ -1717,7 +1813,7 @@
     {
       "name": "KeyAuthorization",
       "docs": [
-        "Links a key NFT to a position with a specific role.",
+        "Links a key NFT to a position with a permission bitmask.",
         "PDA seeds = [b\"key_auth\", position, key_nft_mint]."
       ],
       "type": {
@@ -1738,15 +1834,11 @@
             "type": "pubkey"
           },
           {
-            "name": "role",
+            "name": "permissions",
             "docs": [
-              "The role/permissions this key grants."
+              "Permission bitmask (see PERM_* constants)."
             ],
-            "type": {
-              "defined": {
-                "name": "KeyRole"
-              }
-            }
+            "type": "u8"
           },
           {
             "name": "bump",
@@ -1754,32 +1846,6 @@
               "Bump seed for this PDA."
             ],
             "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "KeyRole",
-      "docs": [
-        "Role assigned to a key NFT."
-      ],
-      "repr": {
-        "kind": "rust"
-      },
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Admin"
-          },
-          {
-            "name": "Operator"
-          },
-          {
-            "name": "Depositor"
-          },
-          {
-            "name": "Keeper"
           }
         ]
       }

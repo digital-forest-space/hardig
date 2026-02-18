@@ -7,7 +7,7 @@ pub enum HardigError {
     Unauthorized,
     #[msg("This action requires admin key")]
     AdminOnly,
-    #[msg("Key role does not have permission for this instruction")]
+    #[msg("Key does not have the required permission for this instruction")]
     InsufficientPermission,
     #[msg("Signer does not hold the key NFT")]
     KeyNotHeld,
@@ -17,13 +17,13 @@ pub enum HardigError {
     WrongPosition,
 
     // Key management errors
-    #[msg("Cannot create a second admin key")]
+    #[msg("Cannot grant PERM_MANAGE_KEYS to delegated keys")]
     CannotCreateSecondAdmin,
     #[msg("Cannot revoke the admin key")]
     CannotRevokeAdminKey,
     #[msg("Key is already authorized for this position")]
     KeyAlreadyAuthorized,
-    #[msg("Invalid key role value")]
+    #[msg("Invalid permissions value (zero or reserved bits set)")]
     InvalidKeyRole,
 
     // Fund errors

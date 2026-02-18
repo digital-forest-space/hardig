@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount};
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 
-use crate::state::{KeyAuthorization, KeyRole, PositionNFT};
+use crate::state::{KeyAuthorization, PositionNFT, PRESET_ADMIN};
 
 #[derive(Accounts)]
 pub struct CreatePosition<'info> {
@@ -115,7 +115,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
     let key_auth = &mut ctx.accounts.admin_key_auth;
     key_auth.position = ctx.accounts.position.key();
     key_auth.key_nft_mint = ctx.accounts.admin_nft_mint.key();
-    key_auth.role = KeyRole::Admin;
+    key_auth.permissions = PRESET_ADMIN;
     key_auth.bump = ctx.bumps.admin_key_auth;
 
     Ok(())

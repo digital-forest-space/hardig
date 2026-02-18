@@ -13,8 +13,8 @@ import {
   DEFAULT_WSOL_MINT,
   DEFAULT_NAV_SOL_MINT,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, myRole, position, marketConfigPda, marketConfig } from '../state.js';
-import { shortPubkey, lamportsToSol, roleName } from '../utils.js';
+import { myNftMint, myKeyAuthPda, positionPda, myPermissions, position, marketConfigPda, marketConfig } from '../state.js';
+import { shortPubkey, lamportsToSol, permissionsName } from '../utils.js';
 
 export async function buildBuy(program, wallet, amountLamports) {
   const nftMint = myNftMint.value;
@@ -73,7 +73,7 @@ export async function buildBuy(program, wallet, amountLamports) {
       'Buy navSOL',
       `Amount: ${lamportsToSol(amountLamports)} SOL`,
       `Position: ${shortPubkey(posPda)}`,
-      `Role: ${roleName(myRole.value)}`,
+      `Permissions: ${permissionsName(myPermissions.value)}`,
     ],
     instructions: [transferIx, syncIx, buyIx],
     extraSigners: [],

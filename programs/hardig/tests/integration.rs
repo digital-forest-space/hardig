@@ -14,7 +14,11 @@ use hardig::mayflower::{
     DEFAULT_MARKET_NAV_VAULT, DEFAULT_MAYFLOWER_MARKET, DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT,
     MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT,
 };
-use hardig::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT, ProtocolConfig};
+use hardig::state::{
+    KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig,
+    PERM_BUY, PERM_MANAGE_KEYS, PERM_REINVEST,
+    PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
+};
 
 const SPL_TOKEN_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM_ID: Pubkey =
@@ -677,7 +681,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &admin_ka,
             &op_mint.pubkey(),
             &operator.pubkey(),
-            1, // Operator
+            PRESET_OPERATOR,
         )],
         &[&admin, &op_mint],
     )
@@ -697,7 +701,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &admin_ka,
             &dep_mint.pubkey(),
             &depositor.pubkey(),
-            2, // Depositor
+            PRESET_DEPOSITOR,
         )],
         &[&admin, &dep_mint],
     )
@@ -717,7 +721,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &admin_ka,
             &keep_mint.pubkey(),
             &keeper.pubkey(),
-            3, // Keeper
+            PRESET_KEEPER,
         )],
         &[&admin, &keep_mint],
     )
@@ -1171,7 +1175,7 @@ fn test_authorize_operator_denied() {
         &h.operator_key_auth,
         &new_mint.pubkey(),
         &random_wallet.pubkey(),
-        2, // Depositor
+        PRESET_DEPOSITOR,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator, &new_mint]).is_err());
 }
@@ -1207,7 +1211,7 @@ fn test_cannot_create_second_admin() {
         &h.admin_key_auth,
         &new_mint.pubkey(),
         &random_wallet.pubkey(),
-        0, // Admin role
+        PRESET_ADMIN, // Has PERM_MANAGE_KEYS → rejected
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
 }
@@ -1303,7 +1307,7 @@ fn test_create_position_and_admin_nft() {
     let ka = read_key_auth(&svm, &ka_pda);
     assert_eq!(ka.position, pos_pda);
     assert_eq!(ka.key_nft_mint, mint_kp.pubkey());
-    assert_eq!(ka.role, KeyRole::Admin);
+    assert_eq!(ka.permissions, PRESET_ADMIN);
 
     // Check NFT minted to admin's ATA
     let ata = get_ata(&admin.pubkey(), &mint_kp.pubkey());
@@ -1320,7 +1324,7 @@ fn test_authorize_and_revoke_key() {
 
     // Verify operator key auth exists
     let ka = read_key_auth(&svm, &h.operator_key_auth);
-    assert_eq!(ka.role, KeyRole::Operator);
+    assert_eq!(ka.permissions, PRESET_OPERATOR);
     assert_eq!(ka.position, h.position_pda);
 
     // Verify operator holds NFT
@@ -1369,7 +1373,7 @@ fn test_revoke_burns_nft_when_admin_holds_it() {
             &h.admin_key_auth,
             &extra_mint.pubkey(),
             &h.admin.pubkey(), // target wallet = admin
-            1, // Operator
+            PRESET_OPERATOR,
         )],
         &[&h.admin, &extra_mint],
     )
@@ -1444,16 +1448,16 @@ fn test_multiple_keys_per_position() {
     let h = full_setup(&mut svm);
 
     let admin_ka = read_key_auth(&svm, &h.admin_key_auth);
-    assert_eq!(admin_ka.role, KeyRole::Admin);
+    assert_eq!(admin_ka.permissions, PRESET_ADMIN);
 
     let op_ka = read_key_auth(&svm, &h.operator_key_auth);
-    assert_eq!(op_ka.role, KeyRole::Operator);
+    assert_eq!(op_ka.permissions, PRESET_OPERATOR);
 
     let dep_ka = read_key_auth(&svm, &h.depositor_key_auth);
-    assert_eq!(dep_ka.role, KeyRole::Depositor);
+    assert_eq!(dep_ka.permissions, PRESET_DEPOSITOR);
 
     let keep_ka = read_key_auth(&svm, &h.keeper_key_auth);
-    assert_eq!(keep_ka.role, KeyRole::Keeper);
+    assert_eq!(keep_ka.permissions, PRESET_KEEPER);
 
     assert_eq!(op_ka.position, h.position_pda);
     assert_eq!(dep_ka.position, h.position_pda);
@@ -1461,7 +1465,7 @@ fn test_multiple_keys_per_position() {
 }
 
 #[test]
-fn test_invalid_role_value_rejected() {
+fn test_zero_permissions_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
     let new_mint = Keypair::new();
@@ -1473,9 +1477,107 @@ fn test_invalid_role_value_rejected() {
         &h.admin_key_auth,
         &new_mint.pubkey(),
         &target.pubkey(),
-        99, // Invalid role
+        0x00, // Zero permissions
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
+}
+
+#[test]
+fn test_reserved_bits_rejected() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let new_mint = Keypair::new();
+    let target = Keypair::new();
+    let ix = ix_authorize_key(
+        &h.admin.pubkey(),
+        &h.admin_nft_mint.pubkey(),
+        &h.position_pda,
+        &h.admin_key_auth,
+        &new_mint.pubkey(),
+        &target.pubkey(),
+        0x80, // Reserved bit set
+    );
+    assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
+}
+
+#[test]
+fn test_manage_keys_permission_rejected() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let new_mint = Keypair::new();
+    let target = Keypair::new();
+    let ix = ix_authorize_key(
+        &h.admin.pubkey(),
+        &h.admin_nft_mint.pubkey(),
+        &h.position_pda,
+        &h.admin_key_auth,
+        &new_mint.pubkey(),
+        &target.pubkey(),
+        PERM_MANAGE_KEYS, // PERM_MANAGE_KEYS alone → rejected
+    );
+    assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
+}
+
+#[test]
+fn test_custom_bitmask_buy_reinvest() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Create a custom key with only buy + reinvest permissions
+    let custom_user = Keypair::new();
+    svm.airdrop(&custom_user.pubkey(), 5_000_000_000).unwrap();
+    let custom_mint = Keypair::new();
+    let custom_perms = PERM_BUY | PERM_REINVEST; // 0x11
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &custom_mint.pubkey(),
+            &custom_user.pubkey(),
+            custom_perms,
+        )],
+        &[&h.admin, &custom_mint],
+    )
+    .unwrap();
+    let (custom_ka, _) = key_auth_pda(&h.position_pda, &custom_mint.pubkey());
+
+    // Verify permissions
+    let ka = read_key_auth(&svm, &custom_ka);
+    assert_eq!(ka.permissions, custom_perms);
+
+    // Custom key can buy
+    let buy_ix = ix_buy(
+        &custom_user.pubkey(), &custom_mint.pubkey(),
+        &custom_ka, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&custom_user]).unwrap();
+
+    // Custom key can reinvest
+    let reinvest_ix = ix_reinvest(
+        &custom_user.pubkey(), &custom_mint.pubkey(),
+        &custom_ka, &h.position_pda, &h.admin_nft_mint.pubkey(),
+    );
+    send_tx(&mut svm, &[reinvest_ix], &[&custom_user]).unwrap();
+
+    // Custom key cannot sell (withdraw)
+    let pos = read_position(&svm, &h.position_pda);
+    if pos.deposited_nav > 0 {
+        let sell_ix = ix_withdraw(
+            &custom_user.pubkey(), &custom_mint.pubkey(),
+            &custom_ka, &h.position_pda, &h.admin_nft_mint.pubkey(), 50_000,
+        );
+        assert!(send_tx(&mut svm, &[sell_ix], &[&custom_user]).is_err());
+    }
+
+    // Custom key cannot borrow
+    let borrow_ix = ix_borrow(
+        &custom_user.pubkey(), &custom_mint.pubkey(),
+        &custom_ka, &h.position_pda, &h.admin_nft_mint.pubkey(), 50_000,
+    );
+    assert!(send_tx(&mut svm, &[borrow_ix], &[&custom_user]).is_err());
 }
 
 // ---- Accounting edge cases ----
@@ -1558,7 +1660,7 @@ fn test_theft_recovery_operator_key_stolen() {
         &h.admin_key_auth,
         &new_op_mint.pubkey(),
         &h.operator.pubkey(),
-        1,
+        PRESET_OPERATOR,
     );
     send_tx(&mut svm, &[ix], &[&h.admin, &new_op_mint]).unwrap();
 

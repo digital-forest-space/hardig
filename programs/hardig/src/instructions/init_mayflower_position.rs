@@ -4,7 +4,7 @@ use anchor_spl::token::TokenAccount;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT};
+use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_MANAGE_KEYS};
 
 use super::validate_key::validate_key;
 
@@ -75,7 +75,7 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
         &ctx.accounts.admin_nft_ata,
         &ctx.accounts.admin_key_auth,
         &ctx.accounts.position.key(),
-        &[KeyRole::Admin],
+        PERM_MANAGE_KEYS,
     )?;
 
     let mc = &ctx.accounts.market_config;

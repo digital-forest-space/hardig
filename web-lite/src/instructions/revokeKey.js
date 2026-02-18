@@ -2,7 +2,7 @@ import {
   getAta,
 } from '../constants.js';
 import { myNftMint, myKeyAuthPda, positionPda } from '../state.js';
-import { shortPubkey, roleName } from '../utils.js';
+import { shortPubkey, permissionsName } from '../utils.js';
 
 export async function buildRevokeKey(program, wallet, targetKeyEntry) {
   const posPda = positionPda.value;
@@ -25,7 +25,7 @@ export async function buildRevokeKey(program, wallet, targetKeyEntry) {
     description: [
       'Revoke Key',
       `Key Mint: ${shortPubkey(targetKeyEntry.mint)}`,
-      `Role: ${roleName(targetKeyEntry.role)}`,
+      `Permissions: ${permissionsName(targetKeyEntry.permissions)}`,
     ],
     instructions: [ix],
     extraSigners: [],

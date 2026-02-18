@@ -1,4 +1,5 @@
 import { signal, computed } from '@preact/signals';
+import { PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS } from './utils.js';
 
 // Cluster
 export const cluster = signal('localnet');
@@ -13,7 +14,7 @@ export const protocolExists = signal(false);
 // Position
 export const positionPda = signal(null);
 export const position = signal(null);
-export const myRole = signal(null); // numeric: 0=Admin, 1=Operator, 2=Depositor, 3=Keeper
+export const myPermissions = signal(null); // u8 bitmask
 export const myKeyAuthPda = signal(null);
 export const myNftMint = signal(null);
 export const keyring = signal([]);
@@ -40,42 +41,48 @@ export const logs = signal([]);
 export const preTxSnapshot = signal(null);
 export const lastTxSignature = signal(null);
 
+// Helper: check if current permissions include a specific bit
+function hasPerm(perm) {
+  const p = myPermissions.value;
+  return p !== null && (p & perm) !== 0;
+}
+
 // Computed permissions
 export const cpiReady = computed(() => mayflowerInitialized.value && atasExist.value);
 
 export const canBuy = computed(
-  () => cpiReady.value && [0, 1, 2].includes(myRole.value)
+  () => cpiReady.value && hasPerm(PERM_BUY)
 );
 
 export const canSell = computed(
-  () => cpiReady.value && myRole.value === 0
+  () => cpiReady.value && hasPerm(PERM_SELL)
 );
 
 export const canBorrow = computed(
-  () => cpiReady.value && myRole.value === 0
+  () => cpiReady.value && hasPerm(PERM_BORROW)
 );
 
 export const canRepay = computed(() => {
   if (!cpiReady.value) return false;
-  if (![0, 1, 2].includes(myRole.value)) return false;
+  if (!hasPerm(PERM_REPAY)) return false;
   const pos = position.value;
   return pos && pos.userDebt > 0;
 });
 
 export const canReinvest = computed(
-  () => cpiReady.value && [0, 1, 3].includes(myRole.value)
+  () => cpiReady.value && hasPerm(PERM_REINVEST)
 );
 
 export const canAuthorize = computed(
-  () => myRole.value === 0 && positionPda.value !== null
+  () => hasPerm(PERM_MANAGE_KEYS) && positionPda.value !== null
 );
 
 export const canRevoke = computed(
-  () => myRole.value === 0 && keyring.value.some((k) => k.role !== 0)
+  () => hasPerm(PERM_MANAGE_KEYS) && keyring.value.length > 1
 );
 
 export const canSetup = computed(
-  () => myRole.value === 0 && positionPda.value !== null && !cpiReady.value
+  () => hasPerm(PERM_MANAGE_KEYS) && positionPda.value !== null && !cpiReady.value
 );
 
 export const canInitProtocol = computed(() => !protocolExists.value);
@@ -110,7 +117,7 @@ export function takeSnapshot() {
 export function resetPositionState() {
   positionPda.value = null;
   position.value = null;
-  myRole.value = null;
+  myPermissions.value = null;
   myKeyAuthPda.value = null;
   myNftMint.value = null;
   keyring.value = [];

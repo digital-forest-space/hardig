@@ -3,7 +3,7 @@ use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount};
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 
 use crate::errors::HardigError;
-use crate::state::{KeyAuthorization, KeyRole, PositionNFT};
+use crate::state::{KeyAuthorization, PositionNFT, PERM_MANAGE_KEYS, PERM_RESERVED_MASK};
 
 use super::validate_key::validate_key;
 
@@ -74,21 +74,20 @@ pub struct AuthorizeKey<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<AuthorizeKey>, role: u8) -> Result<()> {
+pub fn handler(ctx: Context<AuthorizeKey>, permissions: u8) -> Result<()> {
     // Validate the admin holds their key
     validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.admin_nft_ata,
         &ctx.accounts.admin_key_auth,
         &ctx.accounts.position.key(),
-        &[KeyRole::Admin],
+        PERM_MANAGE_KEYS,
     )?;
 
-    // Parse and validate the role
-    let key_role = KeyRole::from_u8(role).ok_or(HardigError::InvalidKeyRole)?;
-
-    // Cannot create a second admin key
-    require!(key_role != KeyRole::Admin, HardigError::CannotCreateSecondAdmin);
+    // Validate the permissions bitmask
+    require!(permissions != 0, HardigError::InvalidKeyRole);
+    require!(permissions & PERM_RESERVED_MASK == 0, HardigError::InvalidKeyRole);
+    require!(permissions & PERM_MANAGE_KEYS == 0, HardigError::CannotCreateSecondAdmin);
 
     // Mint 1 key NFT to the target wallet
     let bump = ctx.bumps.program_pda;
@@ -126,7 +125,7 @@ pub fn handler(ctx: Context<AuthorizeKey>, role: u8) -> Result<()> {
     let key_auth = &mut ctx.accounts.new_key_auth;
     key_auth.position = ctx.accounts.position.key();
     key_auth.key_nft_mint = ctx.accounts.new_key_mint.key();
-    key_auth.role = key_role;
+    key_auth.permissions = permissions;
     key_auth.bump = ctx.bumps.new_key_auth;
 
     Ok(())

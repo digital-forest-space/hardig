@@ -2,16 +2,16 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::TokenAccount;
 
 use crate::errors::HardigError;
-use crate::state::{KeyAuthorization, KeyRole};
+use crate::state::KeyAuthorization;
 
 /// Validates that the signer holds an authorized key NFT for the given position
-/// and that the key's role is in the allowed set.
+/// and that the key has at least one of the required permission bits set.
 pub fn validate_key(
     signer: &Signer,
     key_nft_token_account: &Account<TokenAccount>,
     key_auth: &Account<KeyAuthorization>,
     position: &Pubkey,
-    allowed_roles: &[KeyRole],
+    required: u8,
 ) -> Result<()> {
     // 1. Signer holds this NFT
     require!(
@@ -33,9 +33,9 @@ pub fn validate_key(
         HardigError::WrongPosition
     );
 
-    // 3. This key has the right role
+    // 3. This key has the required permission(s)
     require!(
-        allowed_roles.contains(&key_auth.role),
+        key_auth.permissions & required != 0,
         HardigError::InsufficientPermission
     );
 

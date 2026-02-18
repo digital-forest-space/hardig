@@ -33,22 +33,36 @@ export function formatDelta(before, after) {
   return '0';
 }
 
-export function roleName(roleValue) {
-  switch (roleValue) {
-    case 0: return 'Admin';
-    case 1: return 'Operator';
-    case 2: return 'Depositor';
-    case 3: return 'Keeper';
-    default: return 'Unknown';
+// Permission bitmask constants
+export const PERM_BUY = 0x01;
+export const PERM_SELL = 0x02;
+export const PERM_BORROW = 0x04;
+export const PERM_REPAY = 0x08;
+export const PERM_REINVEST = 0x10;
+export const PERM_MANAGE_KEYS = 0x20;
+
+export const PRESET_ADMIN = 0x3F;
+export const PRESET_OPERATOR = 0x19;
+export const PRESET_DEPOSITOR = 0x09;
+export const PRESET_KEEPER = 0x10;
+
+export function permissionsName(permissions) {
+  switch (permissions) {
+    case PRESET_ADMIN: return 'Admin';
+    case PRESET_OPERATOR: return 'Operator';
+    case PRESET_DEPOSITOR: return 'Depositor';
+    case PRESET_KEEPER: return 'Keeper';
+    case 0: case null: case undefined: return 'None';
+    default: return 'Custom';
   }
 }
 
-export function roleClass(roleValue) {
-  switch (roleValue) {
-    case 0: return 'badge-admin';
-    case 1: return 'badge-operator';
-    case 2: return 'badge-depositor';
-    case 3: return 'badge-keeper';
+export function permissionsClass(permissions) {
+  switch (permissions) {
+    case PRESET_ADMIN: return 'badge-admin';
+    case PRESET_OPERATOR: return 'badge-operator';
+    case PRESET_DEPOSITOR: return 'badge-depositor';
+    case PRESET_KEEPER: return 'badge-keeper';
     default: return '';
   }
 }

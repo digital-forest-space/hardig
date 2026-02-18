@@ -79,33 +79,31 @@ impl MarketConfig {
     pub const SIZE: usize = 8 + 32 * 8 + 1;
 }
 
-/// Role assigned to a key NFT.
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum KeyRole {
-    /// Full control: withdraw, borrow, authorize/revoke keys, update settings.
-    Admin = 0,
-    /// Deposit + reinvest + repay.
-    Operator = 1,
-    /// Deposit + repay only.
-    Depositor = 2,
-    /// Reinvest/compound only.
-    Keeper = 3,
-}
+// ---------------------------------------------------------------------------
+// Permission bitmask constants
+// ---------------------------------------------------------------------------
 
-impl KeyRole {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(KeyRole::Admin),
-            1 => Some(KeyRole::Operator),
-            2 => Some(KeyRole::Depositor),
-            3 => Some(KeyRole::Keeper),
-            _ => None,
-        }
-    }
-}
+/// Each bit grants a specific permission.
+pub const PERM_BUY: u8 = 0x01;
+pub const PERM_SELL: u8 = 0x02;
+pub const PERM_BORROW: u8 = 0x04;
+pub const PERM_REPAY: u8 = 0x08;
+pub const PERM_REINVEST: u8 = 0x10;
+pub const PERM_MANAGE_KEYS: u8 = 0x20;
 
-/// Links a key NFT to a position with a specific role.
+/// Bits 6-7 reserved for future use (rate-limited roles).
+pub const PERM_RESERVED_MASK: u8 = 0xC0;
+
+/// All defined permissions (bits 0-5).
+pub const PERM_ALL: u8 = 0x3F;
+
+// Backwards-compatible presets
+pub const PRESET_ADMIN: u8 = 0x3F; // all 6 bits
+pub const PRESET_OPERATOR: u8 = 0x19; // buy + repay + reinvest
+pub const PRESET_DEPOSITOR: u8 = 0x09; // buy + repay
+pub const PRESET_KEEPER: u8 = 0x10; // reinvest only
+
+/// Links a key NFT to a position with a permission bitmask.
 /// PDA seeds = [b"key_auth", position, key_nft_mint].
 #[account]
 pub struct KeyAuthorization {
@@ -113,14 +111,14 @@ pub struct KeyAuthorization {
     pub position: Pubkey,
     /// The NFT mint that serves as the key.
     pub key_nft_mint: Pubkey,
-    /// The role/permissions this key grants.
-    pub role: KeyRole,
+    /// Permission bitmask (see PERM_* constants).
+    pub permissions: u8,
     /// Bump seed for this PDA.
     pub bump: u8,
 }
 
 impl KeyAuthorization {
     pub const SEED: &'static [u8] = b"key_auth";
-    // discriminator(8) + position(32) + key_nft_mint(32) + role(1) + bump(1)
+    // discriminator(8) + position(32) + key_nft_mint(32) + permissions(1) + bump(1)
     pub const SIZE: usize = 8 + 32 + 32 + 1 + 1;
 }

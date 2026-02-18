@@ -10,7 +10,7 @@ import {
 import {
   positionPda,
   position,
-  myRole,
+  myPermissions,
   myKeyAuthPda,
   myNftMint,
   keyring,
@@ -21,7 +21,7 @@ import {
   pushLog,
   resetPositionState,
 } from './state.js';
-import { shortPubkey, roleName } from './utils.js';
+import { shortPubkey, permissionsName, PERM_MANAGE_KEYS } from './utils.js';
 import { deriveConfigPda } from './constants.js';
 
 export async function checkProtocol(connection) {
@@ -72,8 +72,8 @@ export async function discoverPosition(connection, wallet) {
     if (data.length < KEY_AUTH_SIZE) continue;
     const posKey = new PublicKey(data.slice(8, 40));
     const nftMint = new PublicKey(data.slice(40, 72));
-    const role = data[72];
-    keyAuths.push({ pubkey, position: posKey, nftMint, role });
+    const permissions = data[72];
+    keyAuths.push({ pubkey, position: posKey, nftMint, permissions });
   }
 
   // Batch-check which NFTs the wallet holds
@@ -93,16 +93,24 @@ export async function discoverPosition(connection, wallet) {
     }
   }
 
-  // Find best key (lowest role number) held by the wallet
+  // Find best key (highest popcount) held by the wallet, tie-break with PERM_MANAGE_KEYS
   let bestPos = null;
   let best = null;
 
+  function popcount(n) { let c = 0; while (n) { c += n & 1; n >>= 1; } return c; }
+
   for (const ka of keyAuths) {
     if (checkHoldsNft(balanceMap, wallet, ka.nftMint)) {
-      const isBetter = !best || ka.role < best.role;
+      let isBetter = !best;
+      if (!isBetter) {
+        const newPop = popcount(ka.permissions);
+        const oldPop = popcount(best.permissions);
+        isBetter = newPop > oldPop
+          || (newPop === oldPop && (ka.permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
+      }
       if (isBetter) {
         bestPos = ka.position;
-        best = { role: ka.role, pubkey: ka.pubkey, nftMint: ka.nftMint };
+        best = { permissions: ka.permissions, pubkey: ka.pubkey, nftMint: ka.nftMint };
       }
     }
   }
@@ -113,7 +121,7 @@ export async function discoverPosition(connection, wallet) {
   }
 
   positionPda.value = bestPos;
-  myRole.value = best.role;
+  myPermissions.value = best.permissions;
   myKeyAuthPda.value = best.pubkey;
   myNftMint.value = best.nftMint;
 
@@ -186,7 +194,7 @@ export async function discoverPosition(connection, wallet) {
       posKeys.push({
         pda: ka.pubkey,
         mint: ka.nftMint,
-        role: ka.role,
+        permissions: ka.permissions,
         heldBySigner: checkHoldsNft(balanceMap, wallet, ka.nftMint),
       });
     }
@@ -194,7 +202,7 @@ export async function discoverPosition(connection, wallet) {
   keyring.value = posKeys;
 
   pushLog(
-    `Found position ${shortPubkey(bestPos)} (role: ${roleName(best.role)}${
+    `Found position ${shortPubkey(bestPos)} (permissions: ${permissionsName(best.permissions)}${
       mayflowerInitialized.value ? ', Mayflower OK' : ''
     })`
   );

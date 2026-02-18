@@ -26,7 +26,7 @@ use solana_sdk::{
 };
 
 use hardig::mayflower;
-use hardig::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT, ProtocolConfig};
+use hardig::state::{KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig, PRESET_ADMIN, PRESET_OPERATOR};
 
 const RPC_URL: &str = "http://127.0.0.1:8899";
 
@@ -578,7 +578,7 @@ fn test_mainnet_fork_init_protocol_and_position() {
 
     let ka = get_key_auth(&client, &harness.admin_key_auth);
     assert_eq!(ka.position, harness.position_pda);
-    assert_eq!(ka.role, KeyRole::Admin);
+    assert_eq!(ka.permissions, PRESET_ADMIN);
 
     println!("Position created: {}", harness.position_pda);
 }
@@ -1002,7 +1002,7 @@ fn test_mainnet_fork_full_lifecycle() {
             &harness.admin_key_auth,
             &op_mint.pubkey(),
             &operator.pubkey(),
-            1, // Operator
+            PRESET_OPERATOR,
         )],
         &[&harness.admin, &op_mint],
     )

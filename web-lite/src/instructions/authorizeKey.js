@@ -5,9 +5,9 @@ import {
   getAta,
 } from '../constants.js';
 import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
-import { shortPubkey, roleName } from '../utils.js';
+import { shortPubkey, permissionsName } from '../utils.js';
 
-export async function buildAuthorizeKey(program, wallet, targetWalletStr, roleU8) {
+export async function buildAuthorizeKey(program, wallet, targetWalletStr, permissionsU8) {
   const targetWallet = new PublicKey(targetWalletStr);
   const posPda = positionPda.value;
   const adminNftMint = myNftMint.value;
@@ -21,7 +21,7 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, roleU8
   const [newKeyAuth] = deriveKeyAuthPda(posPda, newMint);
 
   const ix = await program.methods
-    .authorizeKey(roleU8)
+    .authorizeKey(permissionsU8)
     .accounts({
       admin: wallet,
       adminNftAta: adminNftAta,
@@ -39,7 +39,7 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, roleU8
     description: [
       'Authorize Key',
       `Target: ${shortPubkey(targetWallet)}`,
-      `Role: ${roleName(roleU8)} (${roleU8})`,
+      `Permissions: ${permissionsName(permissionsU8)} (0x${permissionsU8.toString(16).padStart(2, '0')})`,
       `Key NFT Mint: ${shortPubkey(newMint)}`,
     ],
     instructions: [ix],

@@ -27,8 +27,8 @@ pub mod hardig {
     }
 
     /// Authorize a new key NFT for a position (admin only).
-    pub fn authorize_key(ctx: Context<AuthorizeKey>, role: u8) -> Result<()> {
-        instructions::authorize_key::handler(ctx, role)
+    pub fn authorize_key(ctx: Context<AuthorizeKey>, permissions: u8) -> Result<()> {
+        instructions::authorize_key::handler(ctx, permissions)
     }
 
     /// Revoke a key by closing its KeyAuthorization (admin only).

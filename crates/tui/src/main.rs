@@ -13,7 +13,7 @@ use ratatui::prelude::*;
 use serde::Serialize;
 use solana_sdk::signature::{read_keypair_file, Signer};
 
-use app::{lamports_to_sol, role_name};
+use app::{lamports_to_sol, permissions_name};
 
 #[derive(Parser)]
 #[command(name = "hardig-tui")]
@@ -80,9 +80,9 @@ enum Action {
         /// Target wallet public key
         #[arg(long)]
         wallet: String,
-        /// Role: 1=Operator, 2=Depositor, 3=Keeper
+        /// Permissions bitmask: 25=Operator, 9=Depositor, 16=Keeper, or custom
         #[arg(long)]
-        role: u8,
+        permissions: u8,
     },
     /// Revoke a non-admin key by index
     RevokeKey {
@@ -378,12 +378,12 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
         Action::Reinvest => {
             app.build_reinvest();
         }
-        Action::AuthorizeKey { wallet, role } => {
+        Action::AuthorizeKey { wallet, permissions } => {
             app.form_fields = vec![
                 ("Target Wallet (pubkey)".into(), wallet.clone()),
                 (
-                    "Role (1=Operator, 2=Depositor, 3=Keeper)".into(),
-                    role.to_string(),
+                    "Permissions (25=Operator, 9=Depositor, 16=Keeper, or custom)".into(),
+                    permissions.to_string(),
                 ),
             ];
             app.build_authorize_key();
@@ -557,7 +557,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
                 .map(|p| p.to_string())
                 .unwrap_or_default(),
             admin_mint: pos.admin_nft_mint.to_string(),
-            role: app.my_role.map(role_name).unwrap_or("None").to_string(),
+            role: app.my_permissions.map(permissions_name).unwrap_or("None").to_string(),
             deposited_nav: lamports_to_sol(pos.deposited_nav),
             user_debt: lamports_to_sol(pos.user_debt),
             protocol_debt: lamports_to_sol(pos.protocol_debt),
@@ -582,7 +582,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
         .map(|k| KeyInfo {
             pda: k.pda.to_string(),
             mint: k.mint.to_string(),
-            role: role_name(k.role).to_string(),
+            role: permissions_name(k.permissions).to_string(),
             held_by_signer: k.held_by_signer,
         })
         .collect();

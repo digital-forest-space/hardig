@@ -5,7 +5,7 @@ use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, KeyRole, MarketConfig, PositionNFT};
+use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_SELL};
 
 use super::validate_key::validate_key;
 
@@ -117,7 +117,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         &ctx.accounts.key_nft_ata,
         &ctx.accounts.key_auth,
         &ctx.accounts.position.key(),
-        &[KeyRole::Admin],
+        PERM_SELL,
     )?;
 
     require!(amount > 0, HardigError::InsufficientFunds);
@@ -146,7 +146,9 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         HardigError::InvalidMayflowerAccount
     );
 
-    ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
+    if ctx.accounts.key_auth.key_nft_mint == ctx.accounts.position.admin_nft_mint {
+        ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
+    }
 
     // Read wSOL balance before CPI for slippage check
     let wsol_before = {

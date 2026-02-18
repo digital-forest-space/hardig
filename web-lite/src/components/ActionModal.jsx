@@ -24,7 +24,7 @@ import {
   buildAuthorizeKey,
   buildRevokeKey,
 } from '../instructions/index.js';
-import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, roleName, explorerUrl } from '../utils.js';
+import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
 
 // Phase: form | building | confirm | result
 export function ActionModal({ action, onClose, onRefresh }) {
@@ -39,8 +39,8 @@ export function ActionModal({ action, onClose, onRefresh }) {
 
   // Form fields
   const [amount, setAmount] = useState('');
-  const [targetWallet, setTargetWallet] = useState('');
-  const [role, setRole] = useState('1');
+  const [targetWallet, setTargetWallet] = useState(wallet.publicKey?.toBase58() || '');
+  const [permissions, setPermissions] = useState(String(PRESET_OPERATOR));
   const [revokeIdx, setRevokeIdx] = useState('0');
 
   const walletPk = wallet.publicKey;
@@ -100,13 +100,15 @@ export function ActionModal({ action, onClose, onRefresh }) {
           break;
         case 'authorize': {
           if (!targetWallet.trim()) { setError('Target wallet required'); setPhase('form'); return; }
-          const r = parseInt(role);
-          if (r === 0) { setError('Cannot create a second admin key'); setPhase('form'); return; }
-          built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), r);
+          const p = parseInt(permissions);
+          if (p === 0) { setError('Permissions cannot be zero'); setPhase('form'); return; }
+          if (p & PERM_MANAGE_KEYS) { setError('Cannot grant PERM_MANAGE_KEYS to delegated keys'); setPhase('form'); return; }
+          built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p);
           break;
         }
         case 'revoke': {
-          const revocable = keyring.value.filter((k) => k.role !== 0);
+          const adminMint = position.value?.adminNftMint;
+          const revocable = keyring.value.filter((k) => !adminMint || !k.mint.equals(adminMint));
           const idx = parseInt(revokeIdx);
           if (idx < 0 || idx >= revocable.length) { setError('Invalid key index'); setPhase('form'); return; }
           built = await buildRevokeKey(program, walletPk, revocable[idx]);
@@ -264,12 +266,36 @@ export function ActionModal({ action, onClose, onRefresh }) {
                   />
                 </div>
                 <div class="form-group">
-                  <label>Role</label>
-                  <select value={role} onChange={(e) => setRole(e.target.value)}>
-                    <option value="1">Operator</option>
-                    <option value="2">Depositor</option>
-                    <option value="3">Keeper</option>
-                  </select>
+                  <label>Permissions</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '6px 0' }}>
+                    {[
+                      [PERM_BUY, 'Buy'],
+                      [PERM_SELL, 'Sell'],
+                      [PERM_BORROW, 'Borrow'],
+                      [PERM_REPAY, 'Repay'],
+                      [PERM_REINVEST, 'Reinvest'],
+                    ].map(([bit, name]) => {
+                      const p = parseInt(permissions) || 0;
+                      return (
+                        <label key={bit} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
+                          <input
+                            type="checkbox"
+                            checked={(p & bit) !== 0}
+                            onChange={() => setPermissions(String(p ^ bit))}
+                          />
+                          {name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                    <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_OPERATOR))}>Operator</button>
+                    <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_DEPOSITOR))}>Depositor</button>
+                    <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_KEEPER))}>Keeper</button>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                    {permissionsName(parseInt(permissions) || 0)} (0x{((parseInt(permissions) || 0).toString(16)).toUpperCase().padStart(2, '0')})
+                  </div>
                 </div>
               </>
             )}
@@ -279,10 +305,13 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 <label>Key to Revoke</label>
                 <select value={revokeIdx} onChange={(e) => setRevokeIdx(e.target.value)}>
                   {keyring.value
-                    .filter((k) => k.role !== 0)
+                    .filter((k) => {
+                      const adminMint = position.value?.adminNftMint;
+                      return !adminMint || !k.mint.equals(adminMint);
+                    })
                     .map((k, i) => (
                       <option key={i} value={i}>
-                        {shortPubkey(k.mint)} ({roleName(k.role)})
+                        {shortPubkey(k.mint)} ({permissionsName(k.permissions)})
                       </option>
                     ))}
                 </select>
