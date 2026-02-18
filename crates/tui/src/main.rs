@@ -112,30 +112,36 @@ enum Action {
     },
     /// Create a MarketConfig PDA (protocol admin only)
     CreateMarketConfig {
+        /// Market name shorthand (e.g. navSOL) — fetches addresses from API
+        #[arg(long, requires = "markets_url", conflicts_with_all = ["nav_mint", "base_mint", "market_group", "market_meta", "mayflower_market", "market_base_vault", "market_nav_vault", "fee_vault"])]
+        market: Option<String>,
+        /// URL of the markets API (required with --market)
+        #[arg(long, requires = "market")]
+        markets_url: Option<String>,
         /// Nav token mint (e.g. navSOL)
-        #[arg(long)]
-        nav_mint: String,
+        #[arg(long, required_unless_present = "market")]
+        nav_mint: Option<String>,
         /// Base token mint (e.g. wSOL)
-        #[arg(long)]
-        base_mint: String,
+        #[arg(long, required_unless_present = "market")]
+        base_mint: Option<String>,
         /// Mayflower market group
-        #[arg(long)]
-        market_group: String,
+        #[arg(long, required_unless_present = "market")]
+        market_group: Option<String>,
         /// Mayflower market meta
-        #[arg(long)]
-        market_meta: String,
+        #[arg(long, required_unless_present = "market")]
+        market_meta: Option<String>,
         /// Mayflower market
-        #[arg(long)]
-        mayflower_market: String,
+        #[arg(long, required_unless_present = "market")]
+        mayflower_market: Option<String>,
         /// Market base vault
-        #[arg(long)]
-        market_base_vault: String,
+        #[arg(long, required_unless_present = "market")]
+        market_base_vault: Option<String>,
         /// Market nav vault
-        #[arg(long)]
-        market_nav_vault: String,
+        #[arg(long, required_unless_present = "market")]
+        market_nav_vault: Option<String>,
         /// Fee vault
-        #[arg(long)]
-        fee_vault: String,
+        #[arg(long, required_unless_present = "market")]
+        fee_vault: Option<String>,
     },
 }
 
@@ -209,6 +215,81 @@ struct KeyInfo {
     mint: String,
     role: String,
     held_by_signer: bool,
+}
+
+/// Fetch Mayflower market configs from the API and resolve a market by name.
+/// Returns the 8 pubkeys needed for create_market_config.
+fn resolve_market(
+    url: &str,
+    name: &str,
+) -> Result<
+    (
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+        solana_sdk::pubkey::Pubkey,
+    ),
+    String,
+> {
+    use std::str::FromStr;
+
+    let body: String = ureq::get(url)
+        .call()
+        .map_err(|e| format!("Failed to fetch markets: {e}"))?
+        .into_body()
+        .read_to_string()
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+    let markets = json["markets"]
+        .as_array()
+        .ok_or("Unexpected API response: missing markets array")?;
+
+    let needle = name.to_lowercase();
+    let market = markets
+        .iter()
+        .find(|m| {
+            m["name"]
+                .as_str()
+                .map(|n| n.to_lowercase() == needle)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            let available: Vec<&str> = markets
+                .iter()
+                .filter_map(|m| m["name"].as_str())
+                .collect();
+            format!(
+                "Market \"{}\" not found. Available markets: {}",
+                name,
+                available.join(", ")
+            )
+        })?;
+
+    let pk = |field: &str| -> Result<solana_sdk::pubkey::Pubkey, String> {
+        let s = market[field]
+            .as_str()
+            .ok_or_else(|| format!("Missing field '{}' in market data", field))?;
+        solana_sdk::pubkey::Pubkey::from_str(s)
+            .map_err(|_| format!("Invalid pubkey for '{}': {}", field, s))
+    };
+
+    Ok((
+        pk("navMint")?,
+        pk("baseMint")?,
+        pk("marketGroup")?,
+        pk("marketMetadata")?,
+        pk("mayflowerMarket")?,
+        pk("marketSolVault")?,
+        pk("marketNavVault")?,
+        pk("feeVault")?,
+    ))
 }
 
 fn cluster_to_url(cluster: &str) -> &str {
@@ -424,6 +505,8 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             }
         }
         Action::CreateMarketConfig {
+            market,
+            markets_url,
             nav_mint,
             base_mint,
             market_group,
@@ -433,22 +516,30 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             market_nav_vault,
             fee_vault,
         } => {
-            use std::str::FromStr;
-            let parse = |s: &str| {
-                solana_sdk::pubkey::Pubkey::from_str(s).map_err(|_| format!("Invalid pubkey: {}", s))
+            let result = if let Some(name) = market {
+                let url = markets_url.as_deref().unwrap();
+                resolve_market(url, name)
+            } else {
+                use std::str::FromStr;
+                let parse = |s: &Option<String>| {
+                    let s = s.as_ref().unwrap();
+                    solana_sdk::pubkey::Pubkey::from_str(s)
+                        .map_err(|_| format!("Invalid pubkey: {}", s))
+                };
+                (|| -> Result<_, String> {
+                    Ok((
+                        parse(nav_mint)?,
+                        parse(base_mint)?,
+                        parse(market_group)?,
+                        parse(market_meta)?,
+                        parse(mayflower_market)?,
+                        parse(market_base_vault)?,
+                        parse(market_nav_vault)?,
+                        parse(fee_vault)?,
+                    ))
+                })()
             };
-            match (|| -> Result<_, String> {
-                Ok((
-                    parse(nav_mint)?,
-                    parse(base_mint)?,
-                    parse(market_group)?,
-                    parse(market_meta)?,
-                    parse(mayflower_market)?,
-                    parse(market_base_vault)?,
-                    parse(market_nav_vault)?,
-                    parse(fee_vault)?,
-                ))
-            })() {
+            match result {
                 Ok((nm, bm, mg, mm, mfm, mbv, mnv, fv)) => {
                     app.build_create_market_config(nm, bm, mg, mm, mfm, mbv, mnv, fv);
                 }
