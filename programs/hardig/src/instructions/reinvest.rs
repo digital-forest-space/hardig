@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
+use anchor_spl::associated_token::get_associated_token_address;
 use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
@@ -49,19 +50,28 @@ pub struct Reinvest<'info> {
     #[account(mut)]
     pub user_shares: UncheckedAccount<'info>,
 
-    /// CHECK: Validated in handler as ATA derivation.
-    #[account(mut)]
+    /// CHECK: Validated as correct ATA for program_pda + nav_mint.
+    #[account(
+        mut,
+        constraint = user_nav_sol_ata.key() == get_associated_token_address(&program_pda.key(), &market_config.nav_mint) @ HardigError::InvalidAta,
+    )]
     pub user_nav_sol_ata: UncheckedAccount<'info>,
 
     /// Program PDA's wSOL ATA (used for buy CPI input).
-    /// CHECK: Validated in handler as ATA derivation.
-    #[account(mut)]
+    /// CHECK: Validated as correct ATA for program_pda + base_mint.
+    #[account(
+        mut,
+        constraint = user_wsol_ata.key() == get_associated_token_address(&program_pda.key(), &market_config.base_mint) @ HardigError::InvalidAta,
+    )]
     pub user_wsol_ata: UncheckedAccount<'info>,
 
     /// Program PDA's wSOL ATA (used for borrow CPI output).
     /// In practice this is the same address as user_wsol_ata.
-    /// CHECK: Validated in handler as ATA derivation.
-    #[account(mut)]
+    /// CHECK: Validated as correct ATA for program_pda + base_mint.
+    #[account(
+        mut,
+        constraint = user_base_token_ata.key() == get_associated_token_address(&program_pda.key(), &market_config.base_mint) @ HardigError::InvalidAta,
+    )]
     pub user_base_token_ata: UncheckedAccount<'info>,
 
     /// CHECK: Constant address validated by constraint.
@@ -111,7 +121,7 @@ pub struct Reinvest<'info> {
     pub log_account: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
+pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
     validate_key(
         &ctx.accounts.signer,
         &ctx.accounts.key_nft_ata,
@@ -162,6 +172,9 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
     // Drop borrows before CPI
     drop(market_data);
     drop(pp_data);
+
+    // Read deposited shares before buy CPI for slippage check
+    let shares_before = deposited_shares;
 
     let market = mayflower::MarketAddresses {
         nav_mint: mc.nav_mint,
@@ -229,7 +242,7 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
         ctx.accounts.user_nav_sol_ata.key(),
         ctx.accounts.user_wsol_ata.key(),
         actual_amount,
-        0, // min_output
+        0, // Mayflower's own min_output — we enforce slippage ourselves
         &market,
     );
 
@@ -257,6 +270,14 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
         ],
         signer_seeds,
     )?;
+
+    // Slippage check: verify navSOL shares received >= min_out
+    let shares_after = {
+        let pp_data = ctx.accounts.personal_position.try_borrow_data()?;
+        mayflower::read_deposited_shares(&pp_data)?
+    };
+    let shares_received = shares_after.saturating_sub(shares_before);
+    require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
     // Update accounting with actual amounts
     ctx.accounts.position.protocol_debt = ctx

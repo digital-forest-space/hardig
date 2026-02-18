@@ -1,4 +1,5 @@
 import { ComputeBudgetProgram } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 import {
   deriveProgramPda,
   derivePersonalPosition,
@@ -35,7 +36,7 @@ export async function buildReinvest(program, wallet) {
   });
 
   const ix = await program.methods
-    .reinvest()
+    .reinvest(new BN(0)) // min_out = 0 (no slippage protection)
     .accounts({
       signer: wallet,
       keyNftAta: nftAta,

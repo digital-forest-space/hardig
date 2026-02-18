@@ -38,6 +38,14 @@ pub enum HardigError {
     #[msg("Invalid Mayflower account address or derivation")]
     InvalidMayflowerAccount,
 
+    // Slippage errors
+    #[msg("Output amount is less than minimum specified (slippage exceeded)")]
+    SlippageExceeded,
+
+    // ATA validation errors
+    #[msg("Token account is not the correct ATA for the program PDA")]
+    InvalidAta,
+
     // State errors
     #[msg("Invalid NFT mint")]
     InvalidNftMint,

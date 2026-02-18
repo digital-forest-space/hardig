@@ -42,7 +42,7 @@ export async function buildBuy(program, wallet, amountLamports) {
   const syncIx = createSyncNativeInstruction(wsolAta, TOKEN_PROGRAM_ID);
 
   const buyIx = await program.methods
-    .buy(new BN(amountLamports))
+    .buy(new BN(amountLamports), new BN(0)) // min_out = 0 (no slippage protection)
     .accounts({
       signer: wallet,
       keyNftAta: nftAta,
