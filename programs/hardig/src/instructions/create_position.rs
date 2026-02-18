@@ -118,7 +118,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
         DataV2 {
             name: "H\u{00e4}rdig Admin Key".to_string(),
             symbol: "HKEY".to_string(),
-            uri: String::new(),
+            uri: "https://gateway.irys.xyz/8o9S13VAezVYyU7TCzYxLkt9Uw25Z1bNb1jLTcdM2NBA".to_string(),
             seller_fee_basis_points: 0,
             creators: None,
             collection: None,

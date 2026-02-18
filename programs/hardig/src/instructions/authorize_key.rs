@@ -174,7 +174,7 @@ pub fn handler(
         DataV2 {
             name: "H\u{00e4}rdig Key".to_string(),
             symbol: "HKEY".to_string(),
-            uri: String::new(),
+            uri: "https://gateway.irys.xyz/8o9S13VAezVYyU7TCzYxLkt9Uw25Z1bNb1jLTcdM2NBA".to_string(),
             seller_fee_basis_points: 0,
             creators: None,
             collection: None,
