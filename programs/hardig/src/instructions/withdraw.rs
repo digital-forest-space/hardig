@@ -168,6 +168,13 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
     let mint_key = ctx.accounts.position.admin_nft_mint;
     let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
+    // Read deposited shares BEFORE the sell CPI
+    let pp_info = ctx.accounts.personal_position.to_account_info();
+    let shares_before = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_deposited_shares(&data)?
+    };
+
     invoke_signed(
         &ix,
         &[
@@ -176,7 +183,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
             ctx.accounts.market_group.to_account_info(),
             ctx.accounts.market_meta.to_account_info(),
             ctx.accounts.mayflower_market.to_account_info(),
-            ctx.accounts.personal_position.to_account_info(),
+            pp_info.clone(),
             ctx.accounts.user_shares.to_account_info(),
             ctx.accounts.nav_sol_mint.to_account_info(),
             ctx.accounts.wsol_mint.to_account_info(),
@@ -193,11 +200,20 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         signer_seeds,
     )?;
 
+    // Read deposited shares AFTER the sell CPI and compute the actual navSOL sold
+    let shares_after = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_deposited_shares(&data)?
+    };
+    let shares_sold = shares_before
+        .checked_sub(shares_after)
+        .ok_or(HardigError::InsufficientFunds)?;
+
     ctx.accounts.position.deposited_nav = ctx
         .accounts
         .position
         .deposited_nav
-        .checked_sub(amount)
+        .checked_sub(shares_sold)
         .ok_or(HardigError::InsufficientFunds)?;
 
     Ok(())

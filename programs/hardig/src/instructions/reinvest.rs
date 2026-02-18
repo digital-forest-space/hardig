@@ -178,7 +178,15 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
     let mint_key = ctx.accounts.position.admin_nft_mint;
     let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
 
+    let pp_info = ctx.accounts.personal_position.to_account_info();
+
     // Step 1: Borrow the available capacity
+    // Read debt BEFORE the borrow CPI
+    let debt_before = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+
     let borrow_ix = mayflower::build_borrow_ix(
         program_pda,
         ctx.accounts.personal_position.key(),
@@ -200,13 +208,22 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
             ctx.accounts.wsol_mint.to_account_info(),
             ctx.accounts.user_base_token_ata.to_account_info(),
             ctx.accounts.mayflower_market.to_account_info(),
-            ctx.accounts.personal_position.to_account_info(),
+            pp_info.clone(),
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.log_account.to_account_info(),
             ctx.accounts.mayflower_program.to_account_info(),
         ],
         signer_seeds,
     )?;
+
+    // Read debt AFTER the borrow CPI to get actual borrowed amount
+    let debt_after = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+    let actual_borrowed = debt_after
+        .checked_sub(debt_before)
+        .ok_or(HardigError::BorrowCapacityExceeded)?;
 
     // Step 2: Read actual wSOL balance after borrow (fees may have been deducted)
     let wsol_data = ctx.accounts.user_base_token_ata.try_borrow_data()?;
@@ -222,6 +239,12 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
     }
 
     // Step 3: Buy navSOL with the actual borrowed amount
+    // Read deposited shares BEFORE the buy CPI
+    let shares_before = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_deposited_shares(&data)?
+    };
+
     let buy_ix = mayflower::build_buy_ix(
         program_pda,
         ctx.accounts.personal_position.key(),
@@ -241,7 +264,7 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
             ctx.accounts.market_group.to_account_info(),
             ctx.accounts.market_meta.to_account_info(),
             ctx.accounts.mayflower_market.to_account_info(),
-            ctx.accounts.personal_position.to_account_info(),
+            pp_info.clone(),
             ctx.accounts.user_shares.to_account_info(),
             ctx.accounts.nav_sol_mint.to_account_info(),
             ctx.accounts.wsol_mint.to_account_info(),
@@ -258,19 +281,28 @@ pub fn handler(ctx: Context<Reinvest>) -> Result<()> {
         signer_seeds,
     )?;
 
-    // Update accounting with actual amounts
+    // Read deposited shares AFTER the buy CPI and compute the actual navSOL received
+    let shares_after = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_deposited_shares(&data)?
+    };
+    let shares_received = shares_after
+        .checked_sub(shares_before)
+        .ok_or(HardigError::InsufficientFunds)?;
+
+    // Update accounting with actual amounts from Mayflower
     ctx.accounts.position.protocol_debt = ctx
         .accounts
         .position
         .protocol_debt
-        .checked_add(capacity)
+        .checked_add(actual_borrowed)
         .ok_or(HardigError::BorrowCapacityExceeded)?;
 
     ctx.accounts.position.deposited_nav = ctx
         .accounts
         .position
         .deposited_nav
-        .checked_add(actual_amount)
+        .checked_add(shares_received)
         .ok_or(HardigError::InsufficientFunds)?;
 
     Ok(())
