@@ -9,6 +9,9 @@ skip-lint = false
 [programs.localnet]
 hardig = "4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p"
 
+[programs.mainnet]
+hardig = "4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p"
+
 [registry]
 url = "https://api.apr.dev"
 

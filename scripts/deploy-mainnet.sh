@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Deploy Härdig to mainnet.
+#
+# Usage: ./scripts/deploy-mainnet.sh <KEYPAIR_PATH>
+#
+# Environment:
+#   SOLANA_RPC_URL  — mainnet RPC endpoint (required)
+#
+# The keypair is used as the payer for deployment fees.
+# The program keypair at target/deploy/hardig-keypair.json determines the
+# program address. After deployment, you can transfer upgrade authority to a
+# multisig with:
+#   solana program set-upgrade-authority <PROGRAM_ID> \
+#     --new-upgrade-authority <MULTISIG> --keypair <KEYPAIR_PATH>
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BPF_SO="$PROJECT_ROOT/target/deploy/hardig.so"
+PROGRAM_KP="$PROJECT_ROOT/target/deploy/hardig-keypair.json"
+PROGRAM_ID="4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p"
+
+# --- Args ---
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <KEYPAIR_PATH>"
+    echo ""
+    echo "  KEYPAIR_PATH  Path to the payer keypair JSON file"
+    echo ""
+    echo "Environment:"
+    echo "  SOLANA_RPC_URL  Mainnet RPC endpoint (required)"
+    exit 1
+fi
+
+PAYER_KP="$1"
+
+# --- Checks ---
+
+if [ -z "${SOLANA_RPC_URL:-}" ]; then
+    echo "Error: SOLANA_RPC_URL is not set"
+    echo "  export SOLANA_RPC_URL=https://your-mainnet-rpc.example.com"
+    exit 1
+fi
+
+if [ ! -f "$PAYER_KP" ]; then
+    echo "Error: Keypair not found: $PAYER_KP"
+    exit 1
+fi
+
+if [ ! -f "$BPF_SO" ]; then
+    echo "Error: Program binary not found. Run 'anchor build' first."
+    exit 1
+fi
+
+if [ ! -f "$PROGRAM_KP" ]; then
+    echo "Error: Program keypair not found: $PROGRAM_KP"
+    echo "  This determines the on-chain program address."
+    exit 1
+fi
+
+# Verify Anchor.toml has mainnet config matching expected program ID
+ANCHOR_TOML="$PROJECT_ROOT/Anchor.toml"
+if ! grep -q '^\[programs\.mainnet\]' "$ANCHOR_TOML" 2>/dev/null; then
+    echo "Error: Anchor.toml is missing [programs.mainnet] section"
+    exit 1
+fi
+ANCHOR_MAINNET_ID=$(grep -A1 '^\[programs\.mainnet\]' "$ANCHOR_TOML" | grep 'hardig' | sed 's/.*= *"\(.*\)"/\1/')
+if [ "$ANCHOR_MAINNET_ID" != "$PROGRAM_ID" ]; then
+    echo "Error: Anchor.toml [programs.mainnet] hardig = \"$ANCHOR_MAINNET_ID\" does not match expected program ID ($PROGRAM_ID)"
+    exit 1
+fi
+
+# Verify program keypair matches expected program ID
+ACTUAL_ID=$(solana-keygen pubkey "$PROGRAM_KP" 2>/dev/null)
+if [ "$ACTUAL_ID" != "$PROGRAM_ID" ]; then
+    echo "Error: Program keypair pubkey ($ACTUAL_ID) does not match expected program ID ($PROGRAM_ID)"
+    exit 1
+fi
+
+# --- Pre-flight ---
+
+echo "=== Härdig Mainnet Deployment ==="
+echo ""
+echo "  RPC:        $SOLANA_RPC_URL"
+echo "  Payer:      $(solana-keygen pubkey "$PAYER_KP")"
+echo "  Program ID: $PROGRAM_ID"
+echo "  Binary:     $BPF_SO ($(du -h "$BPF_SO" | cut -f1 | xargs))"
+echo ""
+
+# Check payer balance
+BALANCE=$(solana balance --keypair "$PAYER_KP" --url "$SOLANA_RPC_URL" 2>/dev/null | awk '{print $1}')
+echo "  Payer balance: $BALANCE SOL"
+
+# Check if program is already deployed
+if solana program show "$PROGRAM_ID" --url "$SOLANA_RPC_URL" &>/dev/null; then
+    echo "  Program status: already deployed (this will be an upgrade)"
+    UPGRADE=true
+else
+    echo "  Program status: not yet deployed (initial deployment)"
+    UPGRADE=false
+fi
+
+echo ""
+read -rp "Proceed? [y/N] " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+echo ""
+
+# --- Deploy ---
+
+if [ "$UPGRADE" = true ]; then
+    echo "Upgrading program..."
+    solana program deploy "$BPF_SO" \
+        --program-id "$PROGRAM_KP" \
+        --keypair "$PAYER_KP" \
+        --url "$SOLANA_RPC_URL"
+else
+    echo "Deploying program..."
+    solana program deploy "$BPF_SO" \
+        --program-id "$PROGRAM_KP" \
+        --keypair "$PAYER_KP" \
+        --url "$SOLANA_RPC_URL"
+fi
+
+echo ""
+echo "Verifying deployment..."
+solana program show "$PROGRAM_ID" --url "$SOLANA_RPC_URL"
+
+echo ""
+echo "Done. Program deployed at: $PROGRAM_ID"
+echo ""
+echo "Next steps:"
+echo "  1. Initialize protocol:  cargo run -p hardig-tui -- $PAYER_KP --cluster $SOLANA_RPC_URL init-protocol"
+echo "  2. Create market config:  cargo run -p hardig-tui -- $PAYER_KP --cluster $SOLANA_RPC_URL create-market-config ..."
+echo ""
+echo "When ready for multisig, transfer upgrade authority:"
+echo "  solana program set-upgrade-authority $PROGRAM_ID \\"
+echo "    --new-upgrade-authority <MULTISIG_ADDRESS> \\"
+echo "    --keypair $PAYER_KP --url $SOLANA_RPC_URL"
