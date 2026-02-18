@@ -92,6 +92,12 @@ enum Action {
     },
     /// Show compact position balances
     Balances,
+    /// Transfer protocol admin to a new pubkey (current admin only)
+    TransferAdmin {
+        /// New admin public key
+        #[arg(long)]
+        new_admin: String,
+    },
     /// Create a MarketConfig PDA (protocol admin only)
     CreateMarketConfig {
         /// Nav token mint (e.g. navSOL)
@@ -298,6 +304,7 @@ fn action_to_name(action: &Action) -> String {
         Action::AuthorizeKey { .. } => "authorize-key".into(),
         Action::RevokeKey { .. } => "revoke-key".into(),
         Action::Balances => "balances".into(),
+        Action::TransferAdmin { .. } => "transfer-admin".into(),
         Action::CreateMarketConfig { .. } => "create-market-config".into(),
     }
 }
@@ -388,6 +395,20 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 ("Key index to revoke".into(), index.to_string()),
             ];
             app.build_revoke_key();
+        }
+        Action::TransferAdmin { new_admin } => {
+            use std::str::FromStr;
+            match solana_sdk::pubkey::Pubkey::from_str(new_admin) {
+                Ok(pubkey) => {
+                    app.build_transfer_admin(pubkey);
+                }
+                Err(_) => {
+                    return Some(CliOutput::Error {
+                        action: "transfer-admin".into(),
+                        error: format!("Invalid pubkey: {}", new_admin),
+                    });
+                }
+            }
         }
         Action::CreateMarketConfig {
             nav_mint,

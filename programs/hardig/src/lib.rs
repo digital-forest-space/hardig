@@ -70,6 +70,11 @@ pub mod hardig {
         instructions::init_mayflower_position::handler(ctx)
     }
 
+    /// Transfer protocol admin rights to a new pubkey (current admin only).
+    pub fn transfer_admin(ctx: Context<TransferAdmin>, new_admin: Pubkey) -> Result<()> {
+        instructions::transfer_admin::handler(ctx, new_admin)
+    }
+
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
     pub fn create_market_config(
         ctx: Context<CreateMarketConfig>,

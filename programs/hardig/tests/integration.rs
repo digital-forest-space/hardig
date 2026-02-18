@@ -762,6 +762,91 @@ fn test_create_market_config_non_admin_denied() {
 }
 
 // ===========================================================================
+// #36: Transfer admin tests
+// ===========================================================================
+
+fn ix_transfer_admin(admin: &Pubkey, new_admin: &Pubkey) -> Instruction {
+    let (config_pda, _) =
+        Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id());
+
+    let mut data = sighash("transfer_admin");
+    data.extend_from_slice(new_admin.as_ref());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new_readonly(*admin, true),
+            AccountMeta::new(config_pda, false),
+        ],
+    )
+}
+
+fn read_protocol_config(svm: &LiteSVM) -> ProtocolConfig {
+    let (config_pda, _) =
+        Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id());
+    let account = svm.get_account(&config_pda).unwrap();
+    ProtocolConfig::try_deserialize(&mut account.data.as_slice()).unwrap()
+}
+
+#[test]
+fn test_transfer_admin_ok() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let new_admin = Keypair::new();
+    svm.airdrop(&new_admin.pubkey(), 5_000_000_000).unwrap();
+
+    // Transfer admin to new_admin
+    let ix = ix_transfer_admin(&admin.pubkey(), &new_admin.pubkey());
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    // Verify the config now has the new admin
+    let config = read_protocol_config(&svm);
+    assert_eq!(config.admin, new_admin.pubkey());
+}
+
+#[test]
+fn test_transfer_admin_non_admin_denied() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let non_admin = Keypair::new();
+    svm.airdrop(&non_admin.pubkey(), 5_000_000_000).unwrap();
+
+    // Non-admin tries to transfer — should fail
+    let ix = ix_transfer_admin(&non_admin.pubkey(), &non_admin.pubkey());
+    assert!(send_tx(&mut svm, &[ix], &[&non_admin]).is_err());
+
+    // Verify admin is unchanged
+    let config = read_protocol_config(&svm);
+    assert_eq!(config.admin, admin.pubkey());
+}
+
+#[test]
+fn test_transfer_admin_old_admin_rejected_new_admin_works() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let new_admin = Keypair::new();
+    svm.airdrop(&new_admin.pubkey(), 5_000_000_000).unwrap();
+
+    // Transfer admin
+    let ix = ix_transfer_admin(&admin.pubkey(), &new_admin.pubkey());
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    // Old admin tries to create market config — should fail
+    assert!(send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).is_err());
+
+    // New admin can create market config
+    send_tx(&mut svm, &[ix_create_market_config(&new_admin.pubkey())], &[&new_admin]).unwrap();
+
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    let mc = read_market_config(&svm, &mc_pda);
+    assert_eq!(mc.nav_mint, DEFAULT_NAV_SOL_MINT);
+}
+
+// ===========================================================================
 // #16: Permission matrix tests
 // ===========================================================================
 
