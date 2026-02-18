@@ -182,6 +182,7 @@ pub struct App {
     // Form state
     pub form_kind: Option<FormKind>,
     pub form_fields: Vec<(String, String)>,
+    pub form_info: Option<String>,
     pub input_field: usize,
     pub input_buf: String,
 
@@ -240,6 +241,7 @@ impl App {
             last_refresh: None,
             form_kind: None,
             form_fields: Vec::new(),
+            form_info: None,
             input_field: 0,
             input_buf: String::new(),
             perm_bits: PRESET_OPERATOR,
@@ -347,7 +349,9 @@ impl App {
         self.my_permissions.map_or(false, |p| p & perm != 0)
     }
     pub fn cpi_ready(&self) -> bool {
-        self.mayflower_initialized && self.atas_exist
+        // ATAs are created on-demand via create_ata_idempotent in each instruction,
+        // so we only need the Mayflower PersonalPosition to be initialized.
+        self.mayflower_initialized
     }
     pub fn can_buy(&self) -> bool {
         self.cpi_ready() && self.has_perm(PERM_BUY)
@@ -510,6 +514,7 @@ impl App {
         self.perm_bits = PRESET_OPERATOR;
         self.perm_cursor = 0;
         self.screen = Screen::Form;
+        self.form_info = None;
         self.form_kind = Some(FormKind::AuthorizeKey);
         let my_wallet = self.keypair.pubkey().to_string();
         self.form_fields = vec![
@@ -521,6 +526,7 @@ impl App {
     }
 
     fn enter_revoke_key(&mut self) {
+        self.form_info = None;
         let admin_mint = self.position.as_ref().map(|p| p.admin_nft_mint);
         let revocable: Vec<(usize, &KeyEntry)> = self
             .keyring
@@ -553,6 +559,7 @@ impl App {
 
     fn enter_buy(&mut self) {
         self.screen = Screen::Form;
+        self.form_info = None;
         self.form_kind = Some(FormKind::Buy);
         self.form_fields = vec![("Amount (SOL)".into(), "1".into())];
         self.input_field = 0;
@@ -563,13 +570,15 @@ impl App {
         let max = self.position.as_ref().map(|p| p.deposited_nav).unwrap_or(0);
         self.screen = Screen::Form;
         self.form_kind = Some(FormKind::Sell);
-        self.form_fields = vec![("Amount (SOL)".into(), lamports_to_sol(max))];
+        self.form_info = Some(format!("Available: {} navSOL", lamports_to_sol(max)));
+        self.form_fields = vec![("Amount (navSOL)".into(), lamports_to_sol(max))];
         self.input_field = 0;
         self.input_buf = self.form_fields[0].1.clone();
     }
 
     fn enter_borrow(&mut self) {
         self.screen = Screen::Form;
+        self.form_info = None;
         self.form_kind = Some(FormKind::Borrow);
         self.form_fields = vec![("Amount (SOL)".into(), String::new())];
         self.input_field = 0;
@@ -579,6 +588,7 @@ impl App {
     fn enter_repay(&mut self) {
         let max = self.position.as_ref().map(|p| p.user_debt + p.protocol_debt).unwrap_or(0);
         self.screen = Screen::Form;
+        self.form_info = None;
         self.form_kind = Some(FormKind::Repay);
         self.form_fields = vec![("Amount (SOL)".into(), lamports_to_sol(max))];
         self.input_field = 0;
@@ -1698,20 +1708,16 @@ impl App {
             return;
         }
 
-        // Check wSOL ATA
+        // Check ATAs — each may or may not exist (sell/borrow close the wSOL ATA)
         let wsol_exists = self.read_token_balance(&self.wsol_ata);
         let nav_exists = self.read_token_balance(&self.nav_sol_ata);
-
-        match (wsol_exists, nav_exists) {
-            (Some(wsol), Some(nav)) => {
-                self.wsol_balance = wsol;
-                self.nav_sol_balance = nav;
-                self.atas_exist = true;
-            }
-            _ => {
-                self.atas_exist = false;
-            }
+        if let Some(wsol) = wsol_exists {
+            self.wsol_balance = wsol;
         }
+        if let Some(nav) = nav_exists {
+            self.nav_sol_balance = nav;
+        }
+        self.atas_exist = wsol_exists.is_some() || nav_exists.is_some();
 
         // Read real borrow capacity from Mayflower accounts
         if let Ok(pp_acc) = self.rpc.get_account(&self.pp_pda) {

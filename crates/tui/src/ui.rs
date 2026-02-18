@@ -41,11 +41,7 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| "never".into());
 
     let mf_status = if app.mayflower_initialized {
-        if app.atas_exist {
-            "CPI Ready"
-        } else {
-            "Need ATAs"
-        }
+        "CPI Ready"
     } else if app.position_pda.is_some() {
         "Need Init"
     } else {
@@ -169,16 +165,6 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
                 "{} SOL",
                 app::lamports_to_sol(app.nav_sol_balance)
             )),
-            Span::raw("    "),
-            Span::styled("ATAs: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                if app.atas_exist { "OK" } else { "Missing" },
-                Style::default().fg(if app.atas_exist {
-                    Color::Green
-                } else {
-                    Color::Red
-                }),
-            ),
         ]));
     } else {
         lines.push(Line::from(""));
@@ -276,6 +262,14 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(info) = &app.form_info {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", info),
+            Style::default().fg(Color::Yellow),
+        )));
+        lines.push(Line::from(""));
+    }
 
     for (i, (label, value)) in app.form_fields.iter().enumerate() {
         let is_active = i == app.input_field;
