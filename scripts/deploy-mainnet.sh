@@ -53,6 +53,21 @@ if [ ! -f "$BPF_SO" ]; then
     exit 1
 fi
 
+# Check if .so is older than any source file
+STALE_FILES=$(find "$PROJECT_ROOT/programs/hardig/src" -name '*.rs' -newer "$BPF_SO" 2>/dev/null)
+if [ -n "$STALE_FILES" ]; then
+    echo "WARNING: Binary is older than these source files:"
+    echo "$STALE_FILES" | sed 's|^|  |'
+    echo ""
+    echo "  Run 'anchor build' first to avoid deploying stale code."
+    echo ""
+    read -rp "Deploy anyway? [y/N] " STALE_CONFIRM
+    if [[ ! "$STALE_CONFIRM" =~ ^[Yy]$ ]]; then
+        echo "Aborted. Run 'anchor build' and try again."
+        exit 0
+    fi
+fi
+
 if [ ! -f "$PROGRAM_KP" ]; then
     echo "Error: Program keypair not found: $PROGRAM_KP"
     echo "  This determines the on-chain program address."

@@ -1397,24 +1397,10 @@
           "writable": true
         },
         {
-          "name": "tenant"
-        },
-        {
-          "name": "market_group"
-        },
-        {
           "name": "market_meta"
         },
         {
           "name": "market_base_vault",
-          "writable": true
-        },
-        {
-          "name": "market_nav_vault",
-          "writable": true
-        },
-        {
-          "name": "fee_vault",
           "writable": true
         },
         {

@@ -126,22 +126,19 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  Deposited: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{} SOL", app::lamports_to_sol(pos.deposited_nav)),
+                format!("{} navSOL", app::lamports_to_sol(pos.deposited_nav)),
                 Style::default().fg(Color::Green),
             ),
             Span::raw("    "),
-            Span::styled("User Debt: ", Style::default().fg(Color::Gray)),
+            Span::styled("Debt: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{} SOL", app::lamports_to_sol(pos.user_debt)),
-                Style::default().fg(if pos.user_debt > 0 {
+                format!("{} SOL", app::lamports_to_sol(pos.user_debt + pos.protocol_debt)),
+                Style::default().fg(if pos.user_debt + pos.protocol_debt > 0 {
                     Color::Red
                 } else {
                     Color::White
                 }),
             ),
-            Span::raw("    "),
-            Span::styled("Protocol Debt: ", Style::default().fg(Color::Gray)),
-            Span::raw(format!("{} SOL", app::lamports_to_sol(pos.protocol_debt))),
         ]),
         Line::from(vec![
             Span::styled("  Borrow Capacity: ", Style::default().fg(Color::Gray)),
@@ -440,18 +437,17 @@ fn draw_result(frame: &mut Frame, app: &App, area: Rect) {
 
     match (&app.pre_tx_snapshot, &app.position) {
         (Some(before), Some(pos)) => {
-            let rows_data: Vec<(&str, u64, u64)> = vec![
-                ("Deposited", before.deposited_nav, pos.deposited_nav),
-                ("User Debt", before.user_debt, pos.user_debt),
-                ("Protocol Debt", before.protocol_debt, pos.protocol_debt),
-                ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity),
-                ("wSOL", before.wsol_balance, app.wsol_balance),
-                ("navSOL", before.nav_sol_balance, app.nav_sol_balance),
+            let rows_data: Vec<(&str, u64, u64, &str)> = vec![
+                ("Deposited", before.deposited_nav, pos.deposited_nav, "navSOL"),
+                ("Debt", before.user_debt + before.protocol_debt, pos.user_debt + pos.protocol_debt, "SOL"),
+                ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity, "SOL"),
+                ("wSOL", before.wsol_balance, app.wsol_balance, "SOL"),
+                ("navSOL", before.nav_sol_balance, app.nav_sol_balance, "navSOL"),
             ];
 
             let rows: Vec<Row> = rows_data
                 .iter()
-                .map(|(label, bv, av)| {
+                .map(|(label, bv, av, unit)| {
                     let delta = app::format_delta(*bv, *av);
                     let delta_color = if *av > *bv {
                         Color::Green
@@ -462,8 +458,8 @@ fn draw_result(frame: &mut Frame, app: &App, area: Rect) {
                     };
                     Row::new(vec![
                         Cell::from(*label).style(Style::default().fg(Color::Gray)),
-                        Cell::from(format!("{} SOL", app::lamports_to_sol(*bv))),
-                        Cell::from(format!("{} SOL", app::lamports_to_sol(*av))),
+                        Cell::from(format!("{} {}", app::lamports_to_sol(*bv), unit)),
+                        Cell::from(format!("{} {}", app::lamports_to_sol(*av), unit)),
                         Cell::from(delta).style(Style::default().fg(delta_color)),
                     ])
                 })

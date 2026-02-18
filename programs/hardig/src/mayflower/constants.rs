@@ -46,6 +46,7 @@ pub const IX_SELL: [u8; 8] = [223, 239, 212, 254, 255, 120, 53, 1];
 pub const PERSONAL_POSITION_SEED: &[u8] = b"personal_position";
 pub const PERSONAL_POSITION_ESCROW_SEED: &[u8] = b"personal_position_escrow";
 pub const LOG_SEED: &[u8] = b"log";
+pub const LIQ_VAULT_MAIN_SEED: &[u8] = b"liq_vault_main";
 
 // PersonalPosition account layout offsets
 pub const PP_DISCRIMINATOR: [u8; 8] = [40, 172, 123, 89, 170, 15, 56, 141];

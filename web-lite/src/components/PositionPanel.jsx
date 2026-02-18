@@ -10,22 +10,16 @@ export function PositionPanel() {
       <h2>Position</h2>
       <div class="data-row">
         <span class="label">Deposited (local)</span>
-        <span class="value">{lamportsToSol(pos.depositedNav)} SOL</span>
+        <span class="value">{lamportsToSol(pos.depositedNav)} navSOL</span>
       </div>
       <div class="data-row">
         <span class="label">Deposited (Mayflower)</span>
         <span class="value">{lamportsToSol(mfDepositedShares.value)} shares</span>
       </div>
       <div class="data-row">
-        <span class="label">User Debt</span>
-        <span class={`value ${pos.userDebt > 0 ? 'negative' : ''}`}>
-          {lamportsToSol(pos.userDebt)} SOL
-        </span>
-      </div>
-      <div class="data-row">
-        <span class="label">Protocol Debt</span>
-        <span class={`value ${pos.protocolDebt > 0 ? 'negative' : ''}`}>
-          {lamportsToSol(pos.protocolDebt)} SOL
+        <span class="label">Debt</span>
+        <span class={`value ${pos.userDebt + pos.protocolDebt > 0 ? 'negative' : ''}`}>
+          {lamportsToSol(pos.userDebt + pos.protocolDebt)} SOL
         </span>
       </div>
       <div class="data-row">

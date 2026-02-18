@@ -172,8 +172,7 @@ enum CliOutput {
 #[derive(Serialize)]
 struct BalancesCompact {
     deposited: String,
-    user_debt: String,
-    protocol_debt: String,
+    debt: String,
     borrow_capacity: String,
     wsol: String,
     nav_sol: String,
@@ -196,8 +195,7 @@ struct PositionInfo {
     admin_mint: String,
     role: String,
     deposited_nav: String,
-    user_debt: String,
-    protocol_debt: String,
+    debt: String,
     borrow_capacity: String,
 }
 
@@ -607,14 +605,13 @@ fn execute_pending(app: &mut app::App, action_name: &str) -> Result<CliOutput, C
 
 fn print_state_diff(before: &app::PositionSnapshot, app: &app::App) {
     eprintln!("[RESULT] State changes:");
-    let rows: Vec<(&str, u64, u64)> = if let Some(pos) = &app.position {
+    let rows: Vec<(&str, u64, u64, &str)> = if let Some(pos) = &app.position {
         vec![
-            ("Deposited", before.deposited_nav, pos.deposited_nav),
-            ("User Debt", before.user_debt, pos.user_debt),
-            ("Protocol Debt", before.protocol_debt, pos.protocol_debt),
-            ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity),
-            ("wSOL", before.wsol_balance, app.wsol_balance),
-            ("navSOL", before.nav_sol_balance, app.nav_sol_balance),
+            ("Deposited", before.deposited_nav, pos.deposited_nav, "navSOL"),
+            ("Debt", before.user_debt + before.protocol_debt, pos.user_debt + pos.protocol_debt, "SOL"),
+            ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity, "SOL"),
+            ("wSOL", before.wsol_balance, app.wsol_balance, "SOL"),
+            ("navSOL", before.nav_sol_balance, app.nav_sol_balance, "navSOL"),
         ]
     } else {
         return;
@@ -623,12 +620,12 @@ fn print_state_diff(before: &app::PositionSnapshot, app: &app::App) {
         "  {:<14} {:>14} {:>14} {:>14}",
         "", "Before", "After", "Delta"
     );
-    for (label, bv, av) in &rows {
+    for (label, bv, av, unit) in &rows {
         eprintln!(
             "  {:<14} {:>14} {:>14} {:>14}",
             label,
-            format!("{} SOL", lamports_to_sol(*bv)),
-            format!("{} SOL", lamports_to_sol(*av)),
+            format!("{} {}", lamports_to_sol(*bv), unit),
+            format!("{} {}", lamports_to_sol(*av), unit),
             app::format_delta(*bv, *av),
         );
     }
@@ -639,8 +636,7 @@ fn build_balances_output(app: &app::App) -> CliOutput {
         Some(pos) => {
             CliOutput::Balances(BalancesCompact {
                 deposited: lamports_to_sol(pos.deposited_nav),
-                user_debt: lamports_to_sol(pos.user_debt),
-                protocol_debt: lamports_to_sol(pos.protocol_debt),
+                debt: lamports_to_sol(pos.user_debt + pos.protocol_debt),
                 borrow_capacity: lamports_to_sol(app.mf_borrow_capacity),
                 wsol: lamports_to_sol(app.wsol_balance),
                 nav_sol: lamports_to_sol(app.nav_sol_balance),
@@ -663,8 +659,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
             admin_mint: pos.admin_nft_mint.to_string(),
             role: app.my_permissions.map(permissions_name).unwrap_or("None").to_string(),
             deposited_nav: lamports_to_sol(pos.deposited_nav),
-            user_debt: lamports_to_sol(pos.user_debt),
-            protocol_debt: lamports_to_sol(pos.protocol_debt),
+            debt: lamports_to_sol(pos.user_debt + pos.protocol_debt),
             borrow_capacity: lamports_to_sol(app.mf_borrow_capacity),
         }
     });

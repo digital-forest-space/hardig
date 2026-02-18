@@ -97,6 +97,15 @@ export function deriveLogAccount() {
   );
 }
 
+// Derive Mayflower liq_vault_main authority PDA
+const LIQ_VAULT_MAIN_SEED = Buffer.from('liq_vault_main');
+export function deriveLiqVaultMain(marketMeta = DEFAULT_MARKET_META) {
+  return PublicKey.findProgramAddressSync(
+    [LIQ_VAULT_MAIN_SEED, marketMeta.toBuffer()],
+    MAYFLOWER_PROGRAM_ID
+  );
+}
+
 // Derive Metaplex Metadata PDA
 export function deriveMetadataPda(mint) {
   return PublicKey.findProgramAddressSync(

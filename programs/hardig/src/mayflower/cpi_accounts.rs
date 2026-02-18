@@ -46,6 +46,15 @@ pub fn derive_log_account() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[LOG_SEED], &MAYFLOWER_PROGRAM_ID)
 }
 
+/// Derive the Mayflower liq_vault_main authority PDA.
+/// Seeds: ["liq_vault_main", market_meta]
+pub fn derive_liq_vault_main(market_meta: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[LIQ_VAULT_MAIN_SEED, market_meta.as_ref()],
+        &MAYFLOWER_PROGRAM_ID,
+    )
+}
+
 /// Build the `init_personal_position` instruction for Mayflower.
 ///
 /// `payer` signs and pays rent. `owner` is stored as the position owner
@@ -207,7 +216,17 @@ pub fn build_borrow_ix(
 
 /// Build the `repay` instruction for Mayflower.
 ///
-/// Mirror of borrow — transfers SOL back to repay debt.
+/// Account layout (10 accounts):
+///   0: userWallet (signer, writable)
+///   1: marketMetadata (readonly)
+///   2: mayflowerMarket (writable)
+///   3: personalPosition (writable)
+///   4: baseMint (readonly)
+///   5: userBaseTokenATA (writable)
+///   6: marketBaseVault (writable)
+///   7: tokenProgram (readonly)
+///   8: logAccount (writable)
+///   9: mayflowerProgram (readonly)
 pub fn build_repay_ix(
     user_wallet: Pubkey,
     personal_position: Pubkey,
@@ -224,20 +243,16 @@ pub fn build_repay_ix(
     Instruction {
         program_id: MAYFLOWER_PROGRAM_ID,
         accounts: vec![
-            AccountMeta::new(user_wallet, true),
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(market.market_group, false),
-            AccountMeta::new_readonly(market.market_meta, false),
-            AccountMeta::new(market.market_base_vault, false),
-            AccountMeta::new(market.market_nav_vault, false),
-            AccountMeta::new(market.fee_vault, false),
-            AccountMeta::new_readonly(market.base_mint, false),
-            AccountMeta::new(user_base_token_ata, false),
-            AccountMeta::new(market.mayflower_market, false),
-            AccountMeta::new(personal_position, false),
-            AccountMeta::new_readonly(anchor_spl::token::ID, false),
-            AccountMeta::new(log_account, false),
-            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            AccountMeta::new(user_wallet, true),                     // 0: userWallet
+            AccountMeta::new_readonly(market.market_meta, false),    // 1: marketMetadata
+            AccountMeta::new(market.mayflower_market, false),        // 2: mayflowerMarket
+            AccountMeta::new(personal_position, false),              // 3: personalPosition
+            AccountMeta::new_readonly(market.base_mint, false),      // 4: baseMint
+            AccountMeta::new(user_base_token_ata, false),            // 5: userBaseTokenATA
+            AccountMeta::new(market.market_base_vault, false),       // 6: marketBaseVault
+            AccountMeta::new_readonly(anchor_spl::token::ID, false), // 7: tokenProgram
+            AccountMeta::new(log_account, false),                    // 8: logAccount
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),  // 9: mayflowerProgram
         ],
         data,
     }

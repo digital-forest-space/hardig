@@ -35,7 +35,7 @@ pub struct Repay<'info> {
 
     pub system_program: Program<'info, System>,
 
-    // -- Mayflower CPI accounts --
+    // -- Mayflower CPI accounts (10-account repay layout) --
 
     /// Mutable because Mayflower CPI marks user_wallet as writable.
     /// CHECK: PDA derived from this program.
@@ -54,14 +54,6 @@ pub struct Repay<'info> {
     )]
     pub user_base_token_ata: UncheckedAccount<'info>,
 
-    /// CHECK: Constant address validated by constraint.
-    #[account(constraint = tenant.key() == mayflower::MAYFLOWER_TENANT @ HardigError::InvalidMayflowerAccount)]
-    pub tenant: UncheckedAccount<'info>,
-
-    /// CHECK: Validated against market_config.
-    #[account(constraint = market_group.key() == market_config.market_group @ HardigError::InvalidMayflowerAccount)]
-    pub market_group: UncheckedAccount<'info>,
-
     /// CHECK: Validated against market_config.
     #[account(constraint = market_meta.key() == market_config.market_meta @ HardigError::InvalidMayflowerAccount)]
     pub market_meta: UncheckedAccount<'info>,
@@ -69,14 +61,6 @@ pub struct Repay<'info> {
     /// CHECK: Validated against market_config.
     #[account(mut, constraint = market_base_vault.key() == market_config.market_base_vault @ HardigError::InvalidMayflowerAccount)]
     pub market_base_vault: UncheckedAccount<'info>,
-
-    /// CHECK: Validated against market_config.
-    #[account(mut, constraint = market_nav_vault.key() == market_config.market_nav_vault @ HardigError::InvalidMayflowerAccount)]
-    pub market_nav_vault: UncheckedAccount<'info>,
-
-    /// CHECK: Validated against market_config.
-    #[account(mut, constraint = fee_vault.key() == market_config.fee_vault @ HardigError::InvalidMayflowerAccount)]
-    pub fee_vault: UncheckedAccount<'info>,
 
     /// CHECK: Validated against market_config.
     #[account(constraint = wsol_mint.key() == market_config.base_mint @ HardigError::InvalidMayflowerAccount)]
@@ -92,6 +76,7 @@ pub struct Repay<'info> {
 
     pub token_program: Program<'info, Token>,
 
+    /// Mayflower log account.
     /// CHECK: Validated in handler via seed derivation.
     #[account(mut)]
     pub log_account: UncheckedAccount<'info>,
@@ -107,10 +92,13 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     )?;
 
     require!(amount > 0, HardigError::InsufficientFunds);
-    require!(
-        amount <= ctx.accounts.position.user_debt,
-        HardigError::InsufficientFunds
-    );
+    let total_debt = ctx
+        .accounts
+        .position
+        .user_debt
+        .checked_add(ctx.accounts.position.protocol_debt)
+        .ok_or(HardigError::InsufficientFunds)?;
+    require!(amount <= total_debt, HardigError::InsufficientFunds);
 
     let mc = &ctx.accounts.market_config;
 
@@ -159,16 +147,12 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
         &ix,
         &[
             ctx.accounts.program_pda.to_account_info(),
-            ctx.accounts.tenant.to_account_info(),
-            ctx.accounts.market_group.to_account_info(),
             ctx.accounts.market_meta.to_account_info(),
-            ctx.accounts.market_base_vault.to_account_info(),
-            ctx.accounts.market_nav_vault.to_account_info(),
-            ctx.accounts.fee_vault.to_account_info(),
-            ctx.accounts.wsol_mint.to_account_info(),
-            ctx.accounts.user_base_token_ata.to_account_info(),
             ctx.accounts.mayflower_market.to_account_info(),
             ctx.accounts.personal_position.to_account_info(),
+            ctx.accounts.wsol_mint.to_account_info(),
+            ctx.accounts.user_base_token_ata.to_account_info(),
+            ctx.accounts.market_base_vault.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.log_account.to_account_info(),
             ctx.accounts.mayflower_program.to_account_info(),
@@ -176,11 +160,21 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
         signer_seeds,
     )?;
 
+    // Drain protocol_debt first, then user_debt
+    let from_protocol = amount.min(ctx.accounts.position.protocol_debt);
+    let from_user = amount - from_protocol;
+
+    ctx.accounts.position.protocol_debt = ctx
+        .accounts
+        .position
+        .protocol_debt
+        .checked_sub(from_protocol)
+        .ok_or(HardigError::InsufficientFunds)?;
     ctx.accounts.position.user_debt = ctx
         .accounts
         .position
         .user_debt
-        .checked_sub(amount)
+        .checked_sub(from_user)
         .ok_or(HardigError::InsufficientFunds)?;
 
     Ok(())

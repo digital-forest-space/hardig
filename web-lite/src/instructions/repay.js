@@ -1,11 +1,13 @@
+import { SystemProgram } from '@solana/web3.js';
+import { createSyncNativeInstruction } from '@solana/spl-token';
 import { BN } from '@coral-xyz/anchor';
 import {
   deriveProgramPda,
   derivePersonalPosition,
   deriveLogAccount,
   getAta,
-  MAYFLOWER_TENANT,
   MAYFLOWER_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
   DEFAULT_WSOL_MINT,
 } from '../constants.js';
 import { myNftMint, myKeyAuthPda, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
@@ -22,10 +24,18 @@ export async function buildRepay(program, wallet, amountLamports) {
   const marketMeta = mc ? mc.marketMeta : undefined;
   const [programPda] = deriveProgramPda(position.value.adminNftMint);
   const [ppPda] = derivePersonalPosition(programPda, marketMeta);
-  const [logPda] = deriveLogAccount();
+  const [logAccount] = deriveLogAccount();
   const wsolAta = getAta(programPda, baseMint);
 
-  const ix = await program.methods
+  // Pre-IXs: wrap SOL + sync native
+  const transferIx = SystemProgram.transfer({
+    fromPubkey: wallet,
+    toPubkey: wsolAta,
+    lamports: amountLamports,
+  });
+  const syncIx = createSyncNativeInstruction(wsolAta, TOKEN_PROGRAM_ID);
+
+  const repayIx = await program.methods
     .repay(new BN(amountLamports))
     .accounts({
       signer: wallet,
@@ -36,16 +46,12 @@ export async function buildRepay(program, wallet, amountLamports) {
       programPda: programPda,
       personalPosition: ppPda,
       userBaseTokenAta: wsolAta,
-      tenant: MAYFLOWER_TENANT,
-      marketGroup: mc.marketGroup,
       marketMeta: mc.marketMeta,
       marketBaseVault: mc.marketBaseVault,
-      marketNavVault: mc.marketNavVault,
-      feeVault: mc.feeVault,
       wsolMint: mc.baseMint,
       mayflowerMarket: mc.mayflowerMarket,
       mayflowerProgram: MAYFLOWER_PROGRAM_ID,
-      logAccount: logPda,
+      logAccount: logAccount,
     })
     .instruction();
 
@@ -55,7 +61,7 @@ export async function buildRepay(program, wallet, amountLamports) {
       `Amount: ${lamportsToSol(amountLamports)} SOL`,
       `Position: ${shortPubkey(posPda)}`,
     ],
-    instructions: [ix],
+    instructions: [transferIx, syncIx, repayIx],
     extraSigners: [],
   };
 }

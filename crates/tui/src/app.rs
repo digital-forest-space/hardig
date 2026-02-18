@@ -344,7 +344,7 @@ impl App {
     }
     pub fn can_repay(&self) -> bool {
         self.cpi_ready()
-            && self.position.as_ref().map(|p| p.user_debt > 0).unwrap_or(false)
+            && self.position.as_ref().map(|p| p.user_debt + p.protocol_debt > 0).unwrap_or(false)
             && self.has_perm(PERM_REPAY)
     }
     pub fn can_reinvest(&self) -> bool {
@@ -561,7 +561,7 @@ impl App {
     }
 
     fn enter_repay(&mut self) {
-        let max = self.position.as_ref().map(|p| p.user_debt).unwrap_or(0);
+        let max = self.position.as_ref().map(|p| p.user_debt + p.protocol_debt).unwrap_or(0);
         self.screen = Screen::Form;
         self.form_kind = Some(FormKind::Repay);
         self.form_fields = vec![("Amount (SOL)".into(), lamports_to_sol(max))];
@@ -1268,12 +1268,8 @@ impl App {
             AccountMeta::new(self.program_pda, false),              // program_pda
             AccountMeta::new(self.pp_pda, false),                   // personal_position
             AccountMeta::new(self.wsol_ata, false),                 // user_base_token_ata
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),     // tenant
-            AccountMeta::new_readonly(mc.market_group, false),      // market_group
             AccountMeta::new_readonly(mc.market_meta, false),       // market_meta
             AccountMeta::new(mc.market_base_vault, false),          // market_base_vault
-            AccountMeta::new(mc.market_nav_vault, false),           // market_nav_vault
-            AccountMeta::new(mc.fee_vault, false),                  // fee_vault
             AccountMeta::new_readonly(mc.base_mint, false),         // wsol_mint
             AccountMeta::new(mc.mayflower_market, false),           // mayflower_market
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
@@ -1281,13 +1277,24 @@ impl App {
             AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
+        // Prepend wrap: transfer SOL → PDA's wSOL ATA, then sync_native
+        let transfer_ix = solana_sdk::system_instruction::transfer(
+            &self.keypair.pubkey(),
+            &self.wsol_ata,
+            amount,
+        );
+        let sync_ix =
+            spl_token::instruction::sync_native(&SPL_TOKEN_ID, &self.wsol_ata).unwrap();
+
+        let repay_ix = Instruction::new_with_bytes(hardig::ID, &data, accounts);
+
         self.goto_confirm(PendingAction {
             description: vec![
                 "Repay".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
             ],
-            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            instructions: vec![transfer_ix, sync_ix, repay_ix],
             extra_signers: vec![],
         });
     }

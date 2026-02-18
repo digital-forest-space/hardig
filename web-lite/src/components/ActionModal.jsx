@@ -415,17 +415,16 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 </thead>
                 <tbody>
                   {[
-                    ['Deposited', result.snapshot.depositedNav, position.value.depositedNav],
-                    ['User Debt', result.snapshot.userDebt, position.value.userDebt],
-                    ['Protocol Debt', result.snapshot.protocolDebt, position.value.protocolDebt],
-                  ].map(([label, before, after]) => {
+                    ['Deposited', result.snapshot.depositedNav, position.value.depositedNav, 'navSOL'],
+                    ['Debt', result.snapshot.userDebt + result.snapshot.protocolDebt, position.value.userDebt + position.value.protocolDebt, 'SOL'],
+                  ].map(([label, before, after, unit]) => {
                     const delta = formatDelta(before, after);
                     const cls = delta.startsWith('+') ? 'positive' : delta.startsWith('-') ? 'negative' : '';
                     return (
                       <tr key={label}>
                         <th>{label}</th>
-                        <td>{lamportsToSol(before)}</td>
-                        <td>{lamportsToSol(after)}</td>
+                        <td>{lamportsToSol(before)} {unit}</td>
+                        <td>{lamportsToSol(after)} {unit}</td>
                         <td class={`delta ${cls}`}>{delta}</td>
                       </tr>
                     );

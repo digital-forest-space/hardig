@@ -2,7 +2,7 @@
 
 *Swedish — hardy, resilient; able to endure difficult conditions.*
 
-Solana program implementing an NFT keyring model for managing leveraged positions on the Mayflower protocol. Supports multiple nav-token markets (navSOL, navJUP, etc.) via on-chain MarketConfig PDAs.
+Solana program implementing an NFT keyring model for delegated management of positions on the Nirvana protocol. Supports multiple nav-token markets (navSOL, navJUP, etc.) via on-chain MarketConfig PDAs.
 
 Each position is controlled by a set of NFT keys with different permission levels (Admin, Operator, Depositor, Keeper). Keys are standard SPL tokens held in wallets — transfer the NFT and you transfer the permission. Mint authority is permanently disabled after minting each key NFT, guaranteeing a supply of exactly 1. Freeze authority is held by the program PDA, enabling account freezing for theft recovery.
 
