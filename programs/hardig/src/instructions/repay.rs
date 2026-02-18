@@ -92,13 +92,10 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     )?;
 
     require!(amount > 0, HardigError::InsufficientFunds);
-    let total_debt = ctx
-        .accounts
-        .position
-        .user_debt
-        .checked_add(ctx.accounts.position.protocol_debt)
-        .ok_or(HardigError::InsufficientFunds)?;
-    require!(amount <= total_debt, HardigError::InsufficientFunds);
+    require!(
+        amount <= ctx.accounts.position.user_debt,
+        HardigError::InsufficientFunds
+    );
 
     let mc = &ctx.accounts.market_config;
 
@@ -160,21 +157,11 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
         signer_seeds,
     )?;
 
-    // Drain protocol_debt first, then user_debt
-    let from_protocol = amount.min(ctx.accounts.position.protocol_debt);
-    let from_user = amount - from_protocol;
-
-    ctx.accounts.position.protocol_debt = ctx
-        .accounts
-        .position
-        .protocol_debt
-        .checked_sub(from_protocol)
-        .ok_or(HardigError::InsufficientFunds)?;
     ctx.accounts.position.user_debt = ctx
         .accounts
         .position
         .user_debt
-        .checked_sub(from_user)
+        .checked_sub(amount)
         .ok_or(HardigError::InsufficientFunds)?;
 
     Ok(())

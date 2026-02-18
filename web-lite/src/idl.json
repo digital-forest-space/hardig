@@ -2058,14 +2058,7 @@
           {
             "name": "user_debt",
             "docs": [
-              "SOL borrowed by the user (local tracking)."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "protocol_debt",
-            "docs": [
-              "SOL borrowed by the protocol for reinvestment."
+              "Total SOL borrowed (user + reinvest). Mayflower is source of truth."
             ],
             "type": "u64"
           },

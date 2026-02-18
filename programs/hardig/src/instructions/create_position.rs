@@ -156,7 +156,6 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
     position.market_config = Pubkey::default(); // Set during init_mayflower_position
     position.deposited_nav = 0;
     position.user_debt = 0;
-    position.protocol_debt = 0;
     position.max_reinvest_spread_bps = max_reinvest_spread_bps;
     position.last_admin_activity = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;

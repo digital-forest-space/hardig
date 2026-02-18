@@ -574,12 +574,8 @@ fn ix_repay(
             AccountMeta::new(program_pda, false),
             AccountMeta::new(pp_pda, false),
             AccountMeta::new(wsol_ata, false),              // user_base_token_ata
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),
             AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
             AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),
-            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),
-            AccountMeta::new(DEFAULT_FEE_VAULT, false),
             AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),
             AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
@@ -1357,7 +1353,6 @@ fn test_create_position_and_admin_nft() {
     assert_eq!(pos.max_reinvest_spread_bps, 750);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
-    assert_eq!(pos.protocol_debt, 0);
     assert_eq!(pos.market_config, Pubkey::default());
 
     // Check admin key auth

@@ -131,7 +131,7 @@ export async function discoverPosition(connection, wallet) {
     if (posInfo) {
       const data = posInfo.data;
       // Parse PositionNFT: discriminator(8) + admin_nft_mint(32) + position_pda(32) + market_config(32)
-      // + deposited_nav(8) + user_debt(8) + protocol_debt(8) + max_reinvest_spread_bps(2)
+      // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
       // + last_admin_activity(8) + bump(1) + authority_bump(1)
       const view = new DataView(data.buffer, data.byteOffset);
       const adminNftMint = new PublicKey(data.slice(8, 40));
@@ -139,10 +139,9 @@ export async function discoverPosition(connection, wallet) {
       const mcPda = new PublicKey(data.slice(72, 104));
       const depositedNav = Number(view.getBigUint64(104, true));
       const userDebt = Number(view.getBigUint64(112, true));
-      const protocolDebt = Number(view.getBigUint64(120, true));
-      // bytes 128-129: max_reinvest_spread_bps (unused, skip)
-      const lastAdminActivity = Number(view.getBigInt64(130, true));
-      const bump = data[138];
+      // bytes 120-121: max_reinvest_spread_bps (unused, skip)
+      const lastAdminActivity = Number(view.getBigInt64(122, true));
+      const bump = data[130];
 
       const posData = {
         adminNftMint,
@@ -150,7 +149,6 @@ export async function discoverPosition(connection, wallet) {
         marketConfig: mcPda,
         depositedNav,
         userDebt,
-        protocolDebt,
         lastAdminActivity,
         bump,
       };

@@ -188,24 +188,31 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     )?;
 
     // Close PDA's wSOL ATA — returns borrowed wSOL + rent as native SOL to admin
-    let close_ix = Instruction {
-        program_id: anchor_spl::token::ID,
-        accounts: vec![
-            AccountMeta::new(ctx.accounts.user_base_token_ata.key(), false),
-            AccountMeta::new(ctx.accounts.admin.key(), false),
-            AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
-        ],
-        data: vec![9], // SPL Token CloseAccount
+    // Only attempt if the account is an initialized SPL token account (state byte at offset 108)
+    let ata_initialized = {
+        let data = ctx.accounts.user_base_token_ata.try_borrow_data()?;
+        data.len() >= 109 && data[108] != 0
     };
-    invoke_signed(
-        &close_ix,
-        &[
-            ctx.accounts.user_base_token_ata.to_account_info(),
-            ctx.accounts.admin.to_account_info(),
-            ctx.accounts.program_pda.to_account_info(),
-        ],
-        signer_seeds,
-    )?;
+    if ata_initialized {
+        let close_ix = Instruction {
+            program_id: anchor_spl::token::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.user_base_token_ata.key(), false),
+                AccountMeta::new(ctx.accounts.admin.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
+            ],
+            data: vec![9], // SPL Token CloseAccount
+        };
+        invoke_signed(
+            &close_ix,
+            &[
+                ctx.accounts.user_base_token_ata.to_account_info(),
+                ctx.accounts.admin.to_account_info(),
+                ctx.accounts.program_pda.to_account_info(),
+            ],
+            signer_seeds,
+        )?;
+    }
 
     ctx.accounts.position.user_debt = ctx
         .accounts

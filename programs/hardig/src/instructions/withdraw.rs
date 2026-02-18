@@ -256,24 +256,31 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     require!(sol_received >= min_out, HardigError::SlippageExceeded);
 
     // Close PDA's wSOL ATA — returns all wSOL + rent as native SOL to admin
-    let close_ix = Instruction {
-        program_id: anchor_spl::token::ID,
-        accounts: vec![
-            AccountMeta::new(ctx.accounts.user_wsol_ata.key(), false),
-            AccountMeta::new(ctx.accounts.admin.key(), false),
-            AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
-        ],
-        data: vec![9], // SPL Token CloseAccount
+    // Only attempt if the account is an initialized SPL token account (state byte at offset 108)
+    let wsol_initialized = {
+        let data = ctx.accounts.user_wsol_ata.try_borrow_data()?;
+        data.len() >= 109 && data[108] != 0
     };
-    invoke_signed(
-        &close_ix,
-        &[
-            ctx.accounts.user_wsol_ata.to_account_info(),
-            ctx.accounts.admin.to_account_info(),
-            ctx.accounts.program_pda.to_account_info(),
-        ],
-        signer_seeds,
-    )?;
+    if wsol_initialized {
+        let close_ix = Instruction {
+            program_id: anchor_spl::token::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.user_wsol_ata.key(), false),
+                AccountMeta::new(ctx.accounts.admin.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
+            ],
+            data: vec![9], // SPL Token CloseAccount
+        };
+        invoke_signed(
+            &close_ix,
+            &[
+                ctx.accounts.user_wsol_ata.to_account_info(),
+                ctx.accounts.admin.to_account_info(),
+                ctx.accounts.program_pda.to_account_info(),
+            ],
+            signer_seeds,
+        )?;
+    }
 
     ctx.accounts.position.deposited_nav = ctx
         .accounts

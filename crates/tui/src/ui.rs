@@ -128,8 +128,8 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
             Span::raw("    "),
             Span::styled("Debt: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{} SOL", app::lamports_to_sol(pos.user_debt + pos.protocol_debt)),
-                Style::default().fg(if pos.user_debt + pos.protocol_debt > 0 {
+                format!("{} SOL", app::lamports_to_sol(pos.user_debt)),
+                Style::default().fg(if pos.user_debt > 0 {
                     Color::Red
                 } else {
                     Color::White
@@ -433,7 +433,7 @@ fn draw_result(frame: &mut Frame, app: &App, area: Rect) {
         (Some(before), Some(pos)) => {
             let rows_data: Vec<(&str, u64, u64, &str)> = vec![
                 ("Deposited", before.deposited_nav, pos.deposited_nav, "navSOL"),
-                ("Debt", before.user_debt + before.protocol_debt, pos.user_debt + pos.protocol_debt, "SOL"),
+                ("Debt", before.user_debt, pos.user_debt, "SOL"),
                 ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity, "SOL"),
                 ("wSOL", before.wsol_balance, app.wsol_balance, "SOL"),
                 ("navSOL", before.nav_sol_balance, app.nav_sol_balance, "navSOL"),

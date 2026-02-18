@@ -304,10 +304,10 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
     require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
     // Update accounting with actual amounts from Mayflower
-    ctx.accounts.position.protocol_debt = ctx
+    ctx.accounts.position.user_debt = ctx
         .accounts
         .position
-        .protocol_debt
+        .user_debt
         .checked_add(actual_borrowed)
         .ok_or(HardigError::BorrowCapacityExceeded)?;
 

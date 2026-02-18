@@ -573,7 +573,6 @@ fn test_mainnet_fork_init_protocol_and_position() {
     assert_eq!(pos.max_reinvest_spread_bps, 500);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
-    assert_eq!(pos.protocol_debt, 0);
     assert!(pos.last_admin_activity > 0);
 
     let ka = get_key_auth(&client, &harness.admin_key_auth);
@@ -1069,7 +1068,6 @@ fn test_mainnet_fork_full_lifecycle() {
     let pos = get_position(&client, &harness.position_pda);
     assert_eq!(pos.deposited_nav, buy_amount);
     assert_eq!(pos.user_debt, 0);
-    assert_eq!(pos.protocol_debt, 0);
     println!("[5] Final state verified - clean position");
 }
 

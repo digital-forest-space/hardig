@@ -106,7 +106,6 @@ export function takeSnapshot() {
   return {
     depositedNav: pos.depositedNav,
     userDebt: pos.userDebt,
-    protocolDebt: pos.protocolDebt,
     borrowCapacity: mfBorrowCapacity.value,
     wsolBalance: wsolBalance.value,
     navSolBalance: navSolBalance.value,

@@ -126,7 +126,6 @@ pub struct PendingAction {
 pub struct PositionSnapshot {
     pub deposited_nav: u64,
     pub user_debt: u64,
-    pub protocol_debt: u64,
     pub borrow_capacity: u64,
     pub wsol_balance: u64,
     pub nav_sol_balance: u64,
@@ -364,7 +363,7 @@ impl App {
     }
     pub fn can_repay(&self) -> bool {
         self.cpi_ready()
-            && self.position.as_ref().map(|p| p.user_debt + p.protocol_debt > 0).unwrap_or(false)
+            && self.position.as_ref().map(|p| p.user_debt > 0).unwrap_or(false)
             && self.has_perm(PERM_REPAY)
     }
     pub fn can_reinvest(&self) -> bool {
@@ -586,7 +585,7 @@ impl App {
     }
 
     fn enter_repay(&mut self) {
-        let max = self.position.as_ref().map(|p| p.user_debt + p.protocol_debt).unwrap_or(0);
+        let max = self.position.as_ref().map(|p| p.user_debt).unwrap_or(0);
         self.screen = Screen::Form;
         self.form_info = None;
         self.form_kind = Some(FormKind::Repay);
@@ -1769,7 +1768,6 @@ impl App {
         Some(PositionSnapshot {
             deposited_nav: pos.deposited_nav,
             user_debt: pos.user_debt,
-            protocol_debt: pos.protocol_debt,
             borrow_capacity: self.mf_borrow_capacity,
             wsol_balance: self.wsol_balance,
             nav_sol_balance: self.nav_sol_balance,

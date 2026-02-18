@@ -416,7 +416,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 <tbody>
                   {[
                     ['Deposited', result.snapshot.depositedNav, position.value.depositedNav, 'navSOL'],
-                    ['Debt', result.snapshot.userDebt + result.snapshot.protocolDebt, position.value.userDebt + position.value.protocolDebt, 'SOL'],
+                    ['Debt', result.snapshot.userDebt, position.value.userDebt, 'SOL'],
                   ].map(([label, before, after, unit]) => {
                     const delta = formatDelta(before, after);
                     const cls = delta.startsWith('+') ? 'positive' : delta.startsWith('-') ? 'negative' : '';

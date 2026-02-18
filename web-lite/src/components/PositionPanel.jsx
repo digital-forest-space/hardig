@@ -18,8 +18,8 @@ export function PositionPanel() {
       </div>
       <div class="data-row">
         <span class="label">Debt</span>
-        <span class={`value ${pos.userDebt + pos.protocolDebt > 0 ? 'negative' : ''}`}>
-          {lamportsToSol(pos.userDebt + pos.protocolDebt)} SOL
+        <span class={`value ${pos.userDebt > 0 ? 'negative' : ''}`}>
+          {lamportsToSol(pos.userDebt)} SOL
         </span>
       </div>
       <div class="data-row">

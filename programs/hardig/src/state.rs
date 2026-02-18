@@ -26,10 +26,8 @@ pub struct PositionNFT {
     pub market_config: Pubkey,
     /// navSOL deposited (local tracking, Mayflower is source of truth).
     pub deposited_nav: u64,
-    /// SOL borrowed by the user (local tracking).
+    /// Total SOL borrowed (user + reinvest). Mayflower is source of truth.
     pub user_debt: u64,
-    /// SOL borrowed by the protocol for reinvestment.
-    pub protocol_debt: u64,
     /// Max market/floor spread ratio (in bps) allowed for reinvest.
     pub max_reinvest_spread_bps: u16,
     /// Last time the admin signed an instruction (unix timestamp).
@@ -44,9 +42,9 @@ pub struct PositionNFT {
 impl PositionNFT {
     pub const SEED: &'static [u8] = b"position";
     // discriminator(8) + admin_nft_mint(32) + position_pda(32) + market_config(32)
-    // + deposited_nav(8) + user_debt(8) + protocol_debt(8) + max_reinvest_spread_bps(2)
+    // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
     // + last_admin_activity(8) + bump(1) + authority_bump(1)
-    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 8 + 2 + 8 + 1 + 1;
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1;
 }
 
 /// On-chain configuration for a Mayflower market.
