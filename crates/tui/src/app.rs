@@ -1157,6 +1157,28 @@ impl App {
         });
     }
 
+    pub fn build_transfer_admin(&mut self, new_admin: Pubkey) {
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
+        let mut data = sighash("transfer_admin");
+        data.extend_from_slice(new_admin.as_ref());
+
+        let accounts = vec![
+            AccountMeta::new_readonly(self.keypair.pubkey(), true),
+            AccountMeta::new(config_pda, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Transfer Protocol Admin".into(),
+                format!("New Admin: {}", new_admin),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
     pub fn build_create_market_config(
         &mut self,
         nav_mint: Pubkey,

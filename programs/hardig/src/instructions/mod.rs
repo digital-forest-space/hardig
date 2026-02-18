@@ -8,6 +8,7 @@ pub mod initialize_protocol;
 pub mod reinvest;
 pub mod repay;
 pub mod revoke_key;
+pub mod transfer_admin;
 pub mod validate_key;
 pub mod withdraw;
 
@@ -22,4 +23,5 @@ pub use initialize_protocol::*;
 pub use reinvest::*;
 pub use repay::*;
 pub use revoke_key::*;
+pub use transfer_admin::*;
 pub use withdraw::*;
