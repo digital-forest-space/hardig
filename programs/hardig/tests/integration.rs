@@ -349,6 +349,7 @@ fn ix_buy(
 
     let mut data = sighash("buy");
     data.extend_from_slice(&amount.to_le_bytes());
+    data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage check)
 
     Instruction::new_with_bytes(
         program_id(),
@@ -395,6 +396,7 @@ fn ix_withdraw(
 
     let mut data = sighash("withdraw");
     data.extend_from_slice(&amount.to_le_bytes());
+    data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage check)
 
     Instruction::new_with_bytes(
         program_id(),
@@ -524,7 +526,8 @@ fn ix_reinvest(
     let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_nft_mint);
     let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
-    let data = sighash("reinvest");
+    let mut data = sighash("reinvest");
+    data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage check)
 
     Instruction::new_with_bytes(
         program_id(),

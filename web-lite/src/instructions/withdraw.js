@@ -31,7 +31,7 @@ export async function buildWithdraw(program, wallet, amountLamports) {
   const navAta = getAta(programPda, navMint);
 
   const ix = await program.methods
-    .withdraw(new BN(amountLamports))
+    .withdraw(new BN(amountLamports), new BN(0)) // min_out = 0 (no slippage protection)
     .accounts({
       admin: wallet,
       keyNftAta: nftAta,

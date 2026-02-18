@@ -859,6 +859,7 @@ impl App {
 
         let mut data = sighash("buy");
         data.extend_from_slice(&amount.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
@@ -936,6 +937,7 @@ impl App {
 
         let mut data = sighash("withdraw");
         data.extend_from_slice(&amount.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // admin
@@ -1107,7 +1109,8 @@ impl App {
         let mc_pda = self.market_config_pda.unwrap();
         let mc = self.market_config.as_ref().unwrap();
 
-        let data = sighash("reinvest");
+        let mut data = sighash("reinvest");
+        data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer

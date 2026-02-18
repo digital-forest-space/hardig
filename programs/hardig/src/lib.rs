@@ -37,13 +37,15 @@ pub mod hardig {
     }
 
     /// Buy navSOL by depositing SOL (admin, operator, or depositor).
-    pub fn buy(ctx: Context<Buy>, amount: u64) -> Result<()> {
-        instructions::buy::handler(ctx, amount)
+    /// `min_out`: minimum navSOL shares to receive (slippage protection, 0 = no check).
+    pub fn buy(ctx: Context<Buy>, amount: u64, min_out: u64) -> Result<()> {
+        instructions::buy::handler(ctx, amount, min_out)
     }
 
     /// Withdraw SOL/navSOL from the position (admin only).
-    pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
-        instructions::withdraw::handler(ctx, amount)
+    /// `min_out`: minimum wSOL to receive (slippage protection, 0 = no check).
+    pub fn withdraw(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> {
+        instructions::withdraw::handler(ctx, amount, min_out)
     }
 
     /// Borrow SOL against the navSOL floor (admin only).
@@ -57,8 +59,9 @@ pub mod hardig {
     }
 
     /// Reinvest new borrow capacity into more navSOL (admin, operator, or keeper).
-    pub fn reinvest(ctx: Context<Reinvest>) -> Result<()> {
-        instructions::reinvest::handler(ctx)
+    /// `min_out`: minimum navSOL shares to receive from the buy (slippage protection, 0 = no check).
+    pub fn reinvest(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
+        instructions::reinvest::handler(ctx, min_out)
     }
 
     /// Initialize a Mayflower PersonalPosition owned by this program's PDA.

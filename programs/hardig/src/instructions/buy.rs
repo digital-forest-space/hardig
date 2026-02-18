@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
+use anchor_spl::associated_token::get_associated_token_address;
 use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
@@ -57,13 +58,19 @@ pub struct Buy<'info> {
     pub user_shares: UncheckedAccount<'info>,
 
     /// Program PDA's navSOL ATA.
-    /// CHECK: Validated in handler as ATA derivation.
-    #[account(mut)]
+    /// CHECK: Validated as correct ATA for program_pda + nav_mint.
+    #[account(
+        mut,
+        constraint = user_nav_sol_ata.key() == get_associated_token_address(&program_pda.key(), &market_config.nav_mint) @ HardigError::InvalidAta,
+    )]
     pub user_nav_sol_ata: UncheckedAccount<'info>,
 
     /// Program PDA's wSOL ATA.
-    /// CHECK: Validated in handler as ATA derivation.
-    #[account(mut)]
+    /// CHECK: Validated as correct ATA for program_pda + base_mint.
+    #[account(
+        mut,
+        constraint = user_wsol_ata.key() == get_associated_token_address(&program_pda.key(), &market_config.base_mint) @ HardigError::InvalidAta,
+    )]
     pub user_wsol_ata: UncheckedAccount<'info>,
 
     /// Mayflower tenant.
@@ -149,7 +156,7 @@ pub struct Buy<'info> {
     pub log_account: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
+pub fn handler(ctx: Context<Buy>, amount: u64, min_out: u64) -> Result<()> {
     validate_key(
         &ctx.accounts.signer,
         &ctx.accounts.key_nft_ata,
@@ -203,7 +210,7 @@ pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
         ctx.accounts.user_nav_sol_ata.key(),
         ctx.accounts.user_wsol_ata.key(),
         amount,
-        0, // min_output = 0 (accept any slippage for now)
+        0, // Mayflower's own min_output — we enforce slippage ourselves
         &market,
     );
 
@@ -251,6 +258,9 @@ pub fn handler(ctx: Context<Buy>, amount: u64) -> Result<()> {
     let shares_received = shares_after
         .checked_sub(shares_before)
         .ok_or(HardigError::InsufficientFunds)?;
+
+    // Slippage check: verify navSOL shares received >= min_out
+    require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
     ctx.accounts.position.deposited_nav = ctx
         .accounts

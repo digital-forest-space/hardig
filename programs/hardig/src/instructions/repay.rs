@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
+use anchor_spl::associated_token::get_associated_token_address;
 use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
@@ -46,8 +47,11 @@ pub struct Repay<'info> {
     pub personal_position: UncheckedAccount<'info>,
 
     /// Program PDA's wSOL ATA (repays from this account).
-    /// CHECK: Validated in handler as ATA derivation.
-    #[account(mut)]
+    /// CHECK: Validated as correct ATA for program_pda + base_mint.
+    #[account(
+        mut,
+        constraint = user_base_token_ata.key() == get_associated_token_address(&program_pda.key(), &market_config.base_mint) @ HardigError::InvalidAta,
+    )]
     pub user_base_token_ata: UncheckedAccount<'info>,
 
     /// CHECK: Constant address validated by constraint.
