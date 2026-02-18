@@ -676,6 +676,15 @@ impl App {
         let admin_nft_ata = get_ata(&self.keypair.pubkey(), &admin_nft_mint);
         let admin_key_auth = self.my_key_auth_pda.unwrap();
 
+        // If the admin holds the target NFT, pass the admin's ATA so the
+        // program can burn it. Otherwise pass the program ID as the Anchor
+        // "None" sentinel to skip the burn.
+        let target_nft_ata = if target.held_by_signer {
+            get_ata(&self.keypair.pubkey(), &target.mint)
+        } else {
+            hardig::ID
+        };
+
         let data = sighash("revoke_key");
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
@@ -683,6 +692,9 @@ impl App {
             AccountMeta::new_readonly(admin_key_auth, false),
             AccountMeta::new_readonly(position_pda, false),
             AccountMeta::new(target.pda, false),
+            AccountMeta::new(target.mint, false),
+            AccountMeta::new(target_nft_ata, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
 
