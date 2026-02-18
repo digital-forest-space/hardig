@@ -215,6 +215,20 @@
           }
         },
         {
+          "name": "metadata",
+          "docs": [
+            "Metaplex Token Metadata PDA for the new key NFT."
+          ],
+          "writable": true
+        },
+        {
+          "name": "master_edition",
+          "docs": [
+            "Master Edition PDA for the new key NFT."
+          ],
+          "writable": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -223,8 +237,16 @@
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
+          "name": "token_metadata_program",
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -910,6 +932,20 @@
           }
         },
         {
+          "name": "metadata",
+          "docs": [
+            "Metaplex Token Metadata PDA for the admin NFT."
+          ],
+          "writable": true
+        },
+        {
+          "name": "master_edition",
+          "docs": [
+            "Master Edition PDA for the admin NFT."
+          ],
+          "writable": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -918,8 +954,16 @@
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
+          "name": "token_metadata_program",
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1456,10 +1500,23 @@
           "name": "target_nft_ata",
           "docs": [
             "The ATA holding the key NFT. Optional — only needed when the admin holds",
-            "the target NFT and wants it burned during revoke. When provided and the",
-            "admin is the token account owner, the NFT is burned and the ATA closed.",
-            "When omitted (or when the admin is not the owner), only the",
-            "KeyAuthorization PDA is closed."
+            "the target NFT and wants it burned during revoke."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "metadata",
+          "docs": [
+            "Metaplex Metadata PDA for the target NFT. Optional — required for burn."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "master_edition",
+          "docs": [
+            "Master Edition PDA for the target NFT. Optional — required for burn."
           ],
           "writable": true,
           "optional": true
@@ -1467,6 +1524,11 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "token_metadata_program",
+          "optional": true,
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
         },
         {
           "name": "system_program",

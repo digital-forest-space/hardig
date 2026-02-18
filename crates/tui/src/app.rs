@@ -37,11 +37,30 @@ const SPL_TOKEN_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuB
 const ATA_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
+const METADATA_PROGRAM_ID: Pubkey =
+    solana_sdk::pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const RENT_SYSVAR: Pubkey = solana_sdk::pubkey!("SysvarRent111111111111111111111111111111111");
 
 fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[wallet.as_ref(), SPL_TOKEN_ID.as_ref(), mint.as_ref()],
         &ATA_PROGRAM_ID,
+    )
+    .0
+}
+
+fn metadata_pda(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &METADATA_PROGRAM_ID,
+    )
+    .0
+}
+
+fn master_edition_pda(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref(), b"edition"],
+        &METADATA_PROGRAM_ID,
     )
     .0
 }
@@ -610,6 +629,8 @@ impl App {
         );
         let (prog_pda, _) =
             Pubkey::find_program_address(&[b"authority", mint.as_ref()], &hardig::ID);
+        let metadata = metadata_pda(&mint);
+        let master_edition = master_edition_pda(&mint);
 
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
@@ -621,9 +642,13 @@ impl App {
             AccountMeta::new(position_pda, false),
             AccountMeta::new(key_auth_pda, false),
             AccountMeta::new_readonly(prog_pda, false),
+            AccountMeta::new(metadata, false),
+            AccountMeta::new(master_edition, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(METADATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new_readonly(RENT_SYSVAR, false),
         ];
 
         self.goto_confirm(PendingAction {
@@ -698,6 +723,9 @@ impl App {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(0);
 
+        let metadata = metadata_pda(&new_mint);
+        let master_edition = master_edition_pda(&new_mint);
+
         let mut data = sighash("authorize_key");
         data.push(permissions_u8);
         data.extend_from_slice(&sell_cap.to_le_bytes());
@@ -715,9 +743,13 @@ impl App {
             AccountMeta::new_readonly(target_wallet, false),
             AccountMeta::new(new_key_auth, false),
             AccountMeta::new_readonly(self.program_pda, false),
+            AccountMeta::new(metadata, false),
+            AccountMeta::new(master_edition, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(METADATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new_readonly(RENT_SYSVAR, false),
         ];
 
         self.goto_confirm(PendingAction {
@@ -757,13 +789,18 @@ impl App {
         let admin_nft_ata = get_ata(&self.keypair.pubkey(), &admin_nft_mint);
         let admin_key_auth = self.my_key_auth_pda.unwrap();
 
-        // If the admin holds the target NFT, pass the admin's ATA so the
-        // program can burn it. Otherwise pass the program ID as the Anchor
-        // "None" sentinel to skip the burn.
-        let target_nft_ata = if target.held_by_signer {
-            get_ata(&self.keypair.pubkey(), &target.mint)
+        // If the admin holds the target NFT, pass the admin's ATA + metadata
+        // accounts so the program can burn via Metaplex. Otherwise pass the
+        // program ID as the Anchor "None" sentinel to skip the burn.
+        let (target_nft_ata, metadata, master_edition, metadata_program) = if target.held_by_signer {
+            (
+                get_ata(&self.keypair.pubkey(), &target.mint),
+                metadata_pda(&target.mint),
+                master_edition_pda(&target.mint),
+                METADATA_PROGRAM_ID,
+            )
         } else {
-            hardig::ID
+            (hardig::ID, hardig::ID, hardig::ID, hardig::ID)
         };
 
         let data = sighash("revoke_key");
@@ -775,7 +812,10 @@ impl App {
             AccountMeta::new(target.pda, false),
             AccountMeta::new(target.mint, false),
             AccountMeta::new(target_nft_ata, false),
+            AccountMeta::new(metadata, false),
+            AccountMeta::new(master_edition, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new_readonly(metadata_program, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
 

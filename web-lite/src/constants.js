@@ -20,6 +20,8 @@ export const DEFAULT_WSOL_MINT = new PublicKey('So111111111111111111111111111111
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ATA_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111');
+export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+export const RENT_SYSVAR = new PublicKey('SysvarRent111111111111111111111111111111111');
 
 // PDA seeds
 const PERSONAL_POSITION_SEED = Buffer.from('personal_position');
@@ -93,6 +95,22 @@ export function deriveLogAccount() {
     [LOG_SEED],
     MAYFLOWER_PROGRAM_ID
   );
+}
+
+// Derive Metaplex Metadata PDA
+export function deriveMetadataPda(mint) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    METADATA_PROGRAM_ID
+  )[0];
+}
+
+// Derive Metaplex Master Edition PDA
+export function deriveMasterEditionPda(mint) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer(), Buffer.from('edition')],
+    METADATA_PROGRAM_ID
+  )[0];
 }
 
 // Derive ATA

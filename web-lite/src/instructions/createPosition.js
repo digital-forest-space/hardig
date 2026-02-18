@@ -3,7 +3,11 @@ import {
   derivePositionPda,
   deriveKeyAuthPda,
   deriveProgramPda,
+  deriveMetadataPda,
+  deriveMasterEditionPda,
   getAta,
+  METADATA_PROGRAM_ID,
+  RENT_SYSVAR,
 } from '../constants.js';
 import { shortPubkey } from '../utils.js';
 
@@ -14,6 +18,8 @@ export async function buildCreatePosition(program, wallet) {
   const [positionPda] = derivePositionPda(mint);
   const [keyAuthPda] = deriveKeyAuthPda(positionPda, mint);
   const [programPda] = deriveProgramPda(mint);
+  const metadata = deriveMetadataPda(mint);
+  const masterEdition = deriveMasterEditionPda(mint);
 
   const ix = await program.methods
     .createPosition(0)
@@ -24,6 +30,10 @@ export async function buildCreatePosition(program, wallet) {
       position: positionPda,
       adminKeyAuth: keyAuthPda,
       programPda: programPda,
+      metadata: metadata,
+      masterEdition: masterEdition,
+      tokenMetadataProgram: METADATA_PROGRAM_ID,
+      rent: RENT_SYSVAR,
     })
     .instruction();
 

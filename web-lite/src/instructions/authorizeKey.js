@@ -3,7 +3,11 @@ import { BN } from '@coral-xyz/anchor';
 import {
   deriveKeyAuthPda,
   deriveProgramPda,
+  deriveMetadataPda,
+  deriveMasterEditionPda,
   getAta,
+  METADATA_PROGRAM_ID,
+  RENT_SYSVAR,
 } from '../constants.js';
 import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
 import { shortPubkey, permissionsName } from '../utils.js';
@@ -20,6 +24,8 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, permis
   const newMint = mintKp.publicKey;
   const targetAta = getAta(targetWallet, newMint);
   const [newKeyAuth] = deriveKeyAuthPda(posPda, newMint);
+  const metadata = deriveMetadataPda(newMint);
+  const masterEdition = deriveMasterEditionPda(newMint);
 
   const ix = await program.methods
     .authorizeKey(permissionsU8, new BN(sellCapacity), new BN(sellRefillSlots), new BN(borrowCapacity), new BN(borrowRefillSlots))
@@ -33,6 +39,10 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, permis
       targetWallet: targetWallet,
       newKeyAuth: newKeyAuth,
       programPda: programPda,
+      metadata: metadata,
+      masterEdition: masterEdition,
+      tokenMetadataProgram: METADATA_PROGRAM_ID,
+      rent: RENT_SYSVAR,
     })
     .instruction();
 

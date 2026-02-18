@@ -24,6 +24,9 @@ use hardig::state::{
 const SPL_TOKEN_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const METADATA_PROGRAM_ID: Pubkey =
+    solana_sdk::pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const RENT_SYSVAR: Pubkey = solana_sdk::pubkey!("SysvarRent111111111111111111111111111111111");
 
 fn program_id() -> Pubkey {
     hardig::ID
@@ -38,6 +41,22 @@ fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[wallet.as_ref(), SPL_TOKEN_ID.as_ref(), mint.as_ref()],
         &ATA_PROGRAM_ID,
+    )
+    .0
+}
+
+fn metadata_pda(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &METADATA_PROGRAM_ID,
+    )
+    .0
+}
+
+fn master_edition_pda(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref(), b"edition"],
+        &METADATA_PROGRAM_ID,
     )
     .0
 }
@@ -65,6 +84,11 @@ fn setup() -> (LiteSVM, Keypair) {
     let mock_bytes = std::fs::read("../../target/deploy/mock_mayflower.so")
         .expect("Run `anchor build` first (mock-mayflower)");
     let _ = svm.add_program(MAYFLOWER_PROGRAM_ID, &mock_bytes);
+
+    // Load Metaplex Token Metadata program
+    let metadata_bytes = std::fs::read("../../test-fixtures/mpl_token_metadata.so")
+        .expect("Run `solana program dump metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s test-fixtures/mpl_token_metadata.so`");
+    let _ = svm.add_program(METADATA_PROGRAM_ID, &metadata_bytes);
 
     // Plant stub accounts at all constant Mayflower addresses
     plant_mayflower_stubs(&mut svm);
@@ -238,6 +262,8 @@ fn ix_create_position(
     );
     let (program_pda, _) =
         Pubkey::find_program_address(&[b"authority", mint.as_ref()], &program_id());
+    let metadata = metadata_pda(mint);
+    let master_edition = master_edition_pda(mint);
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
@@ -252,9 +278,13 @@ fn ix_create_position(
             AccountMeta::new(position_pda, false),
             AccountMeta::new(key_auth_pda, false),
             AccountMeta::new_readonly(program_pda, false),
+            AccountMeta::new(metadata, false),
+            AccountMeta::new(master_edition, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(METADATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(RENT_SYSVAR, false),
         ],
     )
 }
@@ -280,6 +310,8 @@ fn ix_authorize_key(
     );
     let (program_pda, _) =
         Pubkey::find_program_address(&[b"authority", admin_nft_mint.as_ref()], &program_id());
+    let metadata = metadata_pda(new_mint);
+    let master_edition = master_edition_pda(new_mint);
 
     let mut data = sighash("authorize_key");
     data.push(role);
@@ -301,17 +333,21 @@ fn ix_authorize_key(
             AccountMeta::new_readonly(*target_wallet, false),
             AccountMeta::new(new_key_auth, false),
             AccountMeta::new_readonly(program_pda, false),
+            AccountMeta::new(metadata, false),
+            AccountMeta::new(master_edition, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(METADATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(RENT_SYSVAR, false),
         ],
     )
 }
 
 /// Build a revoke_key instruction.
 /// `target_nft_holder`: if `Some`, pass that wallet's ATA for the target NFT
-///   (enables burn when the admin is the holder). If `None`, pass the program ID
-///   as the Anchor "None" sentinel, skipping the burn entirely.
+///   along with metadata accounts (enables Metaplex burn when the admin is the holder).
+///   If `None`, pass the program ID as the Anchor "None" sentinel, skipping the burn.
 fn ix_revoke_key(
     admin: &Pubkey,
     admin_nft_mint: &Pubkey,
@@ -323,11 +359,16 @@ fn ix_revoke_key(
 ) -> Instruction {
     let admin_nft_ata = get_ata(admin, admin_nft_mint);
 
-    // When a holder is specified, derive the real ATA; otherwise use the
-    // program ID which Anchor interprets as Option::None.
-    let target_nft_ata = match target_nft_holder {
-        Some(holder) => get_ata(holder, target_nft_mint),
-        None => program_id(),
+    // When a holder is specified, derive the real ATA + metadata accounts;
+    // otherwise use program ID as Anchor Option::None sentinels.
+    let (target_nft_ata, metadata, master_edition, metadata_program) = match target_nft_holder {
+        Some(holder) => (
+            get_ata(holder, target_nft_mint),
+            metadata_pda(target_nft_mint),
+            master_edition_pda(target_nft_mint),
+            METADATA_PROGRAM_ID,
+        ),
+        None => (program_id(), program_id(), program_id(), program_id()),
     };
 
     Instruction::new_with_bytes(
@@ -341,7 +382,10 @@ fn ix_revoke_key(
             AccountMeta::new(*target_key_auth, false),
             AccountMeta::new(*target_nft_mint, false),
             AccountMeta::new(target_nft_ata, false),
+            AccountMeta::new(metadata, false),
+            AccountMeta::new(master_edition, false),
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new_readonly(metadata_program, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
     )
@@ -2140,4 +2184,105 @@ fn test_limited_borrow_exceeds_capacity() {
         &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
     );
     assert!(send_tx(&mut svm, &[borrow_ix], &[&user]).is_err());
+}
+
+// ===========================================================================
+// Metaplex metadata tests
+// ===========================================================================
+
+#[test]
+fn test_create_position_creates_metadata() {
+    let (mut svm, _) = setup();
+    let admin = Keypair::new();
+    svm.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let mint_kp = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_create_position(&admin.pubkey(), &mint_kp.pubkey(), 500)],
+        &[&admin, &mint_kp],
+    )
+    .unwrap();
+
+    // Metadata PDA should exist
+    let metadata = metadata_pda(&mint_kp.pubkey());
+    assert!(svm.get_account(&metadata).is_some(), "metadata PDA should exist");
+
+    // Master Edition PDA should exist
+    let edition = master_edition_pda(&mint_kp.pubkey());
+    assert!(svm.get_account(&edition).is_some(), "master edition PDA should exist");
+}
+
+#[test]
+fn test_authorize_key_creates_metadata() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Check metadata for operator key
+    let metadata = metadata_pda(&h.operator_nft_mint);
+    assert!(svm.get_account(&metadata).is_some(), "operator metadata PDA should exist");
+
+    let edition = master_edition_pda(&h.operator_nft_mint);
+    assert!(svm.get_account(&edition).is_some(), "operator master edition PDA should exist");
+}
+
+#[test]
+fn test_revoke_burn_closes_metadata() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Authorize a key to the admin's own wallet so admin can burn it
+    let extra_mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &extra_mint.pubkey(),
+            &h.admin.pubkey(),
+            PRESET_OPERATOR,
+            0, 0, 0, 0,
+        )],
+        &[&h.admin, &extra_mint],
+    )
+    .unwrap();
+    let (extra_ka, _) = key_auth_pda(&h.position_pda, &extra_mint.pubkey());
+
+    // Verify metadata exists before revoke
+    let metadata = metadata_pda(&extra_mint.pubkey());
+    let edition = master_edition_pda(&extra_mint.pubkey());
+    assert!(svm.get_account(&metadata).is_some());
+    assert!(svm.get_account(&edition).is_some());
+
+    // Revoke with burn (admin holds the NFT)
+    let ix = ix_revoke_key(
+        &h.admin.pubkey(),
+        &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth,
+        &h.position_pda,
+        &extra_ka,
+        &extra_mint.pubkey(),
+        Some(&h.admin.pubkey()),
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
+
+    // Key auth should be closed
+    assert!(svm.get_account(&extra_ka).is_none());
+
+    // Master edition should be fully closed by burn_nft.
+    let ed_closed = svm.get_account(&edition).map_or(true, |a| a.lamports == 0);
+    assert!(ed_closed, "master edition should be closed after burn");
+
+    // Metadata is "soft-deleted" by legacy BurnNft: data is reduced to 1 byte
+    // (Uninitialized key) but the account retains lamports. Verify it was processed.
+    let md_soft_deleted = svm.get_account(&metadata).map_or(true, |a| a.data.len() <= 1);
+    assert!(md_soft_deleted, "metadata should be soft-deleted after burn");
+
+    // ATA should be closed
+    let ata = get_ata(&h.admin.pubkey(), &extra_mint.pubkey());
+    let ata_closed = svm.get_account(&ata).map_or(true, |a| a.lamports == 0);
+    assert!(ata_closed, "ATA should be closed after burn");
 }

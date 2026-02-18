@@ -1,6 +1,10 @@
 use anchor_lang::prelude::*;
+use anchor_spl::metadata::{
+    create_master_edition_v3, create_metadata_accounts_v3,
+    mpl_token_metadata::types::DataV2,
+    CreateMasterEditionV3, CreateMetadataAccountsV3, Metadata as MetaplexProgram,
+};
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount};
-use anchor_spl::token::spl_token::instruction::AuthorityType;
 
 use crate::state::{KeyAuthorization, PositionNFT, PRESET_ADMIN};
 
@@ -60,9 +64,21 @@ pub struct CreatePosition<'info> {
     )]
     pub program_pda: UncheckedAccount<'info>,
 
+    /// Metaplex Token Metadata PDA for the admin NFT.
+    /// CHECK: Created by Metaplex CPI; derived as ["metadata", metaplex_program, mint].
+    #[account(mut)]
+    pub metadata: UncheckedAccount<'info>,
+
+    /// Master Edition PDA for the admin NFT.
+    /// CHECK: Created by Metaplex CPI; derived as ["metadata", metaplex_program, mint, "edition"].
+    #[account(mut)]
+    pub master_edition: UncheckedAccount<'info>,
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub token_metadata_program: Program<'info, MetaplexProgram>,
     pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Result<()> {
@@ -84,18 +100,53 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
         1,
     )?;
 
-    // Disable mint authority so no additional tokens can ever be minted
-    token::set_authority(
+    // Create Metaplex metadata
+    create_metadata_accounts_v3(
         CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            token::SetAuthority {
-                account_or_mint: ctx.accounts.admin_nft_mint.to_account_info(),
-                current_authority: ctx.accounts.program_pda.to_account_info(),
+            ctx.accounts.token_metadata_program.to_account_info(),
+            CreateMetadataAccountsV3 {
+                metadata: ctx.accounts.metadata.to_account_info(),
+                mint: ctx.accounts.admin_nft_mint.to_account_info(),
+                mint_authority: ctx.accounts.program_pda.to_account_info(),
+                payer: ctx.accounts.admin.to_account_info(),
+                update_authority: ctx.accounts.program_pda.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+                rent: ctx.accounts.rent.to_account_info(),
             },
             signer_seeds,
         ),
-        AuthorityType::MintTokens,
-        None,
+        DataV2 {
+            name: "H\u{00e4}rdig Admin Key".to_string(),
+            symbol: "HKEY".to_string(),
+            uri: String::new(),
+            seller_fee_basis_points: 0,
+            creators: None,
+            collection: None,
+            uses: None,
+        },
+        true, // is_mutable
+        true, // update_authority_is_signer
+        None, // collection_details
+    )?;
+
+    // Create Master Edition (max_supply=0 freezes supply, replaces set_authority(None))
+    create_master_edition_v3(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_metadata_program.to_account_info(),
+            CreateMasterEditionV3 {
+                edition: ctx.accounts.master_edition.to_account_info(),
+                mint: ctx.accounts.admin_nft_mint.to_account_info(),
+                update_authority: ctx.accounts.program_pda.to_account_info(),
+                mint_authority: ctx.accounts.program_pda.to_account_info(),
+                payer: ctx.accounts.admin.to_account_info(),
+                metadata: ctx.accounts.metadata.to_account_info(),
+                token_program: ctx.accounts.token_program.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+                rent: ctx.accounts.rent.to_account_info(),
+            },
+            signer_seeds,
+        ),
+        Some(0),
     )?;
 
     // Initialize the position

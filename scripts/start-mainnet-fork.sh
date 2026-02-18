@@ -39,4 +39,5 @@ exec solana-test-validator \
     --clone B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf \
     --clone EKVkmuwDKRKHw85NPTbKSKuS75EY4NLcxe1qzSPixLdy \
     --clone navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo \
-    --clone TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+    --clone TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA \
+    --clone-upgradeable-program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
