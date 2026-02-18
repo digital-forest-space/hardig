@@ -1163,13 +1163,16 @@ impl App {
             AccountMeta::new(self.log_pda, false),                  // log_account
         ];
 
+        // Sell CPI uses ~170K CUs inside Mayflower — needs extra compute
+        let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+
         self.goto_confirm(PendingAction {
             description: vec![
-                "Sell navSOL (IX_SELL TODO)".into(),
+                "Sell navSOL".into(),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
             ],
-            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            instructions: vec![compute_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
         });
     }

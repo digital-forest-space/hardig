@@ -211,24 +211,24 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     invoke_signed(
         &ix,
         &[
-            ctx.accounts.program_pda.to_account_info(),
-            ctx.accounts.tenant.to_account_info(),
-            ctx.accounts.market_group.to_account_info(),
-            ctx.accounts.market_meta.to_account_info(),
-            ctx.accounts.mayflower_market.to_account_info(),
-            pp_info.clone(),
-            ctx.accounts.user_shares.to_account_info(),
-            ctx.accounts.nav_sol_mint.to_account_info(),
-            ctx.accounts.wsol_mint.to_account_info(),
-            ctx.accounts.user_nav_sol_ata.to_account_info(),
-            ctx.accounts.user_wsol_ata.to_account_info(),
-            ctx.accounts.market_base_vault.to_account_info(),
-            ctx.accounts.market_nav_vault.to_account_info(),
-            ctx.accounts.fee_vault.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-            ctx.accounts.log_account.to_account_info(),
-            ctx.accounts.mayflower_program.to_account_info(),
+            ctx.accounts.program_pda.to_account_info(),       // 0: userWallet
+            ctx.accounts.tenant.to_account_info(),            // 1: tenant
+            ctx.accounts.market_group.to_account_info(),      // 2: marketGroup
+            ctx.accounts.market_meta.to_account_info(),       // 3: marketMetadata
+            ctx.accounts.mayflower_market.to_account_info(),  // 4: mayflowerMarket
+            pp_info.clone(),                                  // 5: personalPosition
+            ctx.accounts.market_base_vault.to_account_info(), // 6: marketBaseVault
+            ctx.accounts.market_nav_vault.to_account_info(),  // 7: marketNavVault
+            ctx.accounts.fee_vault.to_account_info(),         // 8: feeVault
+            ctx.accounts.nav_sol_mint.to_account_info(),      // 9: navMint
+            ctx.accounts.wsol_mint.to_account_info(),         // 10: baseMint
+            ctx.accounts.user_wsol_ata.to_account_info(),     // 11: userWsolATA
+            ctx.accounts.user_nav_sol_ata.to_account_info(),  // 12: userNavSolATA
+            ctx.accounts.user_shares.to_account_info(),       // 13: userShares
+            ctx.accounts.token_program.to_account_info(),     // 14: Token Program
+            ctx.accounts.token_program.to_account_info(),     // 15: Token Program (dup)
+            ctx.accounts.log_account.to_account_info(),       // 16: logAccount
+            ctx.accounts.mayflower_program.to_account_info(), // 17: Mayflower program
         ],
         signer_seeds,
     )?;

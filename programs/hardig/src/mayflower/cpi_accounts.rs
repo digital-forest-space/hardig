@@ -134,7 +134,8 @@ pub fn build_buy_ix(
 
 /// Build the `sell` (SellWithExactTokenIn) instruction for Mayflower.
 ///
-/// Mirror of buy — sells navSOL for SOL.
+/// Sells navSOL for SOL. NOTE: sell layout differs from buy!
+/// Positions 6-13 are rearranged: vaults first, then mints, then user accounts.
 pub fn build_sell_ix(
     user_wallet: Pubkey,
     personal_position: Pubkey,
@@ -155,24 +156,24 @@ pub fn build_sell_ix(
     Instruction {
         program_id: MAYFLOWER_PROGRAM_ID,
         accounts: vec![
-            AccountMeta::new(user_wallet, true),
-            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),
-            AccountMeta::new_readonly(market.market_group, false),
-            AccountMeta::new_readonly(market.market_meta, false),
-            AccountMeta::new(market.mayflower_market, false),
-            AccountMeta::new(personal_position, false),
-            AccountMeta::new(user_shares, false),
-            AccountMeta::new(market.nav_mint, false),
-            AccountMeta::new_readonly(market.base_mint, false),
-            AccountMeta::new(user_nav_sol_ata, false),
-            AccountMeta::new(user_wsol_ata, false),
-            AccountMeta::new(market.market_base_vault, false),
-            AccountMeta::new(market.market_nav_vault, false),
-            AccountMeta::new(market.fee_vault, false),
-            AccountMeta::new_readonly(anchor_spl::token::ID, false),
-            AccountMeta::new_readonly(anchor_spl::token::ID, false),
-            AccountMeta::new(log_account, false),
-            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            AccountMeta::new(user_wallet, true),                     // 0: userWallet (signer)
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),      // 1: tenant
+            AccountMeta::new_readonly(market.market_group, false),   // 2: marketGroup
+            AccountMeta::new_readonly(market.market_meta, false),    // 3: marketMetadata
+            AccountMeta::new(market.mayflower_market, false),        // 4: mayflowerMarket
+            AccountMeta::new(personal_position, false),              // 5: personalPosition
+            AccountMeta::new(market.market_base_vault, false),       // 6: marketBaseVault
+            AccountMeta::new(market.market_nav_vault, false),        // 7: marketNavVault
+            AccountMeta::new(market.fee_vault, false),               // 8: feeVault
+            AccountMeta::new(market.nav_mint, false),                // 9: navMint
+            AccountMeta::new_readonly(market.base_mint, false),      // 10: baseMint
+            AccountMeta::new(user_wsol_ata, false),                  // 11: userWsolATA
+            AccountMeta::new(user_nav_sol_ata, false),               // 12: userNavSolATA
+            AccountMeta::new(user_shares, false),                    // 13: userShares
+            AccountMeta::new_readonly(anchor_spl::token::ID, false), // 14: Token Program
+            AccountMeta::new_readonly(anchor_spl::token::ID, false), // 15: Token Program (dup)
+            AccountMeta::new(log_account, false),                    // 16: logAccount
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),  // 17: Mayflower program
         ],
         data,
     }
