@@ -231,6 +231,22 @@
         {
           "name": "permissions",
           "type": "u8"
+        },
+        {
+          "name": "sell_bucket_capacity",
+          "type": "u64"
+        },
+        {
+          "name": "sell_refill_period_slots",
+          "type": "u64"
+        },
+        {
+          "name": "borrow_bucket_capacity",
+          "type": "u64"
+        },
+        {
+          "name": "borrow_refill_period_slots",
+          "type": "u64"
         }
       ]
     },
@@ -264,8 +280,9 @@
         {
           "name": "key_auth",
           "docs": [
-            "The admin's KeyAuthorization."
-          ]
+            "The admin's KeyAuthorization (mut for rate-limit bucket updates)."
+          ],
+          "writable": true
         },
         {
           "name": "position",
@@ -1536,8 +1553,9 @@
         {
           "name": "key_auth",
           "docs": [
-            "The admin's KeyAuthorization."
-          ]
+            "The admin's KeyAuthorization (mut for rate-limit bucket updates)."
+          ],
+          "writable": true
         },
         {
           "name": "position",
@@ -1795,16 +1813,21 @@
     },
     {
       "code": 6016,
+      "name": "RateLimitExceeded",
+      "msg": "Rate limit exceeded"
+    },
+    {
+      "code": 6017,
       "name": "InvalidNftMint",
       "msg": "Invalid NFT mint"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "InvalidPositionPda",
       "msg": "Invalid position PDA"
     },
     {
-      "code": 6018,
+      "code": 6019,
       "name": "PositionAlreadyExists",
       "msg": "Position already exists for this admin key"
     }
@@ -1846,6 +1869,28 @@
               "Bump seed for this PDA."
             ],
             "type": "u8"
+          },
+          {
+            "name": "sell_bucket",
+            "docs": [
+              "Rate-limit bucket for PERM_LIMITED_SELL."
+            ],
+            "type": {
+              "defined": {
+                "name": "RateBucket"
+              }
+            }
+          },
+          {
+            "name": "borrow_bucket",
+            "docs": [
+              "Rate-limit bucket for PERM_LIMITED_BORROW."
+            ],
+            "type": {
+              "defined": {
+                "name": "RateBucket"
+              }
+            }
           }
         ]
       }
@@ -2029,6 +2074,45 @@
               "Bump seed for the config PDA."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RateBucket",
+      "docs": [
+        "Token-bucket rate limiter. Embedded in KeyAuthorization, not a standalone account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "capacity",
+            "docs": [
+              "Maximum tokens (shares for sell, lamports for borrow)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "refill_period",
+            "docs": [
+              "Number of slots for a full refill from 0 to capacity."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "level",
+            "docs": [
+              "Current tokens available."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_update",
+            "docs": [
+              "Slot of last update."
+            ],
+            "type": "u64"
           }
         ]
       }

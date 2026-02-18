@@ -17,8 +17,8 @@ use solana_sdk::{
 
 use hardig::state::{
     KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_BUY,
-    PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY, PERM_SELL, PRESET_ADMIN, PRESET_DEPOSITOR,
-    PRESET_KEEPER, PRESET_OPERATOR,
+    PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
+    PERM_SELL, PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
 };
 
 // Mayflower constants and helpers
@@ -318,10 +318,10 @@ impl App {
         self.cpi_ready() && self.has_perm(PERM_BUY)
     }
     pub fn can_sell(&self) -> bool {
-        self.cpi_ready() && self.has_perm(PERM_SELL)
+        self.cpi_ready() && (self.has_perm(PERM_SELL) || self.has_perm(PERM_LIMITED_SELL))
     }
     pub fn can_borrow(&self) -> bool {
-        self.cpi_ready() && self.has_perm(PERM_BORROW)
+        self.cpi_ready() && (self.has_perm(PERM_BORROW) || self.has_perm(PERM_LIMITED_BORROW))
     }
     pub fn can_repay(&self) -> bool {
         self.cpi_ready()
@@ -362,7 +362,7 @@ impl App {
                 self.perm_cursor = self.perm_cursor.saturating_sub(1);
             }
             KeyCode::Right | KeyCode::Down if is_perm_field => {
-                if self.perm_cursor < 4 {
+                if self.perm_cursor < 6 {
                     self.perm_cursor += 1;
                 }
             }
@@ -370,8 +370,8 @@ impl App {
                 self.input_buf.pop();
             }
             KeyCode::Char(c) if is_perm_field => {
-                const PERM_ORDER: [u8; 5] =
-                    [PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST];
+                const PERM_ORDER: [u8; 7] =
+                    [PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_LIMITED_SELL, PERM_LIMITED_BORROW];
                 match c {
                     ' ' => { self.perm_bits ^= PERM_ORDER[self.perm_cursor]; self.sync_perm_field(); }
                     '1' => { self.perm_bits ^= PERM_BUY; self.sync_perm_field(); }
@@ -379,6 +379,8 @@ impl App {
                     '3' => { self.perm_bits ^= PERM_BORROW; self.sync_perm_field(); }
                     '4' => { self.perm_bits ^= PERM_REPAY; self.sync_perm_field(); }
                     '5' => { self.perm_bits ^= PERM_REINVEST; self.sync_perm_field(); }
+                    '6' => { self.perm_bits ^= PERM_LIMITED_SELL; self.sync_perm_field(); }
+                    '7' => { self.perm_bits ^= PERM_LIMITED_BORROW; self.sync_perm_field(); }
                     _ => {}
                 }
             }
@@ -392,7 +394,38 @@ impl App {
     fn sync_perm_field(&mut self) {
         let val = self.perm_bits.to_string();
         self.form_fields[1].1 = val.clone();
-        self.input_buf = val;
+        if self.input_field == 1 {
+            self.input_buf = val;
+        }
+
+        // Preserve existing rate-limit field values by label prefix
+        let sell_cap = self.find_field_value("Sell Capacity");
+        let sell_refill = self.find_field_value("Sell Refill");
+        let borrow_cap = self.find_field_value("Borrow Capacity");
+        let borrow_refill = self.find_field_value("Borrow Refill");
+
+        // Rebuild fields after index 1
+        self.form_fields.truncate(2);
+        if self.perm_bits & PERM_LIMITED_SELL != 0 {
+            self.form_fields.push(("Sell Capacity (SOL)".into(), sell_cap.unwrap_or("0".into())));
+            self.form_fields.push(("Sell Refill Period (slots)".into(), sell_refill.unwrap_or("0".into())));
+        }
+        if self.perm_bits & PERM_LIMITED_BORROW != 0 {
+            self.form_fields.push(("Borrow Capacity (SOL)".into(), borrow_cap.unwrap_or("0".into())));
+            self.form_fields.push(("Borrow Refill Period (slots)".into(), borrow_refill.unwrap_or("0".into())));
+        }
+
+        // Clamp cursor if fields were removed
+        if self.input_field >= self.form_fields.len() {
+            self.input_field = self.form_fields.len() - 1;
+            self.input_buf = self.form_fields[self.input_field].1.clone();
+        }
+    }
+
+    fn find_field_value(&self, prefix: &str) -> Option<String> {
+        self.form_fields.iter()
+            .find(|(label, _)| label.starts_with(prefix))
+            .map(|(_, val)| val.clone())
     }
 
     // -----------------------------------------------------------------------
@@ -651,8 +684,26 @@ impl App {
             &hardig::ID,
         );
 
+        // Parse rate-limit params (only present when corresponding limited bit is set)
+        let sell_cap = self.find_field_value("Sell Capacity")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let sell_refill: u64 = self.find_field_value("Sell Refill")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        let borrow_cap = self.find_field_value("Borrow Capacity")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let borrow_refill: u64 = self.find_field_value("Borrow Refill")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+
         let mut data = sighash("authorize_key");
         data.push(permissions_u8);
+        data.extend_from_slice(&sell_cap.to_le_bytes());
+        data.extend_from_slice(&sell_refill.to_le_bytes());
+        data.extend_from_slice(&borrow_cap.to_le_bytes());
+        data.extend_from_slice(&borrow_refill.to_le_bytes());
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
@@ -1049,7 +1100,7 @@ impl App {
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // admin
             AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(key_auth, false),                      // key_auth (mut for rate limits)
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1111,7 +1162,7 @@ impl App {
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // admin
             AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new(key_auth, false),                      // key_auth (mut for rate limits)
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1630,6 +1681,9 @@ pub fn permissions_name(permissions: u8) -> &'static str {
         p if p == PRESET_DEPOSITOR => "Depositor",
         p if p == PRESET_KEEPER => "Keeper",
         0 => "None",
+        p if p == PERM_LIMITED_SELL => "LimitedSell",
+        p if p == PERM_LIMITED_BORROW => "LimitedBorrow",
+        p if p == (PERM_LIMITED_SELL | PERM_LIMITED_BORROW) => "LimitedSellBorrow",
         _ => "Custom",
     }
 }

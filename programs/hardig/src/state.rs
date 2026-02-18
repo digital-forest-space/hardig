@@ -91,17 +91,34 @@ pub const PERM_REPAY: u8 = 0x08;
 pub const PERM_REINVEST: u8 = 0x10;
 pub const PERM_MANAGE_KEYS: u8 = 0x20;
 
-/// Bits 6-7 reserved for future use (rate-limited roles).
-pub const PERM_RESERVED_MASK: u8 = 0xC0;
+/// Rate-limited sell permission (bit 6). Enforced by token-bucket in KeyAuthorization.
+pub const PERM_LIMITED_SELL: u8 = 0x40;
+/// Rate-limited borrow permission (bit 7). Enforced by token-bucket in KeyAuthorization.
+pub const PERM_LIMITED_BORROW: u8 = 0x80;
+/// Mask for rate-limited permission bits.
+pub const PERM_LIMITED_MASK: u8 = 0xC0;
 
-/// All defined permissions (bits 0-5).
-pub const PERM_ALL: u8 = 0x3F;
+/// All defined permissions (bits 0-7).
+pub const PERM_ALL: u8 = 0xFF;
 
 // Backwards-compatible presets
 pub const PRESET_ADMIN: u8 = 0x3F; // all 6 bits
 pub const PRESET_OPERATOR: u8 = 0x19; // buy + repay + reinvest
 pub const PRESET_DEPOSITOR: u8 = 0x09; // buy + repay
 pub const PRESET_KEEPER: u8 = 0x10; // reinvest only
+
+/// Token-bucket rate limiter. Embedded in KeyAuthorization, not a standalone account.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
+pub struct RateBucket {
+    /// Maximum tokens (shares for sell, lamports for borrow).
+    pub capacity: u64,
+    /// Number of slots for a full refill from 0 to capacity.
+    pub refill_period: u64,
+    /// Current tokens available.
+    pub level: u64,
+    /// Slot of last update.
+    pub last_update: u64,
+}
 
 /// Links a key NFT to a position with a permission bitmask.
 /// PDA seeds = [b"key_auth", position, key_nft_mint].
@@ -115,10 +132,15 @@ pub struct KeyAuthorization {
     pub permissions: u8,
     /// Bump seed for this PDA.
     pub bump: u8,
+    /// Rate-limit bucket for PERM_LIMITED_SELL.
+    pub sell_bucket: RateBucket,
+    /// Rate-limit bucket for PERM_LIMITED_BORROW.
+    pub borrow_bucket: RateBucket,
 }
 
 impl KeyAuthorization {
     pub const SEED: &'static [u8] = b"key_auth";
     // discriminator(8) + position(32) + key_nft_mint(32) + permissions(1) + bump(1)
-    pub const SIZE: usize = 8 + 32 + 32 + 1 + 1;
+    // + sell_bucket(32) + borrow_bucket(32)
+    pub const SIZE: usize = 8 + 32 + 32 + 1 + 1 + 32 + 32;
 }

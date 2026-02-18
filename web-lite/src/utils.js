@@ -40,6 +40,8 @@ export const PERM_BORROW = 0x04;
 export const PERM_REPAY = 0x08;
 export const PERM_REINVEST = 0x10;
 export const PERM_MANAGE_KEYS = 0x20;
+export const PERM_LIMITED_SELL = 0x40;
+export const PERM_LIMITED_BORROW = 0x80;
 
 export const PRESET_ADMIN = 0x3F;
 export const PRESET_OPERATOR = 0x19;
@@ -52,6 +54,9 @@ export function permissionsName(permissions) {
     case PRESET_OPERATOR: return 'Operator';
     case PRESET_DEPOSITOR: return 'Depositor';
     case PRESET_KEEPER: return 'Keeper';
+    case PERM_LIMITED_SELL: return 'LimitedSell';
+    case PERM_LIMITED_BORROW: return 'LimitedBorrow';
+    case PERM_LIMITED_SELL | PERM_LIMITED_BORROW: return 'LimitedSellBorrow';
     case 0: case null: case undefined: return 'None';
     default: return 'Custom';
   }

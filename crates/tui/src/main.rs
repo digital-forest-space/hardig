@@ -83,6 +83,18 @@ enum Action {
         /// Permissions bitmask: 25=Operator, 9=Depositor, 16=Keeper, or custom
         #[arg(long)]
         permissions: u8,
+        /// Sell rate-limit capacity in SOL (for PERM_LIMITED_SELL)
+        #[arg(long, default_value = "0")]
+        sell_capacity: f64,
+        /// Sell rate-limit refill period in slots
+        #[arg(long, default_value = "0")]
+        sell_refill_slots: u64,
+        /// Borrow rate-limit capacity in SOL (for PERM_LIMITED_BORROW)
+        #[arg(long, default_value = "0")]
+        borrow_capacity: f64,
+        /// Borrow rate-limit refill period in slots
+        #[arg(long, default_value = "0")]
+        borrow_refill_slots: u64,
     },
     /// Revoke a non-admin key by index
     RevokeKey {
@@ -378,13 +390,14 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
         Action::Reinvest => {
             app.build_reinvest();
         }
-        Action::AuthorizeKey { wallet, permissions } => {
+        Action::AuthorizeKey { wallet, permissions, sell_capacity, sell_refill_slots, borrow_capacity, borrow_refill_slots } => {
             app.form_fields = vec![
                 ("Target Wallet (pubkey)".into(), wallet.clone()),
-                (
-                    "Permissions (25=Operator, 9=Depositor, 16=Keeper, or custom)".into(),
-                    permissions.to_string(),
-                ),
+                ("Permissions".into(), permissions.to_string()),
+                ("Sell Capacity (SOL, 0=none)".into(), sol_amount_to_field(*sell_capacity)),
+                ("Sell Refill Period (slots)".into(), sell_refill_slots.to_string()),
+                ("Borrow Capacity (SOL, 0=none)".into(), sol_amount_to_field(*borrow_capacity)),
+                ("Borrow Refill Period (slots)".into(), borrow_refill_slots.to_string()),
             ];
             app.build_authorize_key();
         }

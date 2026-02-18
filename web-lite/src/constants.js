@@ -32,7 +32,7 @@ export const PP_DEBT_OFFSET = 112;
 export const MARKET_FLOOR_PRICE_OFFSET = 104;
 
 // KeyAuthorization
-export const KEY_AUTH_SIZE = 74; // 8 + 32 + 32 + 1 + 1
+export const KEY_AUTH_SIZE = 138; // 8 + 32 + 32 + 1 + 1 + 32 + 32
 
 // Derive per-position program PDA (authority)
 export function deriveProgramPda(adminNftMint) {

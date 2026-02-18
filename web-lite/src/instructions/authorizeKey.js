@@ -1,4 +1,5 @@
 import { Keypair, PublicKey } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 import {
   deriveKeyAuthPda,
   deriveProgramPda,
@@ -7,7 +8,7 @@ import {
 import { myNftMint, myKeyAuthPda, positionPda, position } from '../state.js';
 import { shortPubkey, permissionsName } from '../utils.js';
 
-export async function buildAuthorizeKey(program, wallet, targetWalletStr, permissionsU8) {
+export async function buildAuthorizeKey(program, wallet, targetWalletStr, permissionsU8, sellCapacity = 0, sellRefillSlots = 0, borrowCapacity = 0, borrowRefillSlots = 0) {
   const targetWallet = new PublicKey(targetWalletStr);
   const posPda = positionPda.value;
   const adminNftMint = myNftMint.value;
@@ -21,7 +22,7 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, permis
   const [newKeyAuth] = deriveKeyAuthPda(posPda, newMint);
 
   const ix = await program.methods
-    .authorizeKey(permissionsU8)
+    .authorizeKey(permissionsU8, new BN(sellCapacity), new BN(sellRefillSlots), new BN(borrowCapacity), new BN(borrowRefillSlots))
     .accounts({
       admin: wallet,
       adminNftAta: adminNftAta,

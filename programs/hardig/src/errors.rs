@@ -46,6 +46,10 @@ pub enum HardigError {
     #[msg("Token account is not the correct ATA for the program PDA")]
     InvalidAta,
 
+    // Rate-limit errors
+    #[msg("Rate limit exceeded")]
+    RateLimitExceeded,
+
     // State errors
     #[msg("Invalid NFT mint")]
     InvalidNftMint,

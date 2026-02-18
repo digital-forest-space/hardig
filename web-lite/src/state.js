@@ -1,5 +1,5 @@
 import { signal, computed } from '@preact/signals';
-import { PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS } from './utils.js';
+import { PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW } from './utils.js';
 
 // Cluster
 export const cluster = signal('localnet');
@@ -55,11 +55,11 @@ export const canBuy = computed(
 );
 
 export const canSell = computed(
-  () => cpiReady.value && hasPerm(PERM_SELL)
+  () => cpiReady.value && (hasPerm(PERM_SELL) || hasPerm(PERM_LIMITED_SELL))
 );
 
 export const canBorrow = computed(
-  () => cpiReady.value && hasPerm(PERM_BORROW)
+  () => cpiReady.value && (hasPerm(PERM_BORROW) || hasPerm(PERM_LIMITED_BORROW))
 );
 
 export const canRepay = computed(() => {

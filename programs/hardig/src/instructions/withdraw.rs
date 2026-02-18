@@ -5,7 +5,9 @@ use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_SELL};
+use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_LIMITED_SELL, PERM_SELL};
+
+use super::consume_rate_limit::consume_rate_limit;
 
 use super::validate_key::validate_key;
 
@@ -17,8 +19,9 @@ pub struct Withdraw<'info> {
     /// The admin's key NFT token account.
     pub key_nft_ata: Account<'info, TokenAccount>,
 
-    /// The admin's KeyAuthorization.
+    /// The admin's KeyAuthorization (mut for rate-limit bucket updates).
     #[account(
+        mut,
         constraint = key_auth.position == position.key() @ HardigError::WrongPosition,
     )]
     pub key_auth: Account<'info, KeyAuthorization>,
@@ -117,8 +120,19 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         &ctx.accounts.key_nft_ata,
         &ctx.accounts.key_auth,
         &ctx.accounts.position.key(),
-        PERM_SELL,
+        PERM_SELL | PERM_LIMITED_SELL,
     )?;
+
+    // Enforce rate limit for PERM_LIMITED_SELL (skipped if unlimited PERM_SELL is set)
+    if ctx.accounts.key_auth.permissions & PERM_SELL == 0
+        && ctx.accounts.key_auth.permissions & PERM_LIMITED_SELL != 0
+    {
+        consume_rate_limit(
+            &mut ctx.accounts.key_auth.sell_bucket,
+            amount,
+            Clock::get()?.slot,
+        )?;
+    }
 
     require!(amount > 0, HardigError::InsufficientFunds);
     require!(

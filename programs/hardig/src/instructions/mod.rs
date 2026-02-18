@@ -1,6 +1,7 @@
 pub mod authorize_key;
 pub mod borrow;
 pub mod buy;
+pub mod consume_rate_limit;
 pub mod create_market_config;
 pub mod create_position;
 pub mod init_mayflower_position;

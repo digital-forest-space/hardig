@@ -3,7 +3,10 @@ use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount};
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 
 use crate::errors::HardigError;
-use crate::state::{KeyAuthorization, PositionNFT, PERM_MANAGE_KEYS, PERM_RESERVED_MASK};
+use crate::state::{
+    KeyAuthorization, PositionNFT, RateBucket, PERM_LIMITED_BORROW, PERM_LIMITED_SELL,
+    PERM_MANAGE_KEYS,
+};
 
 use super::validate_key::validate_key;
 
@@ -74,7 +77,14 @@ pub struct AuthorizeKey<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<AuthorizeKey>, permissions: u8) -> Result<()> {
+pub fn handler(
+    ctx: Context<AuthorizeKey>,
+    permissions: u8,
+    sell_bucket_capacity: u64,
+    sell_refill_period_slots: u64,
+    borrow_bucket_capacity: u64,
+    borrow_refill_period_slots: u64,
+) -> Result<()> {
     // Validate the admin holds their key
     validate_key(
         &ctx.accounts.admin,
@@ -86,8 +96,31 @@ pub fn handler(ctx: Context<AuthorizeKey>, permissions: u8) -> Result<()> {
 
     // Validate the permissions bitmask
     require!(permissions != 0, HardigError::InvalidKeyRole);
-    require!(permissions & PERM_RESERVED_MASK == 0, HardigError::InvalidKeyRole);
     require!(permissions & PERM_MANAGE_KEYS == 0, HardigError::CannotCreateSecondAdmin);
+
+    // Validate rate-limit params match permission bits
+    if permissions & PERM_LIMITED_SELL != 0 {
+        require!(
+            sell_bucket_capacity > 0 && sell_refill_period_slots > 0,
+            HardigError::InvalidKeyRole
+        );
+    } else {
+        require!(
+            sell_bucket_capacity == 0 && sell_refill_period_slots == 0,
+            HardigError::InvalidKeyRole
+        );
+    }
+    if permissions & PERM_LIMITED_BORROW != 0 {
+        require!(
+            borrow_bucket_capacity > 0 && borrow_refill_period_slots > 0,
+            HardigError::InvalidKeyRole
+        );
+    } else {
+        require!(
+            borrow_bucket_capacity == 0 && borrow_refill_period_slots == 0,
+            HardigError::InvalidKeyRole
+        );
+    }
 
     // Mint 1 key NFT to the target wallet
     let bump = ctx.bumps.program_pda;
@@ -121,12 +154,32 @@ pub fn handler(ctx: Context<AuthorizeKey>, permissions: u8) -> Result<()> {
         None,
     )?;
 
+    let current_slot = Clock::get()?.slot;
+
     // Create the KeyAuthorization
     let key_auth = &mut ctx.accounts.new_key_auth;
     key_auth.position = ctx.accounts.position.key();
     key_auth.key_nft_mint = ctx.accounts.new_key_mint.key();
     key_auth.permissions = permissions;
     key_auth.bump = ctx.bumps.new_key_auth;
+
+    // Initialize rate-limit buckets
+    if permissions & PERM_LIMITED_SELL != 0 {
+        key_auth.sell_bucket = RateBucket {
+            capacity: sell_bucket_capacity,
+            refill_period: sell_refill_period_slots,
+            level: sell_bucket_capacity, // starts full
+            last_update: current_slot,
+        };
+    }
+    if permissions & PERM_LIMITED_BORROW != 0 {
+        key_auth.borrow_bucket = RateBucket {
+            capacity: borrow_bucket_capacity,
+            refill_period: borrow_refill_period_slots,
+            level: borrow_bucket_capacity, // starts full
+            last_update: current_slot,
+        };
+    }
 
     Ok(())
 }

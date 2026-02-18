@@ -294,29 +294,35 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         if matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && i == 1 {
             lines.push(Line::from(Span::styled("  Permissions:", label_style)));
             let bits = app.perm_bits;
-            let perms: [(u8, &str); 5] = [
+            let perms: [(u8, &str); 7] = [
                 (hardig::state::PERM_BUY, "1 Buy"),
                 (hardig::state::PERM_SELL, "2 Sell"),
                 (hardig::state::PERM_BORROW, "3 Borrow"),
                 (hardig::state::PERM_REPAY, "4 Repay"),
                 (hardig::state::PERM_REINVEST, "5 Reinvest"),
+                (hardig::state::PERM_LIMITED_SELL, "6 LtdSell"),
+                (hardig::state::PERM_LIMITED_BORROW, "7 LtdBorrow"),
             ];
-            let mut spans = vec![Span::raw("    ")];
-            for (idx, (perm, name)) in perms.iter().enumerate() {
-                let checked = bits & perm != 0;
-                let focused = is_active && idx == app.perm_cursor;
-                let marker = if checked { "x" } else { " " };
-                let mut style = if checked {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                if focused {
-                    style = style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            // Render permissions on two rows: 0-4 on first, 5-6 on second
+            for row_range in [0..5, 5..7] {
+                let mut spans = vec![Span::raw("    ")];
+                for idx in row_range {
+                    let (perm, name) = perms[idx];
+                    let checked = bits & perm != 0;
+                    let focused = is_active && idx == app.perm_cursor;
+                    let marker = if checked { "x" } else { " " };
+                    let mut style = if checked {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    if focused {
+                        style = style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                    }
+                    spans.push(Span::styled(format!("[{}] {}  ", marker, name), style));
                 }
-                spans.push(Span::styled(format!("[{}] {}  ", marker, name), style));
+                lines.push(Line::from(spans));
             }
-            lines.push(Line::from(spans));
             lines.push(Line::from(vec![
                 Span::raw("    "),
                 Span::styled(
@@ -353,7 +359,7 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     let on_perm_field =
         matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && app.input_field == 1;
     let hints = if on_perm_field {
-        "  [\u{2190}\u{2192}] Navigate  [Space/1-5] Toggle  [Enter] Submit  [Tab] Next  [Esc] Cancel"
+        "  [\u{2190}\u{2192}] Navigate  [Space/1-7] Toggle  [Enter] Submit  [Tab] Next  [Esc] Cancel"
     } else {
         "  [Enter] Submit  [Tab] Next field  [Esc] Cancel"
     };

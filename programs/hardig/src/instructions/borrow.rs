@@ -5,7 +5,9 @@ use anchor_spl::token::{Token, TokenAccount};
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_BORROW};
+use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_BORROW, PERM_LIMITED_BORROW};
+
+use super::consume_rate_limit::consume_rate_limit;
 
 use super::validate_key::validate_key;
 
@@ -17,8 +19,9 @@ pub struct Borrow<'info> {
     /// The admin's key NFT token account.
     pub key_nft_ata: Account<'info, TokenAccount>,
 
-    /// The admin's KeyAuthorization.
+    /// The admin's KeyAuthorization (mut for rate-limit bucket updates).
     #[account(
+        mut,
         constraint = key_auth.position == position.key() @ HardigError::WrongPosition,
     )]
     pub key_auth: Account<'info, KeyAuthorization>,
@@ -103,8 +106,19 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
         &ctx.accounts.key_nft_ata,
         &ctx.accounts.key_auth,
         &ctx.accounts.position.key(),
-        PERM_BORROW,
+        PERM_BORROW | PERM_LIMITED_BORROW,
     )?;
+
+    // Enforce rate limit for PERM_LIMITED_BORROW (skipped if unlimited PERM_BORROW is set)
+    if ctx.accounts.key_auth.permissions & PERM_BORROW == 0
+        && ctx.accounts.key_auth.permissions & PERM_LIMITED_BORROW != 0
+    {
+        consume_rate_limit(
+            &mut ctx.accounts.key_auth.borrow_bucket,
+            amount,
+            Clock::get()?.slot,
+        )?;
+    }
 
     require!(amount > 0, HardigError::InsufficientFunds);
 

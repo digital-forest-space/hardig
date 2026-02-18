@@ -27,8 +27,22 @@ pub mod hardig {
     }
 
     /// Authorize a new key NFT for a position (admin only).
-    pub fn authorize_key(ctx: Context<AuthorizeKey>, permissions: u8) -> Result<()> {
-        instructions::authorize_key::handler(ctx, permissions)
+    pub fn authorize_key(
+        ctx: Context<AuthorizeKey>,
+        permissions: u8,
+        sell_bucket_capacity: u64,
+        sell_refill_period_slots: u64,
+        borrow_bucket_capacity: u64,
+        borrow_refill_period_slots: u64,
+    ) -> Result<()> {
+        instructions::authorize_key::handler(
+            ctx,
+            permissions,
+            sell_bucket_capacity,
+            sell_refill_period_slots,
+            borrow_bucket_capacity,
+            borrow_refill_period_slots,
+        )
     }
 
     /// Revoke a key by closing its KeyAuthorization (admin only).

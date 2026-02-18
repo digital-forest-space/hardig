@@ -24,7 +24,7 @@ import {
   buildAuthorizeKey,
   buildRevokeKey,
 } from '../instructions/index.js';
-import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
+import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
 
 // Phase: form | building | confirm | result
 export function ActionModal({ action, onClose, onRefresh }) {
@@ -42,6 +42,10 @@ export function ActionModal({ action, onClose, onRefresh }) {
   const [targetWallet, setTargetWallet] = useState(wallet.publicKey?.toBase58() || '');
   const [permissions, setPermissions] = useState(String(PRESET_OPERATOR));
   const [revokeIdx, setRevokeIdx] = useState('0');
+  const [sellCapacity, setSellCapacity] = useState('');
+  const [sellRefillSlots, setSellRefillSlots] = useState('');
+  const [borrowCapacity, setBorrowCapacity] = useState('');
+  const [borrowRefillSlots, setBorrowRefillSlots] = useState('');
 
   const walletPk = wallet.publicKey;
 
@@ -103,7 +107,11 @@ export function ActionModal({ action, onClose, onRefresh }) {
           const p = parseInt(permissions);
           if (p === 0) { setError('Permissions cannot be zero'); setPhase('form'); return; }
           if (p & PERM_MANAGE_KEYS) { setError('Cannot grant PERM_MANAGE_KEYS to delegated keys'); setPhase('form'); return; }
-          built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p);
+          const sc = (p & PERM_LIMITED_SELL) ? (parseSolToLamports(sellCapacity) || 0) : 0;
+          const sr = (p & PERM_LIMITED_SELL) ? (parseInt(sellRefillSlots) || 0) : 0;
+          const bc = (p & PERM_LIMITED_BORROW) ? (parseSolToLamports(borrowCapacity) || 0) : 0;
+          const br = (p & PERM_LIMITED_BORROW) ? (parseInt(borrowRefillSlots) || 0) : 0;
+          built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p, sc, sr, bc, br);
           break;
         }
         case 'revoke': {
@@ -274,6 +282,8 @@ export function ActionModal({ action, onClose, onRefresh }) {
                       [PERM_BORROW, 'Borrow'],
                       [PERM_REPAY, 'Repay'],
                       [PERM_REINVEST, 'Reinvest'],
+                      [PERM_LIMITED_SELL, 'Limited Sell'],
+                      [PERM_LIMITED_BORROW, 'Limited Borrow'],
                     ].map(([bit, name]) => {
                       const p = parseInt(permissions) || 0;
                       return (
@@ -288,6 +298,30 @@ export function ActionModal({ action, onClose, onRefresh }) {
                       );
                     })}
                   </div>
+                  {((parseInt(permissions) || 0) & PERM_LIMITED_SELL) !== 0 && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', paddingLeft: '20px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '11px' }}>Sell Capacity (SOL)</label>
+                        <input type="text" value={sellCapacity} onInput={(e) => setSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '11px' }}>Sell Refill (slots)</label>
+                        <input type="text" value={sellRefillSlots} onInput={(e) => setSellRefillSlots(e.target.value)} placeholder="e.g. 216000" />
+                      </div>
+                    </div>
+                  )}
+                  {((parseInt(permissions) || 0) & PERM_LIMITED_BORROW) !== 0 && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', paddingLeft: '20px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '11px' }}>Borrow Capacity (SOL)</label>
+                        <input type="text" value={borrowCapacity} onInput={(e) => setBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '11px' }}>Borrow Refill (slots)</label>
+                        <input type="text" value={borrowRefillSlots} onInput={(e) => setBorrowRefillSlots(e.target.value)} placeholder="e.g. 216000" />
+                      </div>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
                     <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_OPERATOR))}>Operator</button>
                     <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_DEPOSITOR))}>Depositor</button>

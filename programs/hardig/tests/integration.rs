@@ -16,7 +16,8 @@ use hardig::mayflower::{
 };
 use hardig::state::{
     KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig,
-    PERM_BUY, PERM_MANAGE_KEYS, PERM_REINVEST,
+    PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST,
+    PERM_LIMITED_SELL, PERM_LIMITED_BORROW,
     PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
 };
 
@@ -266,6 +267,10 @@ fn ix_authorize_key(
     new_mint: &Pubkey,
     target_wallet: &Pubkey,
     role: u8,
+    sell_bucket_capacity: u64,
+    sell_refill_period_slots: u64,
+    borrow_bucket_capacity: u64,
+    borrow_refill_period_slots: u64,
 ) -> Instruction {
     let admin_nft_ata = get_ata(admin, admin_nft_mint);
     let target_ata = get_ata(target_wallet, new_mint);
@@ -278,6 +283,10 @@ fn ix_authorize_key(
 
     let mut data = sighash("authorize_key");
     data.push(role);
+    data.extend_from_slice(&sell_bucket_capacity.to_le_bytes());
+    data.extend_from_slice(&sell_refill_period_slots.to_le_bytes());
+    data.extend_from_slice(&borrow_bucket_capacity.to_le_bytes());
+    data.extend_from_slice(&borrow_refill_period_slots.to_le_bytes());
 
     Instruction::new_with_bytes(
         program_id(),
@@ -425,7 +434,7 @@ fn ix_withdraw(
         vec![
             AccountMeta::new(*admin, true),
             AccountMeta::new_readonly(nft_ata, false),
-            AccountMeta::new_readonly(*key_auth_pda, false),
+            AccountMeta::new(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
             AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
@@ -471,7 +480,7 @@ fn ix_borrow(
         vec![
             AccountMeta::new(*admin, true),
             AccountMeta::new_readonly(nft_ata, false),
-            AccountMeta::new_readonly(*key_auth_pda, false),
+            AccountMeta::new(*key_auth_pda, false),
             AccountMeta::new(*position_pda, false),
             AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
@@ -682,6 +691,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &op_mint.pubkey(),
             &operator.pubkey(),
             PRESET_OPERATOR,
+            0, 0, 0, 0,
         )],
         &[&admin, &op_mint],
     )
@@ -702,6 +712,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &dep_mint.pubkey(),
             &depositor.pubkey(),
             PRESET_DEPOSITOR,
+            0, 0, 0, 0,
         )],
         &[&admin, &dep_mint],
     )
@@ -722,6 +733,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &keep_mint.pubkey(),
             &keeper.pubkey(),
             PRESET_KEEPER,
+            0, 0, 0, 0,
         )],
         &[&admin, &keep_mint],
     )
@@ -1176,6 +1188,7 @@ fn test_authorize_operator_denied() {
         &new_mint.pubkey(),
         &random_wallet.pubkey(),
         PRESET_DEPOSITOR,
+        0, 0, 0, 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator, &new_mint]).is_err());
 }
@@ -1212,6 +1225,7 @@ fn test_cannot_create_second_admin() {
         &new_mint.pubkey(),
         &random_wallet.pubkey(),
         PRESET_ADMIN, // Has PERM_MANAGE_KEYS → rejected
+        0, 0, 0, 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
 }
@@ -1374,6 +1388,7 @@ fn test_revoke_burns_nft_when_admin_holds_it() {
             &extra_mint.pubkey(),
             &h.admin.pubkey(), // target wallet = admin
             PRESET_OPERATOR,
+            0, 0, 0, 0,
         )],
         &[&h.admin, &extra_mint],
     )
@@ -1478,16 +1493,18 @@ fn test_zero_permissions_rejected() {
         &new_mint.pubkey(),
         &target.pubkey(),
         0x00, // Zero permissions
+        0, 0, 0, 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
 }
 
 #[test]
-fn test_reserved_bits_rejected() {
+fn test_limited_sell_requires_rate_params() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
     let new_mint = Keypair::new();
     let target = Keypair::new();
+    // PERM_LIMITED_SELL with zero capacity should fail
     let ix = ix_authorize_key(
         &h.admin.pubkey(),
         &h.admin_nft_mint.pubkey(),
@@ -1495,7 +1512,8 @@ fn test_reserved_bits_rejected() {
         &h.admin_key_auth,
         &new_mint.pubkey(),
         &target.pubkey(),
-        0x80, // Reserved bit set
+        PERM_LIMITED_SELL,
+        0, 0, 0, 0, // missing capacity/refill
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
 }
@@ -1514,6 +1532,7 @@ fn test_manage_keys_permission_rejected() {
         &new_mint.pubkey(),
         &target.pubkey(),
         PERM_MANAGE_KEYS, // PERM_MANAGE_KEYS alone → rejected
+        0, 0, 0, 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
 }
@@ -1538,6 +1557,7 @@ fn test_custom_bitmask_buy_reinvest() {
             &custom_mint.pubkey(),
             &custom_user.pubkey(),
             custom_perms,
+            0, 0, 0, 0,
         )],
         &[&h.admin, &custom_mint],
     )
@@ -1661,6 +1681,7 @@ fn test_theft_recovery_operator_key_stolen() {
         &new_op_mint.pubkey(),
         &h.operator.pubkey(),
         PRESET_OPERATOR,
+        0, 0, 0, 0,
     );
     send_tx(&mut svm, &[ix], &[&h.admin, &new_op_mint]).unwrap();
 
@@ -1720,6 +1741,7 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
             &new_op_mint.pubkey(),
             &new_operator.pubkey(),
             1,
+            0, 0, 0, 0,
         )],
         &[&h.admin, &new_op_mint],
     )
@@ -1761,4 +1783,361 @@ fn test_privilege_escalation_denied() {
         &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
+}
+
+// ===========================================================================
+// Rate-limited permissions tests
+// ===========================================================================
+
+#[test]
+fn test_authorize_limited_sell_key() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_BUY | PERM_LIMITED_SELL,
+            1_000_000_000, // 1 SOL capacity
+            500_000,       // ~500k slots refill period
+            0, 0,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+    let ka = read_key_auth(&svm, &ka_pda);
+    assert_eq!(ka.permissions, PERM_BUY | PERM_LIMITED_SELL);
+    assert_eq!(ka.sell_bucket.capacity, 1_000_000_000);
+    assert_eq!(ka.sell_bucket.refill_period, 500_000);
+    assert_eq!(ka.sell_bucket.level, 1_000_000_000); // starts full
+}
+
+#[test]
+fn test_limited_sell_within_capacity() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    // Buy first so there's something to sell
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    // Create limited sell key
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            2_000_000_000, // 2 SOL capacity
+            1_000_000,
+            0, 0,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    // Sell within limit
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    // Check bucket drained
+    let ka = read_key_auth(&svm, &ka_pda);
+    assert_eq!(ka.sell_bucket.level, 1_000_000_000); // 2B - 1B = 1B remaining
+}
+
+#[test]
+fn test_limited_sell_exceeds_capacity() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            500_000_000, // 0.5 SOL capacity
+            1_000_000,
+            0, 0,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    // Try to sell more than capacity
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
+    );
+    assert!(send_tx(&mut svm, &[sell_ix], &[&user]).is_err());
+}
+
+#[test]
+fn test_limited_sell_drains_then_rejects() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            1_000_000_000, // 1 SOL capacity
+            1_000_000,
+            0, 0,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    // First sell: 600M (succeeds)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 600_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    // Second sell: 600M (exceeds remaining 400M)
+    let sell_ix2 = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 600_000_000,
+    );
+    assert!(send_tx(&mut svm, &[sell_ix2], &[&user]).is_err());
+}
+
+#[test]
+fn test_limited_sell_refills_over_slots() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            1_000_000_000, // 1 SOL capacity
+            1_000_000,     // 1M slots for full refill
+            0, 0,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    // Drain the bucket completely
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    // Verify bucket is empty
+    let ka = read_key_auth(&svm, &ka_pda);
+    assert_eq!(ka.sell_bucket.level, 0);
+
+    // Advance clock by half the refill period (500k slots)
+    let mut clock: solana_sdk::clock::Clock = svm.get_sysvar();
+    clock.slot += 500_000;
+    svm.set_sysvar(&clock);
+
+    // Should be able to sell ~0.5 SOL now (half refilled)
+    let sell_ix2 = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 400_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix2], &[&user]).unwrap();
+}
+
+#[test]
+fn test_unlimited_sell_overrides_limited() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    // Key with both PERM_SELL and PERM_LIMITED_SELL — rate limit is skipped
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_SELL | PERM_LIMITED_SELL,
+            100, // tiny capacity — would block if enforced
+            1,
+            0, 0,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    // Sell way more than the tiny bucket — should succeed because PERM_SELL overrides
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 2_000_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+}
+
+#[test]
+fn test_non_limited_rejects_rate_params() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let new_mint = Keypair::new();
+    let target = Keypair::new();
+    // PERM_BUY with non-zero capacity should fail
+    let ix = ix_authorize_key(
+        &h.admin.pubkey(),
+        &h.admin_nft_mint.pubkey(),
+        &h.position_pda,
+        &h.admin_key_auth,
+        &new_mint.pubkey(),
+        &target.pubkey(),
+        PERM_BUY,
+        1_000_000, 500_000, 0, 0,
+    );
+    assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_mint]).is_err());
+}
+
+#[test]
+fn test_limited_borrow_within_capacity() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_BORROW,
+            0, 0,              // sell: zero (no limited sell)
+            2_000_000_000,     // borrow capacity
+            1_000_000,         // borrow refill
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    let borrow_ix = ix_borrow(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[borrow_ix], &[&user]).unwrap();
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.user_debt, 1_000_000_000);
+}
+
+#[test]
+fn test_limited_borrow_exceeds_capacity() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &mint.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_BORROW,
+            0, 0,
+            500_000_000, // 0.5 SOL borrow capacity
+            1_000_000,
+        )],
+        &[&h.admin, &mint],
+    )
+    .unwrap();
+    let (ka_pda, _) = key_auth_pda(&h.position_pda, &mint.pubkey());
+
+    // Try to borrow more than capacity
+    let borrow_ix = ix_borrow(
+        &user.pubkey(), &mint.pubkey(),
+        &ka_pda, &h.position_pda, &h.admin_nft_mint.pubkey(), 1_000_000_000,
+    );
+    assert!(send_tx(&mut svm, &[borrow_ix], &[&user]).is_err());
 }
