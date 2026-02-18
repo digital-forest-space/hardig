@@ -295,14 +295,28 @@ fn ix_authorize_key(
     )
 }
 
+/// Build a revoke_key instruction.
+/// `target_nft_holder`: if `Some`, pass that wallet's ATA for the target NFT
+///   (enables burn when the admin is the holder). If `None`, pass the program ID
+///   as the Anchor "None" sentinel, skipping the burn entirely.
 fn ix_revoke_key(
     admin: &Pubkey,
     admin_nft_mint: &Pubkey,
     admin_key_auth: &Pubkey,
     position_pda: &Pubkey,
     target_key_auth: &Pubkey,
+    target_nft_mint: &Pubkey,
+    target_nft_holder: Option<&Pubkey>,
 ) -> Instruction {
     let admin_nft_ata = get_ata(admin, admin_nft_mint);
+
+    // When a holder is specified, derive the real ATA; otherwise use the
+    // program ID which Anchor interprets as Option::None.
+    let target_nft_ata = match target_nft_holder {
+        Some(holder) => get_ata(holder, target_nft_mint),
+        None => program_id(),
+    };
+
     Instruction::new_with_bytes(
         program_id(),
         &sighash("revoke_key"),
@@ -312,6 +326,9 @@ fn ix_revoke_key(
             AccountMeta::new_readonly(*admin_key_auth, false),
             AccountMeta::new_readonly(*position_pda, false),
             AccountMeta::new(*target_key_auth, false),
+            AccountMeta::new(*target_nft_mint, false),
+            AccountMeta::new(target_nft_ata, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
     )
@@ -1084,6 +1101,8 @@ fn test_revoke_operator_denied() {
         &h.operator_key_auth,
         &h.position_pda,
         &h.keeper_key_auth,
+        &h.keeper_nft_mint,
+        None, // no burn needed for a denied test
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator]).is_err());
 }
@@ -1120,6 +1139,8 @@ fn test_cannot_revoke_admin_key() {
         &h.admin_key_auth,
         &h.position_pda,
         &h.admin_key_auth, // trying to revoke self
+        &h.admin_nft_mint.pubkey(),
+        Some(&h.admin.pubkey()),
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -1223,13 +1244,15 @@ fn test_authorize_and_revoke_key() {
     let amount = u64::from_le_bytes(ata_account.data[64..72].try_into().unwrap());
     assert_eq!(amount, 1);
 
-    // Revoke the operator key
+    // Revoke the operator key (NFT held by operator, not admin — no burn)
     let ix = ix_revoke_key(
         &h.admin.pubkey(),
         &h.admin_nft_mint.pubkey(),
         &h.admin_key_auth,
         &h.position_pda,
         &h.operator_key_auth,
+        &h.operator_nft_mint,
+        None,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
 
@@ -1242,6 +1265,92 @@ fn test_authorize_and_revoke_key() {
         &h.operator_key_auth, &h.position_pda, &h.admin_nft_mint.pubkey(), 100_000,
     );
     assert!(send_tx(&mut svm, &[buy_ix], &[&h.operator]).is_err());
+}
+
+#[test]
+fn test_revoke_burns_nft_when_admin_holds_it() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Authorize a new key NFT to the admin's own wallet (simulates admin
+    // reclaiming a key, or issuing one to themselves for testing).
+    let extra_mint = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_nft_mint.pubkey(),
+            &h.position_pda,
+            &h.admin_key_auth,
+            &extra_mint.pubkey(),
+            &h.admin.pubkey(), // target wallet = admin
+            1, // Operator
+        )],
+        &[&h.admin, &extra_mint],
+    )
+    .unwrap();
+    let (extra_ka, _) = key_auth_pda(&h.position_pda, &extra_mint.pubkey());
+
+    // Verify admin holds the new key NFT
+    let ata = get_ata(&h.admin.pubkey(), &extra_mint.pubkey());
+    let ata_account = svm.get_account(&ata).unwrap();
+    let amount = u64::from_le_bytes(ata_account.data[64..72].try_into().unwrap());
+    assert_eq!(amount, 1);
+
+    // Revoke — admin holds the NFT, so it should be burned and ATA closed
+    let ix = ix_revoke_key(
+        &h.admin.pubkey(),
+        &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth,
+        &h.position_pda,
+        &extra_ka,
+        &extra_mint.pubkey(),
+        Some(&h.admin.pubkey()),
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
+
+    // Key auth should be closed
+    assert!(svm.get_account(&extra_ka).is_none());
+
+    // ATA should be closed (account gone)
+    assert!(svm.get_account(&ata).is_none());
+
+    // Mint supply should be 0 (token was burned)
+    let mint_account = svm.get_account(&extra_mint.pubkey()).unwrap();
+    let supply = u64::from_le_bytes(mint_account.data[36..44].try_into().unwrap());
+    assert_eq!(supply, 0);
+}
+
+#[test]
+fn test_revoke_skips_burn_when_admin_not_holder() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Operator holds the NFT, not admin. Burn should be skipped.
+    let ata_before = get_ata(&h.operator.pubkey(), &h.operator_nft_mint);
+    let ata_account_before = svm.get_account(&ata_before).unwrap();
+    let amount_before = u64::from_le_bytes(ata_account_before.data[64..72].try_into().unwrap());
+    assert_eq!(amount_before, 1);
+
+    // Pass None for the ATA — admin doesn't hold the NFT, so we skip burn.
+    let ix = ix_revoke_key(
+        &h.admin.pubkey(),
+        &h.admin_nft_mint.pubkey(),
+        &h.admin_key_auth,
+        &h.position_pda,
+        &h.operator_key_auth,
+        &h.operator_nft_mint,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
+
+    // Key auth should be closed
+    assert!(svm.get_account(&h.operator_key_auth).is_none());
+
+    // But the NFT ATA should still exist with amount=1 (burn was skipped)
+    let ata_account_after = svm.get_account(&ata_before).unwrap();
+    let amount_after = u64::from_le_bytes(ata_account_after.data[64..72].try_into().unwrap());
+    assert_eq!(amount_after, 1);
 }
 
 #[test]
@@ -1344,6 +1453,8 @@ fn test_theft_recovery_operator_key_stolen() {
         &h.admin_key_auth,
         &h.position_pda,
         &h.operator_key_auth,
+        &h.operator_nft_mint,
+        None, // operator holds it, no burn
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     assert!(svm.get_account(&h.operator_key_auth).is_none());
@@ -1382,10 +1493,10 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    for ka_pda in [
-        h.operator_key_auth,
-        h.depositor_key_auth,
-        h.keeper_key_auth,
+    for (ka_pda, nft_mint) in [
+        (h.operator_key_auth, h.operator_nft_mint),
+        (h.depositor_key_auth, h.depositor_nft_mint),
+        (h.keeper_key_auth, h.keeper_nft_mint),
     ] {
         let ix = ix_revoke_key(
             &h.admin.pubkey(),
@@ -1393,6 +1504,8 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
             &h.admin_key_auth,
             &h.position_pda,
             &ka_pda,
+            &nft_mint,
+            None, // holders are not the admin, skip burn
         );
         send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     }
