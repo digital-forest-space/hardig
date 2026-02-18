@@ -1758,13 +1758,18 @@ pub fn parse_sol_to_lamports(s: &str) -> Option<u64> {
 }
 
 pub fn lamports_to_sol(lamports: u64) -> String {
-    let sol = lamports as f64 / 1_000_000_000.0;
-    if sol == 0.0 {
+    let whole = lamports / 1_000_000_000;
+    let frac = lamports % 1_000_000_000;
+    if lamports == 0 {
         "0".to_string()
-    } else if sol < 0.001 {
-        format!("{:.9}", sol)
+    } else if lamports < 1_000_000 {
+        // Sub-milliSOL: show full 9-digit precision, trim trailing zeros
+        let s = format!("{}.{:09}", whole, frac);
+        s.trim_end_matches('0').to_string()
     } else {
-        format!("{:.4}", sol)
+        // Floor to 4 decimal places (never rounds up, ensures lossless repay)
+        let frac4 = frac / 100_000; // floor to 4 decimals
+        format!("{}.{:04}", whole, frac4)
     }
 }
 
