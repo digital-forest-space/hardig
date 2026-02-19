@@ -40,6 +40,14 @@ enum Action {
     Status,
     /// Initialize the protocol config
     InitProtocol,
+    /// Migrate ProtocolConfig to add collection field (protocol admin only, one-time)
+    MigrateConfig,
+    /// Create the MPL-Core collection for key NFTs (protocol admin only, one-time)
+    CreateCollection {
+        /// Metadata URI (upload collection-metadata.json to Irys/Arweave first)
+        #[arg(long)]
+        uri: String,
+    },
     /// Create a new position NFT
     CreatePosition,
     /// One-time setup: init Mayflower position + create ATAs
@@ -385,6 +393,8 @@ fn action_to_name(action: &Action) -> String {
     match action {
         Action::Status => "status".into(),
         Action::InitProtocol => "init-protocol".into(),
+        Action::MigrateConfig => "migrate-config".into(),
+        Action::CreateCollection { .. } => "create-collection".into(),
         Action::CreatePosition { .. } => "create-position".into(),
         Action::Setup { .. } => "setup".into(),
         Action::Buy { .. } => "buy".into(),
@@ -416,6 +426,18 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 });
             }
             app.build_init_protocol();
+        }
+        Action::MigrateConfig => {
+            app.build_migrate_config();
+        }
+        Action::CreateCollection { ref uri } => {
+            if app.collection.is_some() {
+                return Some(CliOutput::Noop {
+                    action: "create-collection".into(),
+                    message: "Collection already exists".into(),
+                });
+            }
+            app.build_create_collection(uri.clone());
         }
         Action::CreatePosition => {
             if app.position_pda.is_some() {

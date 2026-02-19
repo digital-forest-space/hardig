@@ -67,7 +67,7 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
     validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.admin_key_asset.to_account_info(),
-        &ctx.accounts.program_pda.key(),
+        &ctx.accounts.position.admin_asset,
         PERM_MANAGE_KEYS,
     )?;
 

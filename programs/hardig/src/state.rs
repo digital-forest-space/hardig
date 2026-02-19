@@ -5,13 +5,15 @@ use anchor_lang::prelude::*;
 pub struct ProtocolConfig {
     /// The admin who initialized the protocol.
     pub admin: Pubkey,
+    /// The MPL-Core collection for all Härdig key NFTs (Pubkey::default() = not yet created).
+    pub collection: Pubkey,
     /// Bump seed for the config PDA.
     pub bump: u8,
 }
 
 impl ProtocolConfig {
     pub const SEED: &'static [u8] = b"config";
-    pub const SIZE: usize = 8 + 32 + 1; // discriminator + admin + bump
+    pub const SIZE: usize = 8 + 32 + 32 + 1; // discriminator + admin + collection + bump
 }
 
 /// A navSOL position controlled by an NFT keyring.

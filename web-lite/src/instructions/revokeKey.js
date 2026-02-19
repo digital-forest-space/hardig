@@ -1,15 +1,15 @@
 import {
   deriveKeyStatePda,
-  deriveProgramPda,
+  deriveConfigPda,
   MPL_CORE_PROGRAM_ID,
 } from '../constants.js';
-import { myKeyAsset, positionPda, position } from '../state.js';
+import { myKeyAsset, positionPda, collection } from '../state.js';
 import { shortPubkey, permissionsName } from '../utils.js';
 
 export async function buildRevokeKey(program, wallet, targetKeyEntry) {
   const posPda = positionPda.value;
   const adminKeyAsset = myKeyAsset.value;
-  const [programPda] = deriveProgramPda(position.value.adminAsset);
+  const [configPda] = deriveConfigPda();
   const [targetKeyState] = deriveKeyStatePda(targetKeyEntry.mint);
 
   const ix = await program.methods
@@ -20,7 +20,8 @@ export async function buildRevokeKey(program, wallet, targetKeyEntry) {
       position: posPda,
       targetAsset: targetKeyEntry.mint,
       targetKeyState: targetKeyState,
-      programPda: programPda,
+      config: configPda,
+      collection: collection.value,
       mplCoreProgram: MPL_CORE_PROGRAM_ID,
     })
     .instruction();

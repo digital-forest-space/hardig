@@ -2,17 +2,17 @@ import { Keypair, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import {
   deriveKeyStatePda,
-  deriveProgramPda,
+  deriveConfigPda,
   MPL_CORE_PROGRAM_ID,
 } from '../constants.js';
-import { myKeyAsset, positionPda, position } from '../state.js';
+import { myKeyAsset, positionPda, collection } from '../state.js';
 import { shortPubkey, permissionsName } from '../utils.js';
 
 export async function buildAuthorizeKey(program, wallet, targetWalletStr, permissionsU8, sellCapacity = 0, sellRefillSlots = 0, borrowCapacity = 0, borrowRefillSlots = 0) {
   const targetWallet = new PublicKey(targetWalletStr);
   const posPda = positionPda.value;
   const adminKeyAsset = myKeyAsset.value;
-  const [programPda] = deriveProgramPda(position.value.adminAsset);
+  const [configPda] = deriveConfigPda();
 
   const assetKp = Keypair.generate();
   const newKeyAsset = assetKp.publicKey;
@@ -27,7 +27,8 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, permis
       newKeyAsset: newKeyAsset,
       targetWallet: targetWallet,
       keyState: keyStatePda,
-      programPda: programPda,
+      config: configPda,
+      collection: collection.value,
       mplCoreProgram: MPL_CORE_PROGRAM_ID,
     })
     .instruction();

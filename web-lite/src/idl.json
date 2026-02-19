@@ -84,39 +84,35 @@
           }
         },
         {
-          "name": "program_pda",
+          "name": "config",
           "docs": [
-            "Per-position authority PDA."
+            "Protocol config PDA — needed to read the collection address."
           ],
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  97,
-                  117,
-                  116,
-                  104,
+                  99,
                   111,
-                  114,
+                  110,
+                  102,
                   105,
-                  116,
-                  121
+                  103
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "position.admin_asset",
-                "account": "PositionNFT"
               }
             ]
           }
         },
         {
-          "name": "mpl_core_program",
+          "name": "collection",
           "docs": [
-            "MPL-Core program."
+            "The MPL-Core collection asset for Härdig key NFTs."
           ],
+          "writable": true
+        },
+        {
+          "name": "mpl_core_program",
           "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
         },
         {
@@ -177,7 +173,7 @@
         {
           "name": "key_state",
           "docs": [
-            "Optional KeyState for rate-limited keys."
+            "Optional KeyState for rate-limited keys (validated in handler)."
           ],
           "writable": true,
           "optional": true
@@ -480,6 +476,70 @@
       ]
     },
     {
+      "name": "create_collection",
+      "docs": [
+        "Create the MPL-Core collection for all Härdig key NFTs (protocol admin only, once)."
+      ],
+      "discriminator": [
+        156,
+        251,
+        92,
+        54,
+        233,
+        2,
+        16,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collection_asset",
+          "docs": [
+            "The MPL-Core collection asset. Fresh keypair, signed by the caller."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mpl_core_program",
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "name": "create_market_config",
       "docs": [
         "Create a MarketConfig PDA for a Mayflower market (protocol admin only)."
@@ -651,7 +711,8 @@
         {
           "name": "program_pda",
           "docs": [
-            "Per-position authority PDA. Set as update_authority on the key NFT."
+            "Per-position authority PDA. Used for Mayflower CPI signing;",
+            "bump stored in PositionNFT.authority_bump."
           ],
           "pda": {
             "seeds": [
@@ -677,10 +738,36 @@
           }
         },
         {
-          "name": "mpl_core_program",
+          "name": "config",
           "docs": [
-            "MPL-Core program."
+            "Protocol config PDA — needed to read the collection address and sign as",
+            "collection authority when adding the asset to the collection."
           ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collection",
+          "docs": [
+            "The MPL-Core collection asset for Härdig key NFTs."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mpl_core_program",
           "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
         },
         {
@@ -1123,6 +1210,9 @@
         },
         {
           "name": "log_account",
+          "docs": [
+            "Mayflower log account."
+          ],
           "writable": true
         }
       ],
@@ -1136,7 +1226,7 @@
     {
       "name": "revoke_key",
       "docs": [
-        "Revoke a key by burning the asset and closing its KeyState (admin only)."
+        "Revoke a key by burning its MPL-Core asset (admin only)."
       ],
       "discriminator": [
         162,
@@ -1181,39 +1271,36 @@
           "writable": true
         },
         {
-          "name": "program_pda",
+          "name": "config",
           "docs": [
-            "Per-position authority PDA (signs burn as PermanentBurnDelegate)."
+            "Protocol config PDA — signs burn as the collection's update authority",
+            "(PermanentBurnDelegate authority)."
           ],
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  97,
-                  117,
-                  116,
-                  104,
+                  99,
                   111,
-                  114,
+                  110,
+                  102,
                   105,
-                  116,
-                  121
+                  103
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "position.admin_asset",
-                "account": "PositionNFT"
               }
             ]
           }
         },
         {
-          "name": "mpl_core_program",
+          "name": "collection",
           "docs": [
-            "MPL-Core program."
+            "The MPL-Core collection asset for Härdig key NFTs."
           ],
+          "writable": true
+        },
+        {
+          "name": "mpl_core_program",
           "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
         },
         {
@@ -1301,7 +1388,7 @@
         {
           "name": "key_state",
           "docs": [
-            "Optional KeyState for rate-limited keys."
+            "Optional KeyState for rate-limited keys (validated in handler)."
           ],
           "writable": true,
           "optional": true
@@ -1429,14 +1516,14 @@
     {
       "name": "KeyState",
       "discriminator": [
-        114,
-        54,
-        13,
-        140,
-        51,
-        154,
-        241,
-        150
+        210,
+        92,
+        252,
+        180,
+        206,
+        188,
+        27,
+        104
       ]
     },
     {
@@ -1503,12 +1590,12 @@
     {
       "code": 6004,
       "name": "InvalidKey",
-      "msg": "Key NFT is not a valid MPL-Core asset or does not match KeyState"
+      "msg": "Key asset has invalid or missing attributes"
     },
     {
       "code": 6005,
       "name": "WrongPosition",
-      "msg": "Key asset update_authority does not match position authority PDA"
+      "msg": "Key asset does not belong to this position"
     },
     {
       "code": 6006,
@@ -1567,16 +1654,26 @@
     },
     {
       "code": 6017,
+      "name": "CollectionNotCreated",
+      "msg": "Collection has not been created yet"
+    },
+    {
+      "code": 6018,
+      "name": "CollectionAlreadyCreated",
+      "msg": "Collection has already been created"
+    },
+    {
+      "code": 6019,
       "name": "InvalidNftMint",
       "msg": "Invalid NFT mint"
     },
     {
-      "code": 6018,
+      "code": 6020,
       "name": "InvalidPositionPda",
       "msg": "Invalid position PDA"
     },
     {
-      "code": 6019,
+      "code": 6021,
       "name": "PositionAlreadyExists",
       "msg": "Position already exists for this admin key"
     }
@@ -1793,6 +1890,13 @@
             "name": "admin",
             "docs": [
               "The admin who initialized the protocol."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "collection",
+            "docs": [
+              "The MPL-Core collection for all Härdig key NFTs (Pubkey::default() = not yet created)."
             ],
             "type": "pubkey"
           },

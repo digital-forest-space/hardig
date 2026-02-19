@@ -9,14 +9,14 @@ use mpl_core::{
 use crate::errors::HardigError;
 
 /// Validates that the signer owns the given MPL-Core key asset, that the asset
-/// belongs to the expected position (via update_authority), and that the key
-/// has at least one of the required permission bits set.
+/// belongs to the expected position (via the `position` attribute), and that the
+/// key has at least one of the required permission bits set.
 ///
 /// Returns the permissions bitmask for further checks (e.g., rate limiting).
 pub fn validate_key(
     signer: &Signer,
     key_asset_info: &AccountInfo,
-    expected_authority_pda: &Pubkey,
+    expected_admin_asset: &Pubkey,
     required: u8,
 ) -> Result<u8> {
     // Deserialize and validate the asset
@@ -28,37 +28,35 @@ pub fn validate_key(
         .map_err(|_| error!(HardigError::InvalidKey))?;
     require!(key == AssetKey::AssetV1, HardigError::InvalidKey);
 
-    // Parse owner (bytes 1..33) and update_authority (bytes 33+)
+    // Parse owner (bytes 1..33)
     require!(data.len() >= 33, HardigError::InvalidKey);
     let owner = Pubkey::try_from(&data[1..33])
         .map_err(|_| error!(HardigError::InvalidKey))?;
-
-    // Read update_authority: borsh-encoded enum (1 byte tag + optional 32-byte pubkey)
-    require!(data.len() >= 34, HardigError::InvalidKey);
-    let ua_tag = data[33];
-    // UpdateAuthority::Address = tag 1
-    require!(ua_tag == 1 && data.len() >= 66, HardigError::WrongPosition);
-    let ua_pubkey = Pubkey::try_from(&data[34..66])
-        .map_err(|_| error!(HardigError::WrongPosition))?;
 
     drop(data);
 
     // 1. Signer owns this asset
     require!(owner == signer.key(), HardigError::KeyNotHeld);
 
-    // 2. Asset belongs to the expected position (via update_authority)
-    require!(
-        ua_pubkey == *expected_authority_pda,
-        HardigError::WrongPosition
-    );
-
-    // 3. Read permissions from Attributes plugin
+    // 2. Read attributes from Attributes plugin
     let (_, attributes, _) = fetch_plugin::<BaseAssetV1, Attributes>(
         key_asset_info,
         PluginType::Attributes,
     )
     .map_err(|_| error!(HardigError::InvalidKey))?;
 
+    // 3. Asset belongs to the expected position (via "position" attribute)
+    let position_attr = attributes
+        .attribute_list
+        .iter()
+        .find(|a| a.key == "position")
+        .ok_or(error!(HardigError::WrongPosition))?;
+    require!(
+        position_attr.value == expected_admin_asset.to_string(),
+        HardigError::WrongPosition
+    );
+
+    // 4. Read permissions
     let permissions = attributes
         .attribute_list
         .iter()
@@ -66,7 +64,7 @@ pub fn validate_key(
         .and_then(|a| a.value.parse::<u8>().ok())
         .ok_or(error!(HardigError::InvalidKey))?;
 
-    // 4. Check required permission(s)
+    // 5. Check required permission(s)
     require!(
         permissions & required != 0,
         HardigError::InsufficientPermission

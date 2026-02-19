@@ -16,6 +16,7 @@ import {
   myNftMint,
   keyring,
   protocolExists,
+  collection,
   mayflowerInitialized,
   marketConfigPda,
   marketConfig,
@@ -30,8 +31,19 @@ export async function checkProtocol(connection) {
     const [configPda] = deriveConfigPda();
     const info = await connection.getAccountInfo(configPda);
     protocolExists.value = info !== null;
+    if (info && info.data.length >= 72) {
+      // ProtocolConfig layout: discriminator(8) + admin(32) + collection(32) + bump(1)
+      // collection is at bytes 40-72
+      const collectionPubkey = new PublicKey(info.data.slice(40, 72));
+      collection.value = collectionPubkey.equals(PublicKey.default)
+        ? null
+        : collectionPubkey;
+    } else {
+      collection.value = null;
+    }
   } catch (e) {
     protocolExists.value = false;
+    collection.value = null;
   }
 }
 

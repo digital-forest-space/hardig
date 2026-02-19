@@ -231,15 +231,45 @@ fn ix_create_market_config(admin: &Pubkey) -> Instruction {
     )
 }
 
+fn config_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id())
+}
+
+fn ix_create_collection(admin: &Pubkey) -> (Instruction, Keypair) {
+    let (config_pda, _) = config_pda();
+    let collection_kp = Keypair::new();
+
+    let mut data = sighash("create_collection");
+    // Borsh-encode the uri String: 4-byte little-endian length prefix + UTF-8 bytes
+    let uri = "";
+    data.extend_from_slice(&(uri.len() as u32).to_le_bytes());
+    data.extend_from_slice(uri.as_bytes());
+
+    let ix = Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),                         // admin
+            AccountMeta::new(config_pda, false),                    // config
+            AccountMeta::new(collection_kp.pubkey(), true),         // collection_asset (signer)
+            AccountMeta::new_readonly(MPL_CORE_ID, false),          // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ],
+    );
+    (ix, collection_kp)
+}
+
 fn ix_create_position(
     admin: &Pubkey,
     asset: &Pubkey,
     spread_bps: u16,
+    collection: &Pubkey,
 ) -> Instruction {
     let (position_pda, _) =
         Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
     let (program_pda, _) =
         Pubkey::find_program_address(&[b"authority", asset.as_ref()], &program_id());
+    let (config_pda, _) = config_pda();
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
@@ -252,6 +282,8 @@ fn ix_create_position(
             AccountMeta::new(*asset, true),               // admin_asset (signer)
             AccountMeta::new(position_pda, false),        // position
             AccountMeta::new_readonly(program_pda, false), // program_pda
+            AccountMeta::new_readonly(config_pda, false),  // config
+            AccountMeta::new(*collection, false),          // collection
             AccountMeta::new_readonly(MPL_CORE_ID, false), // mpl_core_program
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
@@ -269,13 +301,13 @@ fn ix_authorize_key(
     sell_refill_period_slots: u64,
     borrow_bucket_capacity: u64,
     borrow_refill_period_slots: u64,
+    collection: &Pubkey,
 ) -> Instruction {
     let (pos_pda, _) =
         Pubkey::find_program_address(&[PositionNFT::SEED, admin_asset.as_ref()], &program_id());
-    let (program_pda, _) =
-        Pubkey::find_program_address(&[b"authority", admin_asset.as_ref()], &program_id());
     let (key_state_pda, _) =
         Pubkey::find_program_address(&[KeyState::SEED, new_asset.as_ref()], &program_id());
+    let (cfg_pda, _) = config_pda();
 
     let mut data = sighash("authorize_key");
     data.push(role);
@@ -294,7 +326,8 @@ fn ix_authorize_key(
             AccountMeta::new(*new_asset, true),                // new_key_asset (signer)
             AccountMeta::new_readonly(*target_wallet, false),  // target_wallet
             AccountMeta::new(key_state_pda, false),            // key_state (init)
-            AccountMeta::new_readonly(program_pda, false),     // program_pda
+            AccountMeta::new_readonly(cfg_pda, false),         // config
+            AccountMeta::new(*collection, false),              // collection
             AccountMeta::new_readonly(MPL_CORE_ID, false),     // mpl_core_program
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
@@ -306,11 +339,11 @@ fn ix_revoke_key(
     admin_asset: &Pubkey,
     target_asset: &Pubkey,
     target_key_state: &Pubkey,
+    collection: &Pubkey,
 ) -> Instruction {
     let (pos_pda, _) =
         Pubkey::find_program_address(&[PositionNFT::SEED, admin_asset.as_ref()], &program_id());
-    let (program_pda, _) =
-        Pubkey::find_program_address(&[b"authority", admin_asset.as_ref()], &program_id());
+    let (cfg_pda, _) = config_pda();
 
     Instruction::new_with_bytes(
         program_id(),
@@ -321,7 +354,8 @@ fn ix_revoke_key(
             AccountMeta::new_readonly(pos_pda, false),         // position
             AccountMeta::new(*target_asset, false),            // target_asset
             AccountMeta::new(*target_key_state, false),        // target_key_state
-            AccountMeta::new_readonly(program_pda, false),     // program_pda
+            AccountMeta::new_readonly(cfg_pda, false),         // config
+            AccountMeta::new(*collection, false),              // collection
             AccountMeta::new_readonly(MPL_CORE_ID, false),     // mpl_core_program
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
@@ -596,6 +630,7 @@ struct TestHarness {
     admin: Keypair,
     admin_asset: Keypair,
     position_pda: Pubkey,
+    collection: Pubkey,
 
     operator: Keypair,
     operator_asset: Pubkey,
@@ -620,6 +655,11 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
     // Init protocol
     send_tx(svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
 
+    // Create collection
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+
     // Create MarketConfig for default navSOL market
     send_tx(svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
 
@@ -631,6 +671,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &admin.pubkey(),
             &admin_asset.pubkey(),
             500,
+            &collection,
         )],
         &[&admin, &admin_asset],
     )
@@ -658,6 +699,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &operator.pubkey(),
             PRESET_OPERATOR,
             0, 0, 0, 0,
+            &collection,
         )],
         &[&admin, &op_asset],
     )
@@ -678,6 +720,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &depositor.pubkey(),
             PRESET_DEPOSITOR,
             0, 0, 0, 0,
+            &collection,
         )],
         &[&admin, &dep_asset],
     )
@@ -698,6 +741,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &keeper.pubkey(),
             PRESET_KEEPER,
             0, 0, 0, 0,
+            &collection,
         )],
         &[&admin, &keep_asset],
     )
@@ -712,6 +756,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
         admin,
         admin_asset,
         position_pda: pos_pda,
+        collection,
         operator,
         operator_asset: op_asset.pubkey(),
         operator_key_state: op_ks,
@@ -1142,6 +1187,7 @@ fn test_authorize_operator_denied() {
         &random_wallet.pubkey(),
         PRESET_DEPOSITOR,
         0, 0, 0, 0,
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator, &new_asset]).is_err());
 }
@@ -1155,6 +1201,7 @@ fn test_revoke_operator_denied() {
         &h.operator_asset,
         &h.keeper_asset,
         &h.keeper_key_state,
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator]).is_err());
 }
@@ -1175,6 +1222,7 @@ fn test_cannot_create_second_admin() {
         &random_wallet.pubkey(),
         PRESET_ADMIN, // Has PERM_MANAGE_KEYS -> rejected
         0, 0, 0, 0,
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
 }
@@ -1193,6 +1241,7 @@ fn test_cannot_revoke_admin_key() {
         &h.admin_asset.pubkey(),
         &h.admin_asset.pubkey(),
         &h.operator_key_state, // dummy - doesn't matter, should fail first on admin check
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin]).is_err());
 }
@@ -1210,7 +1259,7 @@ fn test_wrong_position_key_rejected() {
     let asset2 = Keypair::new();
     send_tx(
         &mut svm,
-        &[ix_create_position(&admin2.pubkey(), &asset2.pubkey(), 300)],
+        &[ix_create_position(&admin2.pubkey(), &asset2.pubkey(), 300, &h.collection)],
         &[&admin2, &asset2],
     )
     .unwrap();
@@ -1251,10 +1300,15 @@ fn test_create_position_and_admin_asset() {
     svm.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
     send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
 
+    // Create collection
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+
     let asset_kp = Keypair::new();
     send_tx(
         &mut svm,
-        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 750)],
+        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 750, &collection)],
         &[&admin, &asset_kp],
     )
     .unwrap();
@@ -1294,6 +1348,7 @@ fn test_authorize_and_revoke_key() {
         &h.admin_asset.pubkey(),
         &h.operator_asset,
         &h.operator_key_state,
+        &h.collection,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
 
@@ -1347,6 +1402,7 @@ fn test_zero_permissions_rejected() {
         &target.pubkey(),
         0x00, // Zero permissions
         0, 0, 0, 0,
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
 }
@@ -1366,6 +1422,7 @@ fn test_limited_sell_requires_rate_params() {
         &target.pubkey(),
         PERM_LIMITED_SELL,
         0, 0, 0, 0, // missing capacity/refill
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
 }
@@ -1384,6 +1441,7 @@ fn test_manage_keys_permission_rejected() {
         &target.pubkey(),
         PERM_MANAGE_KEYS, // PERM_MANAGE_KEYS alone -> rejected
         0, 0, 0, 0,
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
 }
@@ -1408,6 +1466,7 @@ fn test_custom_bitmask_buy_reinvest() {
             &custom_user.pubkey(),
             custom_perms,
             0, 0, 0, 0,
+            &h.collection,
         )],
         &[&h.admin, &custom_asset],
     )
@@ -1507,6 +1566,7 @@ fn test_theft_recovery_operator_key_stolen() {
         &h.admin_asset.pubkey(),
         &h.operator_asset,
         &h.operator_key_state,
+        &h.collection,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     assert!(svm.get_account(&h.operator_key_state).is_none());
@@ -1528,6 +1588,7 @@ fn test_theft_recovery_operator_key_stolen() {
         &h.operator.pubkey(),
         PRESET_OPERATOR,
         0, 0, 0, 0,
+        &h.collection,
     );
     send_tx(&mut svm, &[ix], &[&h.admin, &new_op_asset]).unwrap();
 
@@ -1557,6 +1618,7 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
             &h.admin_asset.pubkey(),
             &asset,
             &ks,
+            &h.collection,
         );
         send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
     }
@@ -1586,6 +1648,7 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
             &new_operator.pubkey(),
             1,
             0, 0, 0, 0,
+            &h.collection,
         )],
         &[&h.admin, &new_op_asset],
     )
@@ -1653,6 +1716,7 @@ fn test_authorize_limited_sell_key() {
             1_000_000_000, // 1 SOL capacity
             500_000,       // ~500k slots refill period
             0, 0,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1689,6 +1753,7 @@ fn test_limited_sell_within_capacity() {
             2_000_000_000, // 2 SOL capacity
             1_000_000,
             0, 0,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1730,6 +1795,7 @@ fn test_limited_sell_exceeds_capacity() {
             500_000_000, // 0.5 SOL capacity
             1_000_000,
             0, 0,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1768,6 +1834,7 @@ fn test_limited_sell_drains_then_rejects() {
             1_000_000_000, // 1 SOL capacity
             1_000_000,
             0, 0,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1814,6 +1881,7 @@ fn test_limited_sell_refills_over_slots() {
             1_000_000_000, // 1 SOL capacity
             1_000_000,     // 1M slots for full refill
             0, 0,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1870,6 +1938,7 @@ fn test_unlimited_sell_overrides_limited() {
             100, // tiny capacity — would block if enforced
             1,
             0, 0,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1899,6 +1968,7 @@ fn test_non_limited_rejects_rate_params() {
         &target.pubkey(),
         PERM_BUY,
         1_000_000, 500_000, 0, 0,
+        &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
 }
@@ -1923,6 +1993,7 @@ fn test_limited_borrow_within_capacity() {
             0, 0,              // sell: zero (no limited sell)
             2_000_000_000,     // borrow capacity
             1_000_000,         // borrow refill
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1958,6 +2029,7 @@ fn test_limited_borrow_exceeds_capacity() {
             0, 0,
             500_000_000, // 0.5 SOL borrow capacity
             1_000_000,
+            &h.collection,
         )],
         &[&h.admin, &asset],
     )
@@ -1982,10 +2054,15 @@ fn test_create_position_creates_mpl_core_asset() {
     svm.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
     send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
 
+    // Create collection
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+
     let asset_kp = Keypair::new();
     send_tx(
         &mut svm,
-        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 500)],
+        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 500, &collection)],
         &[&admin, &asset_kp],
     )
     .unwrap();
@@ -2029,6 +2106,7 @@ fn test_revoke_burns_mpl_core_asset() {
             &h.admin.pubkey(),
             PRESET_OPERATOR,
             0, 0, 0, 0,
+            &h.collection,
         )],
         &[&h.admin, &extra_asset],
     )
@@ -2045,6 +2123,7 @@ fn test_revoke_burns_mpl_core_asset() {
         &h.admin_asset.pubkey(),
         &extra_asset.pubkey(),
         &extra_ks,
+        &h.collection,
     );
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
 
@@ -2059,4 +2138,55 @@ fn test_revoke_burns_mpl_core_asset() {
             || asset_after.as_ref().unwrap().data.len() == 1,
         "MPL-Core asset should be burned"
     );
+}
+
+// ===========================================================================
+// Collection tests
+// ===========================================================================
+
+#[test]
+fn test_create_collection() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+
+    let config = read_protocol_config(&svm);
+    assert_eq!(config.collection, coll_kp.pubkey());
+
+    // Collection asset should exist (owned by MPL-Core program)
+    let coll_account = svm.get_account(&coll_kp.pubkey());
+    assert!(coll_account.is_some(), "collection asset should exist");
+    assert_eq!(coll_account.unwrap().owner, MPL_CORE_ID);
+}
+
+#[test]
+fn test_create_collection_twice_rejected() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+
+    // Second attempt should fail
+    let (coll_ix2, coll_kp2) = ix_create_collection(&admin.pubkey());
+    assert!(send_tx(&mut svm, &[coll_ix2], &[&admin, &coll_kp2]).is_err());
+}
+
+#[test]
+fn test_create_position_without_collection_rejected() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Try to create position without creating collection first
+    let asset_kp = Keypair::new();
+    // Use a dummy pubkey for collection since none exists
+    let dummy_collection = Pubkey::new_unique();
+    let result = send_tx(
+        &mut svm,
+        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 500, &dummy_collection)],
+        &[&admin, &asset_kp],
+    );
+    assert!(result.is_err());
 }

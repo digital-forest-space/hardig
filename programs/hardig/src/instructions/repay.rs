@@ -81,7 +81,7 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     validate_key(
         &ctx.accounts.signer,
         &ctx.accounts.key_asset.to_account_info(),
-        &ctx.accounts.program_pda.key(),
+        &ctx.accounts.position.admin_asset,
         PERM_REPAY,
     )?;
 

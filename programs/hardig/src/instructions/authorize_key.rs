@@ -10,7 +10,7 @@ use mpl_core::{
 
 use crate::errors::HardigError;
 use crate::state::{
-    KeyState, PositionNFT, RateBucket,
+    KeyState, PositionNFT, ProtocolConfig, RateBucket,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS,
 };
 
@@ -47,13 +47,21 @@ pub struct AuthorizeKey<'info> {
     )]
     pub key_state: Account<'info, KeyState>,
 
-    /// Per-position authority PDA.
-    /// CHECK: PDA derived from program.
+    /// Protocol config PDA — needed to read the collection address.
     #[account(
-        seeds = [b"authority", position.admin_asset.as_ref()],
-        bump,
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+        constraint = config.collection != Pubkey::default() @ HardigError::CollectionNotCreated,
     )]
-    pub program_pda: UncheckedAccount<'info>,
+    pub config: Account<'info, ProtocolConfig>,
+
+    /// The MPL-Core collection asset for Härdig key NFTs.
+    /// CHECK: Validated against config.collection.
+    #[account(
+        mut,
+        constraint = collection.key() == config.collection @ HardigError::CollectionNotCreated,
+    )]
+    pub collection: UncheckedAccount<'info>,
 
     /// CHECK: MPL-Core program validated by address constraint.
     #[account(address = MPL_CORE_ID)]
@@ -74,7 +82,7 @@ pub fn handler(
     validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.admin_key_asset.to_account_info(),
-        &ctx.accounts.program_pda.key(),
+        &ctx.accounts.position.admin_asset,
         PERM_MANAGE_KEYS,
     )?;
 
@@ -106,8 +114,12 @@ pub fn handler(
         );
     }
 
-    // Build attribute list with human-readable permissions
+    // Build attribute list with human-readable permissions + position binding
     let mut attrs = permission_attributes(permissions);
+    attrs.push(Attribute {
+        key: "position".to_string(),
+        value: ctx.accounts.position.admin_asset.to_string(),
+    });
     if permissions & PERM_LIMITED_SELL != 0 {
         attrs.push(Attribute {
             key: "sell_limit".to_string(),
@@ -121,12 +133,16 @@ pub fn handler(
         });
     }
 
-    // Create the new key NFT via MPL-Core
+    // Create the new key NFT via MPL-Core, adding it to the collection
+    let config = &ctx.accounts.config;
+    let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
+
     CreateV2CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
         .asset(&ctx.accounts.new_key_asset.to_account_info())
+        .collection(Some(&ctx.accounts.collection.to_account_info()))
+        .authority(Some(&ctx.accounts.config.to_account_info()))
         .payer(&ctx.accounts.admin.to_account_info())
         .owner(Some(&ctx.accounts.target_wallet.to_account_info()))
-        .update_authority(Some(&ctx.accounts.program_pda.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name("H\u{00e4}rdig Key".to_string())
         .uri(String::new())
@@ -146,7 +162,7 @@ pub fn handler(
                 authority: Some(PluginAuthority::UpdateAuthority),
             },
         ])
-        .invoke()?;
+        .invoke_signed(&[config_seeds])?;
 
     let current_slot = Clock::get()?.slot;
 

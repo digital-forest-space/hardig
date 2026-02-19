@@ -10,6 +10,7 @@ export const connected = signal(false);
 
 // Protocol
 export const protocolExists = signal(false);
+export const collection = signal(null);
 
 // Position
 export const positionPda = signal(null);

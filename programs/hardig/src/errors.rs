@@ -50,6 +50,16 @@ pub enum HardigError {
     #[msg("Rate limit exceeded")]
     RateLimitExceeded,
 
+    // Collection errors
+    #[msg("Collection has not been created yet")]
+    CollectionNotCreated,
+    #[msg("Collection has already been created")]
+    CollectionAlreadyCreated,
+
+    // Migration errors
+    #[msg("Config account already has the expected size")]
+    AlreadyMigrated,
+
     // State errors
     #[msg("Invalid NFT mint")]
     InvalidNftMint,

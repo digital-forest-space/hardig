@@ -102,7 +102,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     let permissions = validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.key_asset.to_account_info(),
-        &ctx.accounts.program_pda.key(),
+        &ctx.accounts.position.admin_asset,
         PERM_BORROW | PERM_LIMITED_BORROW,
     )?;
 

@@ -116,7 +116,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     let permissions = validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.key_asset.to_account_info(),
-        &ctx.accounts.program_pda.key(),
+        &ctx.accounts.position.admin_asset,
         PERM_SELL | PERM_LIMITED_SELL,
     )?;
 

@@ -3,12 +3,13 @@ use mpl_core::{
     ID as MPL_CORE_ID,
     instructions::CreateV2CpiBuilder,
     types::{
-        Attributes, PermanentBurnDelegate, PermanentTransferDelegate,
+        Attribute, Attributes, PermanentBurnDelegate, PermanentTransferDelegate,
         Plugin, PluginAuthority, PluginAuthorityPair,
     },
 };
 
-use crate::state::{PositionNFT, PRESET_ADMIN};
+use crate::errors::HardigError;
+use crate::state::{PositionNFT, ProtocolConfig, PRESET_ADMIN};
 use super::permission_attributes;
 
 #[derive(Accounts)]
@@ -30,13 +31,31 @@ pub struct CreatePosition<'info> {
     )]
     pub position: Account<'info, PositionNFT>,
 
-    /// Per-position authority PDA. Set as update_authority on the key NFT.
+    /// Per-position authority PDA. Used for Mayflower CPI signing;
+    /// bump stored in PositionNFT.authority_bump.
     /// CHECK: PDA derived from program, not read.
     #[account(
         seeds = [b"authority", admin_asset.key().as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
+
+    /// Protocol config PDA — needed to read the collection address and sign as
+    /// collection authority when adding the asset to the collection.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+        constraint = config.collection != Pubkey::default() @ HardigError::CollectionNotCreated,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
+
+    /// The MPL-Core collection asset for Härdig key NFTs.
+    /// CHECK: Validated against config.collection.
+    #[account(
+        mut,
+        constraint = collection.key() == config.collection @ HardigError::CollectionNotCreated,
+    )]
+    pub collection: UncheckedAccount<'info>,
 
     /// CHECK: MPL-Core program validated by address constraint.
     #[account(address = MPL_CORE_ID)]
@@ -46,19 +65,31 @@ pub struct CreatePosition<'info> {
 }
 
 pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Result<()> {
-    // Create the admin key NFT via MPL-Core
+    let config = &ctx.accounts.config;
+    let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
+
+    // Build attributes including position binding
+    let mut attrs = permission_attributes(PRESET_ADMIN);
+    attrs.push(Attribute {
+        key: "position".to_string(),
+        value: ctx.accounts.admin_asset.key().to_string(),
+    });
+
+    // Create the admin key NFT via MPL-Core, adding it to the collection.
+    // update_authority is inherited from the collection (config PDA).
     CreateV2CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
         .asset(&ctx.accounts.admin_asset.to_account_info())
+        .collection(Some(&ctx.accounts.collection.to_account_info()))
+        .authority(Some(&ctx.accounts.config.to_account_info()))
         .payer(&ctx.accounts.admin.to_account_info())
         .owner(Some(&ctx.accounts.admin.to_account_info()))
-        .update_authority(Some(&ctx.accounts.program_pda.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name("H\u{00e4}rdig Admin Key".to_string())
         .uri(String::new())
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {
-                    attribute_list: permission_attributes(PRESET_ADMIN),
+                    attribute_list: attrs,
                 }),
                 authority: Some(PluginAuthority::UpdateAuthority),
             },
@@ -71,7 +102,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
                 authority: Some(PluginAuthority::UpdateAuthority),
             },
         ])
-        .invoke()?;
+        .invoke_signed(&[config_seeds])?;
 
     // Initialize the position
     let position = &mut ctx.accounts.position;

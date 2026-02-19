@@ -18,6 +18,16 @@ pub mod hardig {
         instructions::initialize_protocol::handler(ctx)
     }
 
+    /// Migrate ProtocolConfig from v0 (41 bytes) to v1 (73 bytes, adds collection field).
+    pub fn migrate_config(ctx: Context<MigrateConfig>) -> Result<()> {
+        instructions::migrate_config::handler(ctx)
+    }
+
+    /// Create the MPL-Core collection for all Härdig key NFTs (protocol admin only, once).
+    pub fn create_collection(ctx: Context<CreateCollection>, uri: String) -> Result<()> {
+        instructions::create_collection::handler(ctx, uri)
+    }
+
     /// Create a new position with an admin key NFT.
     pub fn create_position(
         ctx: Context<CreatePosition>,

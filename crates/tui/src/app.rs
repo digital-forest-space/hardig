@@ -128,6 +128,7 @@ pub struct App {
 
     // Protocol state
     pub protocol_exists: bool,
+    pub collection: Option<Pubkey>,
 
     // Position state (single position mode)
     pub position_pda: Option<Pubkey>,
@@ -198,6 +199,7 @@ impl App {
             message_log: Vec::new(),
             verbose,
             protocol_exists: false,
+            collection: None,
             position_pda: None,
             position: None,
             my_permissions: None,
@@ -624,7 +626,66 @@ impl App {
         });
     }
 
+    pub fn build_migrate_config(&mut self) {
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
+        let data = sighash("migrate_config");
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Migrate Config (add collection field)".into(),
+                format!("Config PDA: {}", config_pda),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
+    pub fn build_create_collection(&mut self, uri: String) {
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+        let collection_kp = Keypair::new();
+        let collection = collection_kp.pubkey();
+
+        // Anchor serializes String as: 4-byte little-endian length + UTF-8 bytes
+        let mut data = sighash("create_collection");
+        let uri_bytes = uri.as_bytes();
+        data.extend_from_slice(&(uri_bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(uri_bytes);
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(collection, true),
+            AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Create Collection".into(),
+                format!("Collection Asset: {}", collection),
+                format!("URI: {}", uri),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![collection_kp],
+        });
+    }
+
     pub fn build_create_position(&mut self) {
+        let collection = match self.collection {
+            Some(c) => c,
+            None => {
+                self.push_log("No collection set — run create-collection first");
+                return;
+            }
+        };
         let asset_kp = Keypair::new();
         let asset = asset_kp.pubkey();
         let admin = self.keypair.pubkey();
@@ -632,6 +693,8 @@ impl App {
             Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &hardig::ID);
         let (prog_pda, _) =
             Pubkey::find_program_address(&[b"authority", asset.as_ref()], &hardig::ID);
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
 
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
@@ -641,6 +704,8 @@ impl App {
             AccountMeta::new(asset, true),
             AccountMeta::new(position_pda, false),
             AccountMeta::new_readonly(prog_pda, false),
+            AccountMeta::new_readonly(config_pda, false),   // config
+            AccountMeta::new(collection, false),             // collection
             AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
@@ -713,6 +778,15 @@ impl App {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(0);
 
+        let collection = match self.collection {
+            Some(c) => c,
+            None => {
+                self.push_log("No collection set — run create-collection first");
+                return;
+            }
+        };
+        let (config_pda, _) = Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let mut data = sighash("authorize_key");
         data.push(permissions_u8);
         data.extend_from_slice(&sell_cap.to_le_bytes());
@@ -727,7 +801,8 @@ impl App {
             AccountMeta::new(new_asset, true),
             AccountMeta::new_readonly(target_wallet, false),
             AccountMeta::new(new_key_state, false),
-            AccountMeta::new_readonly(self.program_pda, false),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(collection, false),
             AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
@@ -773,6 +848,15 @@ impl App {
             &hardig::ID,
         );
 
+        let collection = match self.collection {
+            Some(c) => c,
+            None => {
+                self.push_log("No collection set — run create-collection first");
+                return;
+            }
+        };
+        let (config_pda, _) = Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let data = sighash("revoke_key");
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
@@ -780,7 +864,8 @@ impl App {
             AccountMeta::new_readonly(position_pda, false),
             AccountMeta::new(target.asset, false),
             AccountMeta::new(target_key_state, false),
-            AccountMeta::new_readonly(self.program_pda, false),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(collection, false),
             AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
@@ -1484,7 +1569,24 @@ impl App {
     fn check_protocol(&mut self) {
         let (config_pda, _) =
             Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
-        self.protocol_exists = self.rpc.get_account(&config_pda).is_ok();
+        match self.rpc.get_account(&config_pda) {
+            Ok(acc) => {
+                self.protocol_exists = true;
+                if let Ok(config) =
+                    ProtocolConfig::try_deserialize(&mut acc.data.as_slice())
+                {
+                    if config.collection != Pubkey::default() {
+                        self.collection = Some(config.collection);
+                    } else {
+                        self.collection = None;
+                    }
+                }
+            }
+            Err(_) => {
+                self.protocol_exists = false;
+                self.collection = None;
+            }
+        }
     }
 
     fn discover_position(&mut self) {
