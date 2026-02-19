@@ -25,6 +25,11 @@ pub fn read_deposited_shares(position_data: &[u8]) -> Result<u64> {
         position_data.len() >= PP_DEPOSITED_SHARES_OFFSET + 8,
         HardigError::InvalidPositionPda
     );
+    // Verify PersonalPosition discriminator
+    require!(
+        position_data[..8] == PP_DISCRIMINATOR,
+        HardigError::InvalidPositionPda
+    );
 
     let bytes: [u8; 8] = position_data[PP_DEPOSITED_SHARES_OFFSET..PP_DEPOSITED_SHARES_OFFSET + 8]
         .try_into()
@@ -37,6 +42,11 @@ pub fn read_deposited_shares(position_data: &[u8]) -> Result<u64> {
 pub fn read_debt(position_data: &[u8]) -> Result<u64> {
     require!(
         position_data.len() >= PP_DEBT_OFFSET + 8,
+        HardigError::InvalidPositionPda
+    );
+    // Verify PersonalPosition discriminator
+    require!(
+        position_data[..8] == PP_DISCRIMINATOR,
         HardigError::InvalidPositionPda
     );
 
