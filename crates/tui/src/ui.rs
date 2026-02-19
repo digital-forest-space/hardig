@@ -53,7 +53,7 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
         )
     } else {
         format!(
-            " Härdig | {} | Role: {} | Mayflower: {} | Last refresh: {} ",
+            " Härdig | {} | Role: {} | Nirvana: {} | Last refresh: {} ",
             short_wallet, role_str, mf_status, refresh_str,
         )
     };
@@ -69,7 +69,7 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // position panel (increased for Mayflower info)
+            Constraint::Length(10), // position panel
             Constraint::Min(5),    // keyring panel
         ])
         .split(area);
@@ -108,7 +108,7 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
         .position_pda
         .map(|p| app::short_pubkey(&p))
         .unwrap_or_default();
-    let mut lines = vec![
+    let lines = vec![
         Line::from(vec![
             Span::styled("  Position: ", Style::default().fg(Color::Gray)),
             Span::raw(position_pda),
@@ -120,7 +120,8 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  Deposited: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{} navSOL", app::lamports_to_sol(pos.deposited_nav)),
+                format!("{} {}", app::lamports_to_sol(pos.deposited_nav),
+                    app.market_config.as_ref().map(|mc| app::nav_token_name(&mc.nav_mint)).unwrap_or("shares")),
                 Style::default().fg(Color::Green),
             ),
             Span::raw("    "),
@@ -144,27 +145,6 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
-
-    // Mayflower state
-    if app.mayflower_initialized {
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "  Mayflower: ",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("wSOL: ", Style::default().fg(Color::Gray)),
-            Span::raw(format!("{} SOL", app::lamports_to_sol(app.wsol_balance))),
-            Span::raw("    "),
-            Span::styled("navSOL: ", Style::default().fg(Color::Gray)),
-            Span::raw(format!(
-                "{} SOL",
-                app::lamports_to_sol(app.nav_sol_balance)
-            )),
-        ]));
-    }
 
     let para = Paragraph::new(Text::from(lines));
     frame.render_widget(para, inner);
@@ -218,9 +198,11 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
             };
             rows.push(sub_row(app::permissions_name(k.permissions)));
             if let Some(ref bucket) = k.sell_bucket {
+                let nav = app.market_config.as_ref().map(|mc| app::nav_token_name(&mc.nav_mint)).unwrap_or("shares");
                 rows.push(sub_row(format!(
-                    "Sell: {} navSOL / {}",
+                    "Sell: {} {} / {}",
                     hardig::instructions::format_sol_amount(bucket.capacity),
+                    nav,
                     hardig::instructions::slots_to_duration(bucket.refill_period),
                 )));
             }
@@ -260,14 +242,17 @@ fn live_field_value(app: &App, label: &str) -> Option<String> {
 }
 
 fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
+    let nav = app.market_config.as_ref()
+        .map(|mc| app::nav_token_name(&mc.nav_mint))
+        .unwrap_or("shares");
     let title = match app.form_kind {
-        Some(FormKind::AuthorizeKey) => " Authorize Key ",
-        Some(FormKind::RevokeKey) => " Revoke Key ",
-        Some(FormKind::Buy) => " Buy navSOL ",
-        Some(FormKind::Sell) => " Sell navSOL ",
-        Some(FormKind::Borrow) => " Borrow ",
-        Some(FormKind::Repay) => " Repay ",
-        _ => " Form ",
+        Some(FormKind::AuthorizeKey) => " Authorize Key ".to_string(),
+        Some(FormKind::RevokeKey) => " Revoke Key ".to_string(),
+        Some(FormKind::Buy) => format!(" Buy {} ", nav),
+        Some(FormKind::Sell) => format!(" Sell {} ", nav),
+        Some(FormKind::Borrow) => " Borrow ".to_string(),
+        Some(FormKind::Repay) => " Repay ".to_string(),
+        _ => " Form ".to_string(),
     };
 
     let block = Block::default()
@@ -467,12 +452,13 @@ fn draw_result(frame: &mut Frame, app: &App, area: Rect) {
 
     match (&app.pre_tx_snapshot, &app.position) {
         (Some(before), Some(pos)) => {
+            let nav_name = app.market_config.as_ref()
+                .map(|mc| app::nav_token_name(&mc.nav_mint))
+                .unwrap_or("shares");
             let rows_data: Vec<(&str, u64, u64, &str)> = vec![
-                ("Deposited", before.deposited_nav, pos.deposited_nav, "navSOL"),
+                ("Deposited", before.deposited_nav, pos.deposited_nav, nav_name),
                 ("Debt", before.user_debt, pos.user_debt, "SOL"),
                 ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity, "SOL"),
-                ("wSOL", before.wsol_balance, app.wsol_balance, "SOL"),
-                ("navSOL", before.nav_sol_balance, app.nav_sol_balance, "navSOL"),
             ];
 
             let rows: Vec<Row> = rows_data

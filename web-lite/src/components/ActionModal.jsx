@@ -11,6 +11,7 @@ import {
   lastTxSignature,
   cluster,
   customUrl,
+  marketConfig,
 } from '../state.js';
 import {
   buildInitializeProtocol,
@@ -23,7 +24,7 @@ import {
   buildAuthorizeKey,
   buildRevokeKey,
 } from '../instructions/index.js';
-import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
+import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, navTokenName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR } from '../utils.js';
 
 // Phase: form | building | confirm | result
 export function ActionModal({ action, onClose, onRefresh }) {
@@ -272,7 +273,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 </div>
                 <div class="form-group">
                   <label>Permissions</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '6px 0' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
                     {[
                       [PERM_BUY, 'Buy'],
                       [PERM_SELL, 'Sell'],
@@ -296,43 +297,52 @@ export function ActionModal({ action, onClose, onRefresh }) {
                     })}
                   </div>
                   {((parseInt(permissions) || 0) & PERM_LIMITED_SELL) !== 0 && (
-                    <div style={{ paddingLeft: '20px', marginTop: '6px' }}>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: '11px' }}>Sell Capacity (navSOL)</label>
-                          <input type="text" value={sellCapacity} onInput={(e) => setSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
-                        </div>
+                    <div style={{ marginTop: '8px', marginLeft: '26px' }}>
+                      <div class="form-group" style={{ marginBottom: '4px' }}>
+                        <label style={{ fontSize: '11px' }}>Sell Capacity (navSOL)</label>
+                        <input type="text" value={sellCapacity} onInput={(e) => setSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'center' }}>
-                        <label style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>Sell Refill:</label>
-                        <div><label style={{ fontSize: '10px' }}>Days</label><input type="number" min="0" value={sellDays} onInput={(e) => setSellDays(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
-                        <div><label style={{ fontSize: '10px' }}>Hours</label><input type="number" min="0" max="23" value={sellHours} onInput={(e) => setSellHours(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
-                        <div><label style={{ fontSize: '10px' }}>Min</label><input type="number" min="0" max="59" value={sellMinutes} onInput={(e) => setSellMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Sell Refill Period</label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Days</label>
+                          <input type="number" min="0" value={sellDays} onInput={(e) => setSellDays(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Hours</label>
+                          <input type="number" min="0" max="23" value={sellHours} onInput={(e) => setSellHours(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Min</label>
+                          <input type="number" min="0" max="59" value={sellMinutes} onInput={(e) => setSellMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
                       </div>
                     </div>
                   )}
                   {((parseInt(permissions) || 0) & PERM_LIMITED_BORROW) !== 0 && (
-                    <div style={{ paddingLeft: '20px', marginTop: '6px' }}>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: '11px' }}>Borrow Capacity (SOL)</label>
-                          <input type="text" value={borrowCapacity} onInput={(e) => setBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
-                        </div>
+                    <div style={{ marginTop: '8px', marginLeft: '26px' }}>
+                      <div class="form-group" style={{ marginBottom: '4px' }}>
+                        <label style={{ fontSize: '11px' }}>Borrow Capacity (SOL)</label>
+                        <input type="text" value={borrowCapacity} onInput={(e) => setBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'center' }}>
-                        <label style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>Borrow Refill:</label>
-                        <div><label style={{ fontSize: '10px' }}>Days</label><input type="number" min="0" value={borrowDays} onInput={(e) => setBorrowDays(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
-                        <div><label style={{ fontSize: '10px' }}>Hours</label><input type="number" min="0" max="23" value={borrowHours} onInput={(e) => setBorrowHours(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
-                        <div><label style={{ fontSize: '10px' }}>Min</label><input type="number" min="0" max="59" value={borrowMinutes} onInput={(e) => setBorrowMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Borrow Refill Period</label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Days</label>
+                          <input type="number" min="0" value={borrowDays} onInput={(e) => setBorrowDays(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Hours</label>
+                          <input type="number" min="0" max="23" value={borrowHours} onInput={(e) => setBorrowHours(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Min</label>
+                          <input type="number" min="0" max="59" value={borrowMinutes} onInput={(e) => setBorrowMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
                       </div>
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                    <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_OPERATOR))}>Operator</button>
-                    <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_DEPOSITOR))}>Depositor</button>
-                    <button type="button" class="btn" style={{ padding: '2px 8px', fontSize: '11px' }} onClick={() => setPermissions(String(PRESET_KEEPER))}>Keeper</button>
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '8px' }}>
                     {permissionsName(parseInt(permissions) || 0)} (0x{((parseInt(permissions) || 0).toString(16)).toUpperCase().padStart(2, '0')})
                   </div>
                 </div>
@@ -420,7 +430,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 </thead>
                 <tbody>
                   {[
-                    ['Deposited', result.snapshot.depositedNav, position.value.depositedNav, 'navSOL'],
+                    ['Deposited', result.snapshot.depositedNav, position.value.depositedNav, navTokenName(marketConfig.value?.navMint)],
                     ['Debt', result.snapshot.userDebt, position.value.userDebt, 'SOL'],
                   ].map(([label, before, after, unit]) => {
                     const delta = formatDelta(before, after);

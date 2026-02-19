@@ -1,29 +1,22 @@
-import { position, mfBorrowCapacity, mfDepositedShares, mfDebt } from '../state.js';
-import { lamportsToSol } from '../utils.js';
+import { position, mfBorrowCapacity, mfDepositedShares, mfDebt, marketConfig } from '../state.js';
+import { lamportsToSol, navTokenName } from '../utils.js';
 
 export function PositionPanel() {
   const pos = position.value;
   if (!pos) return null;
 
+  const mc = marketConfig.value;
+  const tokenName = navTokenName(mc?.navMint);
+
   return (
     <div class="card">
       <h2>Position</h2>
       <div class="data-row">
-        <span class="label">Deposited (local)</span>
-        <span class="value">{lamportsToSol(pos.depositedNav)} navSOL</span>
-      </div>
-      <div class="data-row">
-        <span class="label">Deposited (Mayflower)</span>
-        <span class="value">{lamportsToSol(mfDepositedShares.value)} shares</span>
+        <span class="label">Deposited</span>
+        <span class="value">{lamportsToSol(mfDepositedShares.value)} {tokenName}</span>
       </div>
       <div class="data-row">
         <span class="label">Debt</span>
-        <span class={`value ${pos.userDebt > 0 ? 'negative' : ''}`}>
-          {lamportsToSol(pos.userDebt)} SOL
-        </span>
-      </div>
-      <div class="data-row">
-        <span class="label">Mayflower Debt</span>
         <span class={`value ${mfDebt.value > 0 ? 'negative' : ''}`}>
           {lamportsToSol(mfDebt.value)} SOL
         </span>

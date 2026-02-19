@@ -380,7 +380,7 @@ export async function discoverPosition(connection, wallet) {
 
   pushLog(
     `Found position ${shortPubkey(bestPos)} (permissions: ${permissionsName(best.permissions)}${
-      mayflowerInitialized.value ? ', Mayflower OK' : ''
+      mayflowerInitialized.value ? ', Nirvana OK' : ''
     })`
   );
 }

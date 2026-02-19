@@ -615,13 +615,14 @@ fn execute_pending(app: &mut app::App, action_name: &str) -> Result<CliOutput, C
 
 fn print_state_diff(before: &app::PositionSnapshot, app: &app::App) {
     eprintln!("[RESULT] State changes:");
+    let nav_name = app.market_config.as_ref()
+        .map(|mc| app::nav_token_name(&mc.nav_mint))
+        .unwrap_or("shares");
     let rows: Vec<(&str, u64, u64, &str)> = if let Some(pos) = &app.position {
         vec![
-            ("Deposited", before.deposited_nav, pos.deposited_nav, "navSOL"),
+            ("Deposited", before.deposited_nav, pos.deposited_nav, nav_name),
             ("Debt", before.user_debt, pos.user_debt, "SOL"),
             ("Borrow Cap", before.borrow_capacity, app.mf_borrow_capacity, "SOL"),
-            ("wSOL", before.wsol_balance, app.wsol_balance, "SOL"),
-            ("navSOL", before.nav_sol_balance, app.nav_sol_balance, "navSOL"),
         ]
     } else {
         return;

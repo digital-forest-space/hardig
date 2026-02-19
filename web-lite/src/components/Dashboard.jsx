@@ -7,7 +7,6 @@ import {
 } from '../state.js';
 import { permissionsName, permissionsClass } from '../utils.js';
 import { PositionPanel } from './PositionPanel.jsx';
-import { MayflowerPanel } from './MayflowerPanel.jsx';
 import { KeyringTable } from './KeyringTable.jsx';
 import { ActionBar } from './ActionBar.jsx';
 import { LogPanel } from './LogPanel.jsx';
@@ -64,7 +63,6 @@ export function Dashboard({ onAction }) {
       </div>
       <ActionBar onAction={onAction} />
       <PositionPanel />
-      <MayflowerPanel />
       <KeyringTable />
       <LogPanel />
     </div>

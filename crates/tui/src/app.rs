@@ -114,8 +114,6 @@ pub struct PositionSnapshot {
     pub deposited_nav: u64,
     pub user_debt: u64,
     pub borrow_capacity: u64,
-    pub wsol_balance: u64,
-    pub nav_sol_balance: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -574,8 +572,9 @@ impl App {
         let max = self.position.as_ref().map(|p| p.deposited_nav).unwrap_or(0);
         self.screen = Screen::Form;
         self.form_kind = Some(FormKind::Sell);
-        self.form_info = Some(format!("Available: {} navSOL", lamports_to_sol(max)));
-        self.form_fields = vec![("Amount (navSOL)".into(), lamports_to_sol(max))];
+        let nav = self.market_config.as_ref().map(|mc| nav_token_name(&mc.nav_mint)).unwrap_or("shares");
+        self.form_info = Some(format!("Available: {} {}", lamports_to_sol(max), nav));
+        self.form_fields = vec![(format!("Amount ({})", nav), lamports_to_sol(max))];
         self.input_field = 0;
         self.input_buf = self.form_fields[0].1.clone();
     }
@@ -1077,9 +1076,10 @@ impl App {
 
         let buy_ix = Instruction::new_with_bytes(hardig::ID, &data, accounts);
 
+        let nav = self.market_config.as_ref().map(|mc| nav_token_name(&mc.nav_mint)).unwrap_or("shares");
         self.goto_confirm(PendingAction {
             description: vec![
-                "Buy navSOL".into(),
+                format!("Buy {}", nav),
                 format!("Amount: {} SOL", lamports_to_sol(amount)),
                 format!("Position: {}", short_pubkey(&position_pda)),
                 format!(
@@ -1163,10 +1163,11 @@ impl App {
             &mc.base_mint,
         );
 
+        let nav = nav_token_name(&mc.nav_mint);
         self.goto_confirm(PendingAction {
             description: vec![
-                "Sell navSOL".into(),
-                format!("Amount: {} navSOL", lamports_to_sol(amount)),
+                format!("Sell {}", nav),
+                format!("Amount: {} {}", lamports_to_sol(amount), nav),
                 format!("Position: {}", short_pubkey(&position_pda)),
             ],
             instructions: vec![compute_ix, create_ata_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
@@ -1378,7 +1379,7 @@ impl App {
                     "Permissions: {}",
                     permissions_name(self.my_permissions.unwrap_or(0))
                 ),
-                "Borrows available capacity and buys more navSOL".into(),
+                format!("Borrows available capacity and buys more {}", nav_token_name(&mc.nav_mint)),
             ],
             instructions: vec![compute_ix, create_ata_ix, Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
@@ -1947,8 +1948,6 @@ impl App {
             deposited_nav: pos.deposited_nav,
             user_debt: pos.user_debt,
             borrow_capacity: self.mf_borrow_capacity,
-            wsol_balance: self.wsol_balance,
-            nav_sol_balance: self.nav_sol_balance,
         })
     }
 }
@@ -2006,6 +2005,14 @@ pub fn parse_sol_to_lamports(s: &str) -> Option<u64> {
         return None; // too small to represent
     }
     Some(lamports)
+}
+
+pub fn nav_token_name(mint: &Pubkey) -> &'static str {
+    if *mint == DEFAULT_NAV_SOL_MINT {
+        "navSOL"
+    } else {
+        "shares"
+    }
 }
 
 pub fn lamports_to_sol(lamports: u64) -> String {

@@ -129,6 +129,16 @@ export function formatSolAmount(raw) {
   return `${whole}.${fracStr}`;
 }
 
+const NAV_TOKEN_NAMES = {
+  navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo: 'navSOL',
+};
+
+export function navTokenName(mintPubkey) {
+  if (!mintPubkey) return 'shares';
+  const key = mintPubkey.toString();
+  return NAV_TOKEN_NAMES[key] || key.slice(0, 4) + '..' + key.slice(-4);
+}
+
 export function explorerUrl(sig, cluster) {
   const base = 'https://explorer.solana.com/tx/' + sig;
   if (cluster === 'mainnet-beta') return base;
