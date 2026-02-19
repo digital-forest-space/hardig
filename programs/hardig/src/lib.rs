@@ -32,8 +32,9 @@ pub mod hardig {
     pub fn create_position(
         ctx: Context<CreatePosition>,
         max_reinvest_spread_bps: u16,
+        name: Option<String>,
     ) -> Result<()> {
-        instructions::create_position::handler(ctx, max_reinvest_spread_bps)
+        instructions::create_position::handler(ctx, max_reinvest_spread_bps, name)
     }
 
     /// Authorize a new key NFT for a position (admin only).
@@ -44,6 +45,7 @@ pub mod hardig {
         sell_refill_period_slots: u64,
         borrow_bucket_capacity: u64,
         borrow_refill_period_slots: u64,
+        name: Option<String>,
     ) -> Result<()> {
         instructions::authorize_key::handler(
             ctx,
@@ -52,6 +54,7 @@ pub mod hardig {
             sell_refill_period_slots,
             borrow_bucket_capacity,
             borrow_refill_period_slots,
+            name,
         )
     }
 

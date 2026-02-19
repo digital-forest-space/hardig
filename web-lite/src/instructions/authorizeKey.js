@@ -19,7 +19,7 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, permis
   const [keyStatePda] = deriveKeyStatePda(newKeyAsset);
 
   const ix = await program.methods
-    .authorizeKey(permissionsU8, new BN(sellCapacity), new BN(sellRefillSlots), new BN(borrowCapacity), new BN(borrowRefillSlots))
+    .authorizeKey(permissionsU8, new BN(sellCapacity), new BN(sellRefillSlots), new BN(borrowCapacity), new BN(borrowRefillSlots), null)
     .accounts({
       admin: wallet,
       adminKeyAsset: adminKeyAsset,

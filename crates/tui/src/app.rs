@@ -787,6 +787,7 @@ impl App {
 
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
+        data.push(0); // name: Option<String> = None
 
         let accounts = vec![
             AccountMeta::new(admin, true),                              // admin
@@ -921,6 +922,7 @@ impl App {
         data.extend_from_slice(&sell_refill.to_le_bytes());
         data.extend_from_slice(&borrow_cap.to_le_bytes());
         data.extend_from_slice(&borrow_refill.to_le_bytes());
+        data.push(0); // name: Option<String> = None
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),

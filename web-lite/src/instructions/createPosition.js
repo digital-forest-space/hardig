@@ -33,7 +33,7 @@ export async function buildCreatePosition(program, wallet) {
   const [logPda] = deriveLogAccount();
 
   const ix = await program.methods
-    .createPosition(0)
+    .createPosition(0, null)
     .accounts({
       admin: wallet,
       adminAsset: adminAsset,

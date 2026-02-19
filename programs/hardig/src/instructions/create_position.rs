@@ -98,7 +98,7 @@ pub struct CreatePosition<'info> {
     pub mayflower_program: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Result<()> {
+pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name: Option<String>) -> Result<()> {
     let mc = &ctx.accounts.market_config;
 
     // --- Validate Mayflower account addresses against MarketConfig ---
@@ -128,6 +128,15 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
         HardigError::InvalidPositionPda
     );
 
+    // --- Validate optional custom name ---
+    let nft_name = match &name {
+        Some(n) => {
+            require!(n.len() <= 32, HardigError::NameTooLong);
+            n.clone()
+        }
+        None => "H\u{00e4}rdig Admin Key".to_string(),
+    };
+
     // --- Create admin NFT via MPL-Core CPI ---
     let config = &ctx.accounts.config;
     let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
@@ -145,8 +154,8 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
         .payer(&ctx.accounts.admin.to_account_info())
         .owner(Some(&ctx.accounts.admin.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
-        .name("H\u{00e4}rdig Admin Key".to_string())
-        .uri(metadata_uri("H\u{00e4}rdig Admin Key", PRESET_ADMIN, None, None))
+        .name(nft_name.clone())
+        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {
