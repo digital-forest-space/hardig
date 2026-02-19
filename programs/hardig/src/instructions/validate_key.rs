@@ -4,6 +4,7 @@ use mpl_core::{
     accounts::BaseAssetV1,
     fetch_plugin,
     types::{Attributes, Key as AssetKey, PluginType},
+    ID,
 };
 
 use crate::errors::HardigError;
@@ -19,6 +20,12 @@ pub fn validate_key(
     expected_admin_asset: &Pubkey,
     required: u8,
 ) -> Result<u8> {
+    // Verify the account is owned by the MPL-Core program
+    require!(
+        *key_asset_info.owner == ID,
+        HardigError::InvalidKey
+    );
+
     // Deserialize and validate the asset
     let data = key_asset_info.try_borrow_data()?;
 
