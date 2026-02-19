@@ -1,3 +1,4 @@
+pub mod accept_admin;
 pub mod authorize_key;
 pub mod borrow;
 pub mod buy;
@@ -15,6 +16,7 @@ pub mod validate_key;
 pub mod withdraw;
 
 #[allow(ambiguous_glob_reexports)]
+pub use accept_admin::*;
 pub use authorize_key::*;
 pub use borrow::*;
 pub use buy::*;

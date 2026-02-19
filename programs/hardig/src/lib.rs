@@ -88,9 +88,15 @@ pub mod hardig {
         instructions::reinvest::handler(ctx, min_out)
     }
 
-    /// Transfer protocol admin rights to a new pubkey (current admin only).
+    /// Nominate a new protocol admin (current admin only). The nominated key
+    /// must call `accept_admin` to complete the transfer.
     pub fn transfer_admin(ctx: Context<TransferAdmin>, new_admin: Pubkey) -> Result<()> {
         instructions::transfer_admin::handler(ctx, new_admin)
+    }
+
+    /// Accept a pending admin transfer (must be called by the nominated key).
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        instructions::accept_admin::handler(ctx)
     }
 
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
