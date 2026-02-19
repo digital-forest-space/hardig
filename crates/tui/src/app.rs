@@ -16,7 +16,7 @@ use solana_sdk::{
 };
 
 use hardig::state::{
-    KeyState, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_BUY,
+    KeyState, MarketConfig, PositionNFT, ProtocolConfig, RateBucket, PERM_BORROW, PERM_BUY,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
     PERM_SELL, PRESET_ADMIN, PRESET_OPERATOR,
 };
@@ -97,6 +97,10 @@ pub struct KeyEntry {
     pub asset: Pubkey,
     pub permissions: u8,
     pub held_by_signer: bool,
+    /// Rate-limit bucket for sell (populated for keys with PERM_LIMITED_SELL).
+    pub sell_bucket: Option<RateBucket>,
+    /// Rate-limit bucket for borrow (populated for keys with PERM_LIMITED_BORROW).
+    pub borrow_bucket: Option<RateBucket>,
 }
 
 pub struct PendingAction {
@@ -161,6 +165,8 @@ pub struct App {
 
     // Refresh tracking
     pub last_refresh: Option<Instant>,
+    /// Current slot, fetched during refresh (for rate-limit display).
+    pub current_slot: u64,
 
     // Form state
     pub form_kind: Option<FormKind>,
@@ -223,6 +229,7 @@ impl App {
             mf_floor_price: 0,
             mf_borrow_capacity: 0,
             last_refresh: None,
+            current_slot: 0,
             form_kind: None,
             form_fields: Vec::new(),
             form_info: None,
@@ -1604,6 +1611,10 @@ impl App {
 
     pub fn refresh(&mut self) {
         self.push_log("Refreshing...");
+        // Fetch current slot for rate-limit display
+        if let Ok(slot) = self.rpc.get_slot() {
+            self.current_slot = slot;
+        }
         self.check_protocol();
         self.discover_position();
         self.refresh_mayflower_state();
@@ -1841,6 +1852,8 @@ impl App {
                 asset: admin_asset,
                 permissions: PRESET_ADMIN,
                 held_by_signer: signer_is_admin,
+                sell_bucket: None,
+                borrow_bucket: None,
             });
 
             // Scan KeyState accounts for delegated keys belonging to this position
@@ -1871,11 +1884,23 @@ impl App {
                     }
                     let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
                     let held = self.check_asset_owner(&ks.asset, &signer);
+                    let sell_bucket = if perms & PERM_LIMITED_SELL != 0 {
+                        Some(ks.sell_bucket.clone())
+                    } else {
+                        None
+                    };
+                    let borrow_bucket = if perms & PERM_LIMITED_BORROW != 0 {
+                        Some(ks.borrow_bucket.clone())
+                    } else {
+                        None
+                    };
                     self.keyring.push(KeyEntry {
                         pda: *ks_pda,
                         asset: ks.asset,
                         permissions: perms,
                         held_by_signer: held,
+                        sell_bucket,
+                        borrow_bucket,
                     });
                 }
             }
@@ -2145,7 +2170,6 @@ pub fn slots_to_human(slots: u64) -> String {
     if slots == 0 {
         return "~0s".to_string();
     }
-    // Total milliseconds at 400ms per slot
     let total_ms = slots * 400;
     let total_secs = total_ms / 1000;
 
@@ -2160,6 +2184,24 @@ pub fn slots_to_human(slots: u64) -> String {
     } else {
         let days = total_secs / 86400;
         format!("~{}d", days.max(1))
+    }
+}
+
+/// Format a refill period in slots as a human-readable duration for rate-limit display.
+/// Assumes ~400ms per slot (Solana mainnet average).
+pub fn format_refill_time(refill_period: u64) -> String {
+    let seconds = (refill_period as f64) * 0.4;
+    if seconds < 60.0 {
+        format!("~{}s", seconds as u64)
+    } else if seconds < 3600.0 {
+        format!("~{}m", (seconds / 60.0).round() as u64)
+    } else {
+        let hours = seconds / 3600.0;
+        if hours < 24.0 {
+            format!("~{:.1}h", hours)
+        } else {
+            format!("~{:.1}d", hours / 24.0)
+        }
     }
 }
 

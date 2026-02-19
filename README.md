@@ -215,6 +215,73 @@ Anchor.toml                   # Anchor configuration
 9. **Revoke Key** — close authorization; burns the NFT if admin holds it
 10. **Transfer Admin** — hand off protocol admin rights to a new wallet
 
+## Reading Rate-Limited Key Allowances
+
+Keys with `PERM_LIMITED_SELL` (0x40) or `PERM_LIMITED_BORROW` (0x80) are governed by a token-bucket rate limiter stored in the key's `KeyState` PDA. The bucket refills linearly over a configurable number of slots, capping at a maximum capacity.
+
+To compute the currently available spending allowance for a limited key:
+
+1. **Derive the `KeyState` PDA** from the key's MPL-Core asset pubkey:
+   - Seeds: `[b"key_state", asset_pubkey]`
+   - Program: `4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p`
+
+2. **Fetch and deserialize the account.** The `KeyState` layout is:
+
+   | Offset | Size | Field |
+   |--------|------|-------|
+   | 0 | 8 | Anchor discriminator |
+   | 8 | 32 | `asset` (Pubkey) |
+   | 40 | 1 | `bump` (u8) |
+   | 41 | 32 | `sell_bucket` (RateBucket) |
+   | 73 | 32 | `borrow_bucket` (RateBucket) |
+
+   Each `RateBucket` (32 bytes, all little-endian u64):
+
+   | Offset | Size | Field |
+   |--------|------|-------|
+   | 0 | 8 | `capacity` — max tokens (lamports for borrow, shares for sell) |
+   | 8 | 8 | `refill_period` — slots for a full refill from 0 to capacity |
+   | 16 | 8 | `level` — tokens remaining at last update |
+   | 24 | 8 | `last_update` — slot of last update |
+
+3. **Get the current slot** via `getSlot` (or `Clock::get()` on-chain).
+
+4. **Apply the refill formula:**
+
+   ```
+   elapsed   = current_slot - last_update
+   refill    = min(capacity, capacity * elapsed / refill_period)   // use u128/BigInt to avoid overflow
+   available = min(capacity, level + refill)
+   ```
+
+### Rust
+
+The `RateBucket` struct exposes a read-only helper:
+
+```rust
+use hardig::state::{KeyState, RateBucket};
+
+// After deserializing a KeyState account:
+let available_sell = key_state.sell_bucket.available_now(current_slot);
+let available_borrow = key_state.borrow_bucket.available_now(current_slot);
+```
+
+### JavaScript
+
+The `web-lite/src/rateLimits.js` module provides equivalent helpers:
+
+```js
+import { getKeyAllowance, bucketAvailableNow, parseKeyState } from './rateLimits.js';
+
+// High-level: fetch + compute in one call
+const allowance = await getKeyAllowance(connection, assetPubkey);
+console.log(allowance.sellAvailable, allowance.borrowAvailable);
+
+// Low-level: parse raw account data + compute
+const ks = parseKeyState(accountData);
+const available = bucketAvailableNow(ks.sellBucket, currentSlot);
+```
+
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
