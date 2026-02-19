@@ -49,27 +49,28 @@ export const PRESET_DEPOSITOR = 0x09;
 export const PRESET_KEEPER = 0x10;
 
 export function permissionsName(permissions) {
-  switch (permissions) {
-    case PRESET_ADMIN: return 'Admin';
-    case PRESET_OPERATOR: return 'Operator';
-    case PRESET_DEPOSITOR: return 'Depositor';
-    case PRESET_KEEPER: return 'Keeper';
-    case PERM_LIMITED_SELL: return 'LimitedSell';
-    case PERM_LIMITED_BORROW: return 'LimitedBorrow';
-    case PERM_LIMITED_SELL | PERM_LIMITED_BORROW: return 'LimitedSellBorrow';
-    case 0: case null: case undefined: return 'None';
-    default: return 'Custom';
-  }
+  if (permissions === null || permissions === undefined || permissions === 0) return 'None';
+  if (permissions === PRESET_ADMIN) return 'Admin';
+  const bits = [
+    [PERM_BUY, 'Buy'],
+    [PERM_SELL, 'Sell'],
+    [PERM_BORROW, 'Borrow'],
+    [PERM_REPAY, 'Repay'],
+    [PERM_REINVEST, 'Reinvest'],
+    [PERM_MANAGE_KEYS, 'ManageKeys'],
+    [PERM_LIMITED_SELL, 'LimSell'],
+    [PERM_LIMITED_BORROW, 'LimBorrow'],
+  ];
+  const names = bits.filter(([bit]) => (permissions & bit) !== 0).map(([, name]) => name);
+  return names.length > 0 ? names.join(', ') : 'None';
 }
 
 export function permissionsClass(permissions) {
-  switch (permissions) {
-    case PRESET_ADMIN: return 'badge-admin';
-    case PRESET_OPERATOR: return 'badge-operator';
-    case PRESET_DEPOSITOR: return 'badge-depositor';
-    case PRESET_KEEPER: return 'badge-keeper';
-    default: return '';
-  }
+  if (permissions === PRESET_ADMIN) return 'badge-admin';
+  if (permissions === PRESET_OPERATOR) return 'badge-operator';
+  if (permissions === PRESET_DEPOSITOR) return 'badge-depositor';
+  if (permissions === PRESET_KEEPER) return 'badge-keeper';
+  return '';
 }
 
 /**

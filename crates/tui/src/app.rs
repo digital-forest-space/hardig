@@ -18,7 +18,7 @@ use solana_sdk::{
 use hardig::state::{
     KeyState, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_BUY,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
-    PERM_SELL, PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
+    PERM_SELL, PRESET_ADMIN, PRESET_OPERATOR,
 };
 
 // Mayflower constants and helpers
@@ -2041,17 +2041,32 @@ impl App {
 // Helpers
 // ---------------------------------------------------------------------------
 
-pub fn permissions_name(permissions: u8) -> &'static str {
-    match permissions {
-        p if p == PRESET_ADMIN => "Admin",
-        p if p == PRESET_OPERATOR => "Operator",
-        p if p == PRESET_DEPOSITOR => "Depositor",
-        p if p == PRESET_KEEPER => "Keeper",
-        0 => "None",
-        p if p == PERM_LIMITED_SELL => "LimitedSell",
-        p if p == PERM_LIMITED_BORROW => "LimitedBorrow",
-        p if p == (PERM_LIMITED_SELL | PERM_LIMITED_BORROW) => "LimitedSellBorrow",
-        _ => "Custom",
+pub fn permissions_name(permissions: u8) -> String {
+    if permissions == PRESET_ADMIN {
+        return "Admin".into();
+    }
+    if permissions == 0 {
+        return "None".into();
+    }
+    let bits: &[(u8, &str)] = &[
+        (PERM_BUY, "Buy"),
+        (PERM_SELL, "Sell"),
+        (PERM_BORROW, "Borrow"),
+        (PERM_REPAY, "Repay"),
+        (PERM_REINVEST, "Reinvest"),
+        (PERM_MANAGE_KEYS, "ManageKeys"),
+        (PERM_LIMITED_SELL, "LimSell"),
+        (PERM_LIMITED_BORROW, "LimBorrow"),
+    ];
+    let names: Vec<&str> = bits
+        .iter()
+        .filter(|(bit, _)| permissions & bit != 0)
+        .map(|(_, name)| *name)
+        .collect();
+    if names.is_empty() {
+        "None".into()
+    } else {
+        names.join(", ")
     }
 }
 

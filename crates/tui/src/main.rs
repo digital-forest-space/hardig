@@ -679,7 +679,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
                 .map(|p| p.to_string())
                 .unwrap_or_default(),
             admin_asset: pos.admin_asset.to_string(),
-            role: app.my_permissions.map(permissions_name).unwrap_or("None").to_string(),
+            role: app.my_permissions.map(permissions_name).unwrap_or_else(|| "None".into()),
             deposited_nav: lamports_to_sol(pos.deposited_nav),
             debt: lamports_to_sol(pos.user_debt),
             borrow_capacity: lamports_to_sol(app.mf_borrow_capacity),
@@ -703,7 +703,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
         .map(|k| KeyInfo {
             pda: k.pda.to_string(),
             asset: k.asset.to_string(),
-            role: permissions_name(k.permissions).to_string(),
+            role: permissions_name(k.permissions),
             held_by_signer: k.held_by_signer,
         })
         .collect();
