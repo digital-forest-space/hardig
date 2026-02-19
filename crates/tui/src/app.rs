@@ -375,6 +375,17 @@ impl App {
                     self.input_buf = self.form_fields[self.input_field].1.clone();
                 }
             }
+            KeyCode::BackTab => {
+                if !self.form_fields.is_empty() {
+                    self.form_fields[self.input_field].1 = self.input_buf.clone();
+                    self.input_field = if self.input_field == 0 {
+                        self.form_fields.len() - 1
+                    } else {
+                        self.input_field - 1
+                    };
+                    self.input_buf = self.form_fields[self.input_field].1.clone();
+                }
+            }
             KeyCode::Enter => {
                 if !self.form_fields.is_empty() {
                     self.form_fields[self.input_field].1 = self.input_buf.clone();
@@ -423,19 +434,27 @@ impl App {
 
         // Preserve existing rate-limit field values by label prefix
         let sell_cap = self.find_field_value("Sell Capacity");
-        let sell_refill = self.find_field_value("Sell Refill");
+        let sell_days = self.find_field_value("Sell Refill Days");
+        let sell_hours = self.find_field_value("Sell Refill Hours");
+        let sell_mins = self.find_field_value("Sell Refill Minutes");
         let borrow_cap = self.find_field_value("Borrow Capacity");
-        let borrow_refill = self.find_field_value("Borrow Refill");
+        let borrow_days = self.find_field_value("Borrow Refill Days");
+        let borrow_hours = self.find_field_value("Borrow Refill Hours");
+        let borrow_mins = self.find_field_value("Borrow Refill Minutes");
 
         // Rebuild fields after index 1
         self.form_fields.truncate(2);
         if self.perm_bits & PERM_LIMITED_SELL != 0 {
             self.form_fields.push(("Sell Capacity (SOL)".into(), sell_cap.unwrap_or("0".into())));
-            self.form_fields.push(("Sell Refill Period (slots)".into(), sell_refill.unwrap_or("0".into())));
+            self.form_fields.push(("Sell Refill Days".into(), sell_days.unwrap_or("0".into())));
+            self.form_fields.push(("Sell Refill Hours".into(), sell_hours.unwrap_or("0".into())));
+            self.form_fields.push(("Sell Refill Minutes".into(), sell_mins.unwrap_or("0".into())));
         }
         if self.perm_bits & PERM_LIMITED_BORROW != 0 {
             self.form_fields.push(("Borrow Capacity (SOL)".into(), borrow_cap.unwrap_or("0".into())));
-            self.form_fields.push(("Borrow Refill Period (slots)".into(), borrow_refill.unwrap_or("0".into())));
+            self.form_fields.push(("Borrow Refill Days".into(), borrow_days.unwrap_or("0".into())));
+            self.form_fields.push(("Borrow Refill Hours".into(), borrow_hours.unwrap_or("0".into())));
+            self.form_fields.push(("Borrow Refill Minutes".into(), borrow_mins.unwrap_or("0".into())));
         }
 
         // Clamp cursor if fields were removed
@@ -445,7 +464,7 @@ impl App {
         }
     }
 
-    fn find_field_value(&self, prefix: &str) -> Option<String> {
+    pub fn find_field_value(&self, prefix: &str) -> Option<String> {
         self.form_fields.iter()
             .find(|(label, _)| label.starts_with(prefix))
             .map(|(_, val)| val.clone())
@@ -768,15 +787,41 @@ impl App {
         let sell_cap = self.find_field_value("Sell Capacity")
             .and_then(|v| parse_sol_to_lamports(&v))
             .unwrap_or(0);
-        let sell_refill: u64 = self.find_field_value("Sell Refill")
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0);
+        let sell_refill = time_fields_to_slots(
+            &self.find_field_value("Sell Refill Days"),
+            &self.find_field_value("Sell Refill Hours"),
+            &self.find_field_value("Sell Refill Minutes"),
+        );
         let borrow_cap = self.find_field_value("Borrow Capacity")
             .and_then(|v| parse_sol_to_lamports(&v))
             .unwrap_or(0);
-        let borrow_refill: u64 = self.find_field_value("Borrow Refill")
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0);
+        let borrow_refill = time_fields_to_slots(
+            &self.find_field_value("Borrow Refill Days"),
+            &self.find_field_value("Borrow Refill Hours"),
+            &self.find_field_value("Borrow Refill Minutes"),
+        );
+
+        // Validate rate-limit fields: both capacity and refill must be nonzero
+        if permissions_u8 & PERM_LIMITED_SELL != 0 {
+            if sell_cap == 0 {
+                self.push_log("LimSell capacity must be > 0");
+                return;
+            }
+            if sell_refill == 0 {
+                self.push_log("LimSell refill period must be > 0");
+                return;
+            }
+        }
+        if permissions_u8 & PERM_LIMITED_BORROW != 0 {
+            if borrow_cap == 0 {
+                self.push_log("LimBorrow capacity must be > 0");
+                return;
+            }
+            if borrow_refill == 0 {
+                self.push_log("LimBorrow refill period must be > 0");
+                return;
+            }
+        }
 
         let collection = match self.collection {
             Some(c) => c,
@@ -2042,6 +2087,23 @@ pub fn lamports_to_sol(lamports: u64) -> String {
         let s = format!("{}.{:09}", whole, frac);
         s.trim_end_matches('0').to_string()
     }
+}
+
+// Solana slot-to-time constants (~400ms per slot)
+pub const SLOTS_PER_MINUTE: u64 = 150;
+pub const SLOTS_PER_HOUR: u64 = 9_000;
+pub const SLOTS_PER_DAY: u64 = 216_000;
+
+/// Convert days/hours/minutes form field values to a slot count.
+pub fn time_fields_to_slots(
+    days: &Option<String>,
+    hours: &Option<String>,
+    minutes: &Option<String>,
+) -> u64 {
+    let d: u64 = days.as_ref().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+    let h: u64 = hours.as_ref().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+    let m: u64 = minutes.as_ref().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+    d * SLOTS_PER_DAY + h * SLOTS_PER_HOUR + m * SLOTS_PER_MINUTE
 }
 
 /// Convert a slot count to a human-readable time estimate using Solana's ~400ms slot time.

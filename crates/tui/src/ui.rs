@@ -243,6 +243,20 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(table, inner);
 }
 
+/// Read a form field value, using `input_buf` if that field is currently active.
+fn live_field_value(app: &App, label: &str) -> Option<String> {
+    for (i, (l, v)) in app.form_fields.iter().enumerate() {
+        if l == label {
+            return if i == app.input_field {
+                Some(app.input_buf.clone())
+            } else {
+                Some(v.clone())
+            };
+        }
+    }
+    None
+}
+
 fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     let title = match app.form_kind {
         Some(FormKind::AuthorizeKey) => " Authorize Key ",
@@ -328,19 +342,6 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         let display_value = if is_active { &app.input_buf } else { value };
         let cursor = if is_active { "_" } else { "" };
 
-        // Build a time-estimate suffix for refill period fields
-        let time_hint = if label.contains("Refill Period") {
-            display_value
-                .trim()
-                .parse::<u64>()
-                .ok()
-                .filter(|&v| v > 0)
-                .map(|v| format!(" ({})", app::slots_to_human(v)))
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-
         // Handle multiline values (for revoke key list)
         if value.contains('\n') && !is_active {
             lines.push(Line::from(Span::styled(
@@ -351,18 +352,31 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
                 lines.push(Line::from(format!("    {}", line)));
             }
         } else {
-            let mut spans = vec![
+            let spans = vec![
                 Span::styled(format!("  {}: ", label), label_style),
                 Span::raw(format!("{}{}", display_value, cursor)),
             ];
-            if !time_hint.is_empty() {
-                spans.push(Span::styled(
-                    time_hint,
-                    Style::default().fg(Color::DarkGray),
-                ));
-            }
             lines.push(Line::from(spans));
         }
+
+        // After a "Refill Minutes" field, show the computed total slots summary
+        if label.contains("Refill Minutes") {
+            let prefix = if label.starts_with("Sell") { "Sell" } else { "Borrow" };
+            let days = live_field_value(app, &format!("{} Refill Days", prefix));
+            let hours = live_field_value(app, &format!("{} Refill Hours", prefix));
+            let mins = live_field_value(app, &format!("{} Refill Minutes", prefix));
+            let slots = app::time_fields_to_slots(&days, &hours, &mins);
+            if slots > 0 {
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(
+                        format!("= {} slots ({})", slots, app::slots_to_human(slots)),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
+
         lines.push(Line::from(""));
     }
 
@@ -372,7 +386,7 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     let hints = if on_perm_field {
         "  [\u{2190}\u{2192}] Navigate  [Space/1-7] Toggle  [Enter] Submit  [Tab] Next  [Esc] Cancel"
     } else {
-        "  [Enter] Submit  [Tab] Next field  [Esc] Cancel"
+        "  [Enter] Submit  [Tab/Shift+Tab] Navigate fields  [Esc] Cancel"
     };
     lines.push(Line::from(Span::styled(
         hints,

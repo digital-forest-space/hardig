@@ -35,32 +35,84 @@ use mpl_core::types::Attribute;
 use crate::state::*;
 
 /// Build human-readable on-chain attributes from a permission bitmask.
+/// Does NOT include limited_sell/limited_borrow — those are added by authorize_key
+/// with the actual capacity/period values merged in.
 pub fn permission_attributes(permissions: u8) -> Vec<Attribute> {
-    let base = permissions & !PERM_LIMITED_MASK;
-    let role = match base {
-        PRESET_ADMIN => "Admin",
-        PRESET_OPERATOR => "Operator",
-        PRESET_DEPOSITOR => "Depositor",
-        PRESET_KEEPER => "Keeper",
-        _ => "Custom",
-    };
-
     let flag = |bit: u8| -> &'static str {
         if permissions & bit != 0 { "true" } else { "false" }
     };
 
     vec![
         Attribute { key: "permissions".to_string(), value: permissions.to_string() },
-        Attribute { key: "role".to_string(), value: role.to_string() },
         Attribute { key: "buy".to_string(), value: flag(PERM_BUY).to_string() },
         Attribute { key: "sell".to_string(), value: flag(PERM_SELL).to_string() },
         Attribute { key: "borrow".to_string(), value: flag(PERM_BORROW).to_string() },
         Attribute { key: "repay".to_string(), value: flag(PERM_REPAY).to_string() },
         Attribute { key: "reinvest".to_string(), value: flag(PERM_REINVEST).to_string() },
         Attribute { key: "manage_keys".to_string(), value: flag(PERM_MANAGE_KEYS).to_string() },
-        Attribute { key: "limited_sell".to_string(), value: flag(PERM_LIMITED_SELL).to_string() },
-        Attribute { key: "limited_borrow".to_string(), value: flag(PERM_LIMITED_BORROW).to_string() },
     ]
+}
+
+/// Convert a slot count to a human-readable duration string using ~400ms per slot.
+/// Examples: "15 days", "30 days, 12 hours", "6 hours", "45 minutes".
+pub fn slots_to_duration(slots: u64) -> String {
+    let total_secs = slots * 400 / 1000;
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(if days == 1 { "1 day".to_string() } else { format!("{} days", days) });
+    }
+    if hours > 0 {
+        parts.push(if hours == 1 { "1 hour".to_string() } else { format!("{} hours", hours) });
+    }
+    if parts.is_empty() {
+        let m = minutes.max(1);
+        parts.push(if m == 1 { "1 minute".to_string() } else { format!("{} minutes", m) });
+    }
+    parts.join(", ")
+}
+
+/// Image hosted on Irys, shared by all Härdig key NFTs.
+const KEY_IMAGE: &str = "https://gateway.irys.xyz/GKa2AyPSRe2VnsPXBepTzhzohEBsLNdxFctR1MFoYojK";
+
+/// Build an inline `data:application/json,...` metadata URI so wallets that don't
+/// read MPL-Core Attributes (e.g. Phantom) can still display name/image/description.
+/// Only includes permission attributes that are actually set, to keep the URI compact.
+/// `limited_sell` / `limited_borrow` are passed as pre-formatted strings (e.g. "5 SOL / 15 days").
+pub fn metadata_uri(
+    name: &str,
+    permissions: u8,
+    limited_sell: Option<&str>,
+    limited_borrow: Option<&str>,
+) -> String {
+    let mut attrs = Vec::new();
+    let bits: &[(u8, &str)] = &[
+        (PERM_BUY, "buy"),
+        (PERM_SELL, "sell"),
+        (PERM_BORROW, "borrow"),
+        (PERM_REPAY, "repay"),
+        (PERM_REINVEST, "reinvest"),
+        (PERM_MANAGE_KEYS, "manage_keys"),
+    ];
+    for &(bit, label) in bits {
+        if permissions & bit != 0 {
+            attrs.push(format!("{{\"trait_type\":\"{}\",\"value\":\"true\"}}", label));
+        }
+    }
+    if let Some(v) = limited_sell {
+        attrs.push(format!("{{\"trait_type\":\"limited_sell\",\"value\":\"{}\"}}", v));
+    }
+    if let Some(v) = limited_borrow {
+        attrs.push(format!("{{\"trait_type\":\"limited_borrow\",\"value\":\"{}\"}}", v));
+    }
+
+    format!(
+        "data:application/json,{{\"name\":\"{}\",\"symbol\":\"HKEY\",\"description\":\"Permission key for managing a H\\u00e4rdig navSOL position.\",\"image\":\"{}\",\"attributes\":[{}]}}",
+        name, KEY_IMAGE, attrs.join(","),
+    )
 }
 
 /// Format a raw u64 amount (lamports or shares, 9 decimals) as a human-readable string.

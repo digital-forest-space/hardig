@@ -10,7 +10,7 @@ use mpl_core::{
 
 use crate::errors::HardigError;
 use crate::state::{PositionNFT, ProtocolConfig, PRESET_ADMIN};
-use super::permission_attributes;
+use super::{metadata_uri, permission_attributes};
 
 #[derive(Accounts)]
 pub struct CreatePosition<'info> {
@@ -85,7 +85,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16) -> Re
         .owner(Some(&ctx.accounts.admin.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name("H\u{00e4}rdig Admin Key".to_string())
-        .uri(String::new())
+        .uri(metadata_uri("H\u{00e4}rdig Admin Key", PRESET_ADMIN, None, None))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

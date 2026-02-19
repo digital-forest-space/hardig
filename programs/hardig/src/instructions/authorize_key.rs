@@ -15,7 +15,7 @@ use crate::state::{
 };
 
 use super::validate_key::validate_key;
-use super::{permission_attributes, format_sol_amount};
+use super::{permission_attributes, metadata_uri, format_sol_amount, slots_to_duration};
 
 #[derive(Accounts)]
 pub struct AuthorizeKey<'info> {
@@ -120,18 +120,20 @@ pub fn handler(
         key: "position".to_string(),
         value: ctx.accounts.position.admin_asset.to_string(),
     });
-    if permissions & PERM_LIMITED_SELL != 0 {
-        attrs.push(Attribute {
-            key: "sell_limit".to_string(),
-            value: format!("{} navSOL / {} slots", format_sol_amount(sell_bucket_capacity), sell_refill_period_slots),
-        });
-    }
-    if permissions & PERM_LIMITED_BORROW != 0 {
-        attrs.push(Attribute {
-            key: "borrow_limit".to_string(),
-            value: format!("{} SOL / {} slots", format_sol_amount(borrow_bucket_capacity), borrow_refill_period_slots),
-        });
-    }
+    let sell_limit_str = if permissions & PERM_LIMITED_SELL != 0 {
+        let v = format!("{} navSOL / {}", format_sol_amount(sell_bucket_capacity), slots_to_duration(sell_refill_period_slots));
+        attrs.push(Attribute { key: "limited_sell".to_string(), value: v.clone() });
+        Some(v)
+    } else {
+        None
+    };
+    let borrow_limit_str = if permissions & PERM_LIMITED_BORROW != 0 {
+        let v = format!("{} SOL / {}", format_sol_amount(borrow_bucket_capacity), slots_to_duration(borrow_refill_period_slots));
+        attrs.push(Attribute { key: "limited_borrow".to_string(), value: v.clone() });
+        Some(v)
+    } else {
+        None
+    };
 
     // Create the new key NFT via MPL-Core, adding it to the collection
     let config = &ctx.accounts.config;
@@ -145,7 +147,12 @@ pub fn handler(
         .owner(Some(&ctx.accounts.target_wallet.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name("H\u{00e4}rdig Key".to_string())
-        .uri(String::new())
+        .uri(metadata_uri(
+            "H\u{00e4}rdig Key",
+            permissions,
+            sell_limit_str.as_deref(),
+            borrow_limit_str.as_deref(),
+        ))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {
