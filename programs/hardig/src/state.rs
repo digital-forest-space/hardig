@@ -118,6 +118,35 @@ pub struct RateBucket {
     pub last_update: u64,
 }
 
+impl RateBucket {
+    /// Compute the currently available tokens without mutating state.
+    ///
+    /// Replicates the refill logic from `consume_rate_limit` in read-only form:
+    ///
+    /// ```text
+    /// elapsed = current_slot - last_update
+    /// refill  = min(capacity, capacity * elapsed / refill_period)   // u128 intermediate
+    /// available = min(capacity, level + refill)
+    /// ```
+    ///
+    /// Returns 0 for an unconfigured bucket (capacity == 0).
+    pub fn available_now(&self, current_slot: u64) -> u64 {
+        if self.capacity == 0 {
+            return 0;
+        }
+
+        let elapsed = current_slot.saturating_sub(self.last_update);
+
+        let refill = if elapsed >= self.refill_period {
+            self.capacity
+        } else {
+            ((self.capacity as u128) * (elapsed as u128) / (self.refill_period as u128)) as u64
+        };
+
+        self.level.saturating_add(refill).min(self.capacity)
+    }
+}
+
 /// Mutable state for a key NFT. Created for all delegated keys (via authorize_key).
 /// PDA seeds = [b"key_state", asset].
 #[account]

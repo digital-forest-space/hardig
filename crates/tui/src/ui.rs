@@ -206,7 +206,15 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let header = Row::new(vec!["", "Role", "Asset", "Held"])
+    // Check if any key has rate limits to decide whether to show the column
+    let has_rate_limits = app.keyring.iter().any(|k| k.sell_bucket.is_some() || k.borrow_bucket.is_some());
+
+    let header_cells: Vec<&str> = if has_rate_limits {
+        vec!["", "Role", "Asset", "Held", "Rate Limits"]
+    } else {
+        vec!["", "Role", "Asset", "Held"]
+    };
+    let header = Row::new(header_cells)
         .style(Style::default().add_modifier(Modifier::BOLD))
         .bottom_margin(0);
 
@@ -222,25 +230,72 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 Style::default()
             };
-            Row::new(vec![
+
+            let mut cells = vec![
                 marker.to_string(),
                 app::permissions_name(k.permissions).to_string(),
                 app::short_pubkey(&k.asset),
                 held.to_string(),
-            ])
-            .style(style)
+            ];
+
+            if has_rate_limits {
+                cells.push(format_rate_limits(k, app.current_slot));
+            }
+
+            Row::new(cells).style(style)
         })
         .collect();
 
-    let widths = [
-        Constraint::Length(2),
-        Constraint::Length(12),
-        Constraint::Length(14),
-        Constraint::Length(5),
-    ];
+    let widths: Vec<Constraint> = if has_rate_limits {
+        vec![
+            Constraint::Length(2),
+            Constraint::Length(12),
+            Constraint::Length(14),
+            Constraint::Length(5),
+            Constraint::Min(30),
+        ]
+    } else {
+        vec![
+            Constraint::Length(2),
+            Constraint::Length(12),
+            Constraint::Length(14),
+            Constraint::Length(5),
+        ]
+    };
 
     let table = Table::new(rows, widths).header(header);
     frame.render_widget(table, inner);
+}
+
+/// Format rate-limit info for a single key entry.
+fn format_rate_limits(k: &app::KeyEntry, current_slot: u64) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(ref bucket) = k.sell_bucket {
+        let avail = bucket.available_now(current_slot);
+        parts.push(format!(
+            "Sell: {}/{} SOL ({})",
+            app::lamports_to_sol(avail),
+            app::lamports_to_sol(bucket.capacity),
+            app::format_refill_time(bucket.refill_period),
+        ));
+    }
+
+    if let Some(ref bucket) = k.borrow_bucket {
+        let avail = bucket.available_now(current_slot);
+        parts.push(format!(
+            "Borrow: {}/{} SOL ({})",
+            app::lamports_to_sol(avail),
+            app::lamports_to_sol(bucket.capacity),
+            app::format_refill_time(bucket.refill_period),
+        ));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join(" | ")
+    }
 }
 
 fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
