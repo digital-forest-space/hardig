@@ -125,6 +125,12 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         require!(ks.asset == ctx.accounts.key_asset.key(), HardigError::InvalidKey);
     }
 
+    require!(amount > 0, HardigError::InsufficientFunds);
+    require!(
+        amount <= ctx.accounts.position.deposited_nav,
+        HardigError::InsufficientFunds
+    );
+
     // Enforce rate limit for PERM_LIMITED_SELL (skipped if unlimited PERM_SELL is set)
     if permissions & PERM_SELL == 0 && permissions & PERM_LIMITED_SELL != 0 {
         let key_state = ctx.accounts.key_state.as_deref_mut()
@@ -135,12 +141,6 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
             Clock::get()?.slot,
         )?;
     }
-
-    require!(amount > 0, HardigError::InsufficientFunds);
-    require!(
-        amount <= ctx.accounts.position.deposited_nav,
-        HardigError::InsufficientFunds
-    );
 
     let mc = &ctx.accounts.market_config;
 
