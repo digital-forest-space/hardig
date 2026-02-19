@@ -55,6 +55,7 @@ pub fn permission_attributes(permissions: u8) -> Vec<Attribute> {
 
 /// Convert a slot count to a human-readable duration string using ~400ms per slot.
 /// Examples: "15 days", "30 days, 12 hours", "6 hours", "45 minutes".
+/// NOTE: Used for both on-chain NFT attributes and TUI display — changes affect both.
 pub fn slots_to_duration(slots: u64) -> String {
     let total_secs = slots * 400 / 1000;
     let days = total_secs / 86400;
@@ -117,6 +118,7 @@ pub fn metadata_uri(
 
 /// Format a raw u64 amount (lamports or shares, 9 decimals) as a human-readable string.
 /// Trailing zeros after the decimal point are trimmed. Integer amounts have no decimal point.
+/// NOTE: Used for both on-chain NFT attributes and TUI display — changes affect both.
 pub fn format_sol_amount(raw: u64) -> String {
     let whole = raw / 1_000_000_000;
     let frac = raw % 1_000_000_000;
