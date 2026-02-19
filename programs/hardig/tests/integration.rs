@@ -12,7 +12,7 @@ use anchor_lang::AccountDeserialize;
 use hardig::mayflower::{
     self, DEFAULT_FEE_VAULT, DEFAULT_MARKET_BASE_VAULT, DEFAULT_MARKET_GROUP, DEFAULT_MARKET_META,
     DEFAULT_MARKET_NAV_VAULT, DEFAULT_MAYFLOWER_MARKET, DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT,
-    MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT,
+    MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, PP_DISCRIMINATOR,
 };
 use hardig::state::{
     KeyState, MarketConfig, PositionNFT, ProtocolConfig,
@@ -124,9 +124,9 @@ fn plant_position_stubs(svm: &mut LiteSVM, admin_asset: &Pubkey) {
     let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
     let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
 
-    // PersonalPosition — needs to be large enough for floor price / debt reads
+    // PersonalPosition — needs valid discriminator and large enough for floor price / debt reads
     let owner = MAYFLOWER_PROGRAM_ID;
-    plant_account(svm, &pp_pda, &owner, 256);
+    plant_pp_account(svm, &pp_pda, &owner, 256);
     plant_account(svm, &escrow_pda, &owner, 256);
 
     // ATAs for program PDA (wSOL and navSOL)
@@ -141,6 +141,20 @@ fn plant_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usiz
     let account = Account {
         lamports: 1_000_000_000,
         data: vec![0u8; size],
+        owner: *owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(*address, account).unwrap();
+}
+
+/// Plant a PersonalPosition stub with the correct Mayflower discriminator.
+fn plant_pp_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usize) {
+    let mut data = vec![0u8; size];
+    data[..8].copy_from_slice(&PP_DISCRIMINATOR);
+    let account = Account {
+        lamports: 1_000_000_000,
+        data,
         owner: *owner,
         executable: false,
         rent_epoch: 0,
@@ -810,6 +824,20 @@ fn ix_transfer_admin(admin: &Pubkey, new_admin: &Pubkey) -> Instruction {
     )
 }
 
+fn ix_accept_admin(new_admin: &Pubkey) -> Instruction {
+    let (config_pda, _) =
+        Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &sighash("accept_admin"),
+        vec![
+            AccountMeta::new_readonly(*new_admin, true),
+            AccountMeta::new(config_pda, false),
+        ],
+    )
+}
+
 fn read_protocol_config(svm: &LiteSVM) -> ProtocolConfig {
     let (config_pda, _) =
         Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id());
@@ -825,11 +853,20 @@ fn test_transfer_admin_ok() {
     let new_admin = Keypair::new();
     svm.airdrop(&new_admin.pubkey(), 5_000_000_000).unwrap();
 
+    // Step 1: Nominate
     let ix = ix_transfer_admin(&admin.pubkey(), &new_admin.pubkey());
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
     let config = read_protocol_config(&svm);
+    assert_eq!(config.admin, admin.pubkey()); // still old admin
+    assert_eq!(config.pending_admin, new_admin.pubkey());
+
+    // Step 2: Accept
+    send_tx(&mut svm, &[ix_accept_admin(&new_admin.pubkey())], &[&new_admin]).unwrap();
+
+    let config = read_protocol_config(&svm);
     assert_eq!(config.admin, new_admin.pubkey());
+    assert_eq!(config.pending_admin, Pubkey::default());
 }
 
 #[test]
@@ -840,11 +877,13 @@ fn test_transfer_admin_non_admin_denied() {
     let non_admin = Keypair::new();
     svm.airdrop(&non_admin.pubkey(), 5_000_000_000).unwrap();
 
+    // Non-admin cannot nominate
     let ix = ix_transfer_admin(&non_admin.pubkey(), &non_admin.pubkey());
     assert!(send_tx(&mut svm, &[ix], &[&non_admin]).is_err());
 
     let config = read_protocol_config(&svm);
     assert_eq!(config.admin, admin.pubkey());
+    assert_eq!(config.pending_admin, Pubkey::default());
 }
 
 #[test]
@@ -855,11 +894,17 @@ fn test_transfer_admin_old_admin_rejected_new_admin_works() {
     let new_admin = Keypair::new();
     svm.airdrop(&new_admin.pubkey(), 5_000_000_000).unwrap();
 
+    // Nominate new admin
     let ix = ix_transfer_admin(&admin.pubkey(), &new_admin.pubkey());
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
+    // New admin accepts
+    send_tx(&mut svm, &[ix_accept_admin(&new_admin.pubkey())], &[&new_admin]).unwrap();
+
+    // Old admin can no longer create market config
     assert!(send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).is_err());
 
+    // New admin can
     send_tx(&mut svm, &[ix_create_market_config(&new_admin.pubkey())], &[&new_admin]).unwrap();
 
     let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);

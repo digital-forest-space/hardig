@@ -94,10 +94,10 @@ fn process_instruction(
             }
         }
         IX_REPAY => {
-            // Repay: accounts[10] = personalPosition, instruction_data[8..16] = repay_amount
-            if instruction_data.len() >= 16 && accounts.len() > 10 {
+            // Repay: accounts[3] = personalPosition, instruction_data[8..16] = repay_amount
+            if instruction_data.len() >= 16 && accounts.len() > 3 {
                 let amount = u64::from_le_bytes(instruction_data[8..16].try_into().unwrap());
-                let pp = &accounts[10];
+                let pp = &accounts[3];
                 let mut data = pp.try_borrow_mut_data()?;
                 if data.len() >= PP_DEBT_OFFSET + 8 {
                     let current = u64::from_le_bytes(
