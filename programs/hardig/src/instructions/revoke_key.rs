@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use mpl_core::{
     ID as MPL_CORE_ID,
+    accounts::BaseAssetV1,
+    fetch_plugin,
     instructions::BurnV1CpiBuilder,
+    types::{Attributes, PluginType},
 };
 
 use crate::errors::HardigError;
@@ -71,6 +74,31 @@ pub fn handler(ctx: Context<RevokeKey>) -> Result<()> {
     require!(
         ctx.accounts.target_asset.key() != ctx.accounts.position.admin_asset,
         HardigError::CannotRevokeAdminKey
+    );
+
+    // Verify target_asset is actually an MPL-Core asset
+    require!(
+        *ctx.accounts.target_asset.to_account_info().owner == mpl_core::ID,
+        HardigError::InvalidKey
+    );
+
+    // Verify the target key belongs to THIS position by reading its
+    // Attributes plugin and checking the "position" attribute matches
+    // our position's admin_asset. Without this check any position admin
+    // could burn delegated keys belonging to OTHER positions (griefing).
+    let (_, target_attrs, _) = fetch_plugin::<BaseAssetV1, Attributes>(
+        &ctx.accounts.target_asset.to_account_info(),
+        PluginType::Attributes,
+    )
+    .map_err(|_| error!(HardigError::InvalidKey))?;
+    let target_position = target_attrs
+        .attribute_list
+        .iter()
+        .find(|a| a.key == "position")
+        .ok_or(error!(HardigError::WrongPosition))?;
+    require!(
+        target_position.value == ctx.accounts.position.admin_asset.to_string(),
+        HardigError::WrongPosition
     );
 
     // Burn the target asset via PermanentBurnDelegate.
