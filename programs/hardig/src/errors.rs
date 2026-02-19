@@ -67,4 +67,8 @@ pub enum HardigError {
     InvalidPositionPda,
     #[msg("Position already exists for this admin key")]
     PositionAlreadyExists,
+
+    // Name errors
+    #[msg("Custom name exceeds 32 characters")]
+    NameTooLong,
 }

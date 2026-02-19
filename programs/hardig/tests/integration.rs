@@ -257,6 +257,8 @@ fn ix_create_position(
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
+    // name: Option<String> = None (serialized as single 0 byte)
+    data.push(0);
 
     Instruction::new_with_bytes(
         program_id(),
@@ -278,6 +280,55 @@ fn ix_create_position(
             AccountMeta::new_readonly(DEFAULT_NAV_SOL_MINT, false),            // nav_sol_mint
             AccountMeta::new(log_pda, false),                                  // mayflower_log
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),            // mayflower_program
+        ],
+    )
+}
+
+/// Like ix_create_position but with a custom name.
+fn ix_create_position_named(
+    admin: &Pubkey,
+    asset: &Pubkey,
+    spread_bps: u16,
+    collection: &Pubkey,
+    name: &str,
+) -> Instruction {
+    let (position_pda, _) =
+        Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
+    let (program_pda, _) =
+        Pubkey::find_program_address(&[b"authority", asset.as_ref()], &program_id());
+    let (config_pda, _) = config_pda();
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
+    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
+    let (log_pda, _) = mayflower::derive_log_account();
+
+    let mut data = sighash("create_position");
+    data.extend_from_slice(&spread_bps.to_le_bytes());
+    // name: Option<String> = Some(name)
+    data.push(1); // Some
+    data.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    data.extend_from_slice(name.as_bytes());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new(*asset, true),
+            AccountMeta::new(position_pda, false),
+            AccountMeta::new_readonly(program_pda, false),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(*collection, false),
+            AccountMeta::new_readonly(mc_pda, false),
+            AccountMeta::new_readonly(MPL_CORE_ID, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new(pp_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
+            AccountMeta::new_readonly(DEFAULT_NAV_SOL_MINT, false),
+            AccountMeta::new(log_pda, false),
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
         ],
     )
 }
@@ -307,6 +358,8 @@ fn ix_authorize_key(
     data.extend_from_slice(&sell_refill_period_slots.to_le_bytes());
     data.extend_from_slice(&borrow_bucket_capacity.to_le_bytes());
     data.extend_from_slice(&borrow_refill_period_slots.to_le_bytes());
+    // name: Option<String> = None
+    data.push(0);
 
     Instruction::new_with_bytes(
         program_id(),
@@ -2182,4 +2235,44 @@ fn test_create_position_without_collection_rejected() {
         &[&admin, &asset_kp],
     );
     assert!(result.is_err());
+}
+
+/// Extract the name string from an MPL-Core AssetV1 account's raw data.
+/// Layout: 1 (key) + 32 (owner) + 1 (update_authority tag) + 32 (authority pubkey) + 4 (name len) + name bytes
+fn extract_asset_name(data: &[u8]) -> String {
+    let name_len_offset = 1 + 32 + 1 + 32; // = 66
+    let name_len = u32::from_le_bytes(data[name_len_offset..name_len_offset + 4].try_into().unwrap()) as usize;
+    let name_start = name_len_offset + 4;
+    String::from_utf8(data[name_start..name_start + name_len].to_vec()).unwrap()
+}
+
+#[test]
+fn test_create_position_custom_name() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    let asset_kp = Keypair::new();
+    plant_position_stubs(&mut svm, &asset_kp.pubkey());
+    send_tx(
+        &mut svm,
+        &[ix_create_position_named(
+            &admin.pubkey(),
+            &asset_kp.pubkey(),
+            500,
+            &collection,
+            "My Vault",
+        )],
+        &[&admin, &asset_kp],
+    )
+    .unwrap();
+
+    // Verify the MPL-Core asset has the custom name
+    let asset_account = svm.get_account(&asset_kp.pubkey()).expect("asset should exist");
+    assert_eq!(asset_account.owner, MPL_CORE_ID);
+    let name = extract_asset_name(&asset_account.data);
+    assert_eq!(name, "My Vault");
 }

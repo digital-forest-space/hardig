@@ -77,6 +77,7 @@ pub fn handler(
     sell_refill_period_slots: u64,
     borrow_bucket_capacity: u64,
     borrow_refill_period_slots: u64,
+    name: Option<String>,
 ) -> Result<()> {
     // Validate the admin holds their key
     validate_key(
@@ -135,6 +136,15 @@ pub fn handler(
         None
     };
 
+    // Validate optional custom name
+    let nft_name = match &name {
+        Some(n) => {
+            require!(n.len() <= 32, HardigError::NameTooLong);
+            n.clone()
+        }
+        None => "H\u{00e4}rdig Key".to_string(),
+    };
+
     // Create the new key NFT via MPL-Core, adding it to the collection
     let config = &ctx.accounts.config;
     let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
@@ -146,9 +156,9 @@ pub fn handler(
         .payer(&ctx.accounts.admin.to_account_info())
         .owner(Some(&ctx.accounts.target_wallet.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
-        .name("H\u{00e4}rdig Key".to_string())
+        .name(nft_name.clone())
         .uri(metadata_uri(
-            "H\u{00e4}rdig Key",
+            &nft_name,
             permissions,
             sell_limit_str.as_deref(),
             borrow_limit_str.as_deref(),
