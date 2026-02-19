@@ -328,6 +328,19 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         let display_value = if is_active { &app.input_buf } else { value };
         let cursor = if is_active { "_" } else { "" };
 
+        // Build a time-estimate suffix for refill period fields
+        let time_hint = if label.contains("Refill Period") {
+            display_value
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|&v| v > 0)
+                .map(|v| format!(" ({})", app::slots_to_human(v)))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
         // Handle multiline values (for revoke key list)
         if value.contains('\n') && !is_active {
             lines.push(Line::from(Span::styled(
@@ -338,10 +351,17 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
                 lines.push(Line::from(format!("    {}", line)));
             }
         } else {
-            lines.push(Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!("  {}: ", label), label_style),
                 Span::raw(format!("{}{}", display_value, cursor)),
-            ]));
+            ];
+            if !time_hint.is_empty() {
+                spans.push(Span::styled(
+                    time_hint,
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            lines.push(Line::from(spans));
         }
         lines.push(Line::from(""));
     }

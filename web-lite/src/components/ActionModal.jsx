@@ -24,7 +24,7 @@ import {
   buildAuthorizeKey,
   buildRevokeKey,
 } from '../instructions/index.js';
-import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
+import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, slotsToHuman, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
 
 // Phase: form | building | confirm | result
 export function ActionModal({ action, onClose, onRefresh }) {
@@ -305,7 +305,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
                         <input type="text" value={sellCapacity} onInput={(e) => setSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '11px' }}>Sell Refill (slots)</label>
+                        <label style={{ fontSize: '11px' }}>Sell Refill (slots){sellRefillSlots && parseInt(sellRefillSlots) > 0 ? ` ${slotsToHuman(parseInt(sellRefillSlots))}` : ''}</label>
                         <input type="text" value={sellRefillSlots} onInput={(e) => setSellRefillSlots(e.target.value)} placeholder="e.g. 216000" />
                       </div>
                     </div>
@@ -317,7 +317,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
                         <input type="text" value={borrowCapacity} onInput={(e) => setBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '11px' }}>Borrow Refill (slots)</label>
+                        <label style={{ fontSize: '11px' }}>Borrow Refill (slots){borrowRefillSlots && parseInt(borrowRefillSlots) > 0 ? ` ${slotsToHuman(parseInt(borrowRefillSlots))}` : ''}</label>
                         <input type="text" value={borrowRefillSlots} onInput={(e) => setBorrowRefillSlots(e.target.value)} placeholder="e.g. 216000" />
                       </div>
                     </div>

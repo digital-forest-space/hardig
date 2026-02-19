@@ -72,6 +72,28 @@ export function permissionsClass(permissions) {
   }
 }
 
+/**
+ * Convert a slot count to a human-readable time estimate using Solana's ~400ms slot time.
+ *
+ * - < 150 slots (~1 min): show seconds, e.g. "~40s"
+ * - 150-9,000 slots (~1 min - ~1 hr): show minutes, e.g. "~20m"
+ * - 9,000-216,000 slots (~1 hr - ~1 day): show hours, e.g. "~6h"
+ * - 216,000+ slots (~1+ day): show days, e.g. "~3d"
+ */
+export function slotsToHuman(slots) {
+  if (!slots || slots <= 0) return '~0s';
+  const totalSecs = Math.floor((slots * 400) / 1000);
+  if (slots < 150) {
+    return `~${totalSecs}s`;
+  } else if (slots < 9000) {
+    return `~${Math.max(1, Math.floor(totalSecs / 60))}m`;
+  } else if (slots < 216000) {
+    return `~${Math.max(1, Math.floor(totalSecs / 3600))}h`;
+  } else {
+    return `~${Math.max(1, Math.floor(totalSecs / 86400))}d`;
+  }
+}
+
 export function explorerUrl(sig, cluster) {
   const base = 'https://explorer.solana.com/tx/' + sig;
   if (cluster === 'mainnet-beta') return base;

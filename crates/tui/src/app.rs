@@ -2044,6 +2044,34 @@ pub fn lamports_to_sol(lamports: u64) -> String {
     }
 }
 
+/// Convert a slot count to a human-readable time estimate using Solana's ~400ms slot time.
+///
+/// - < 150 slots (~1 min): show seconds, e.g. "~40s"
+/// - 150-9,000 slots (~1 min - ~1 hr): show minutes, e.g. "~20m"
+/// - 9,000-216,000 slots (~1 hr - ~1 day): show hours, e.g. "~6h"
+/// - 216,000+ slots (~1+ day): show days, e.g. "~3d"
+pub fn slots_to_human(slots: u64) -> String {
+    if slots == 0 {
+        return "~0s".to_string();
+    }
+    // Total milliseconds at 400ms per slot
+    let total_ms = slots * 400;
+    let total_secs = total_ms / 1000;
+
+    if slots < 150 {
+        format!("~{}s", total_secs)
+    } else if slots < 9_000 {
+        let minutes = total_secs / 60;
+        format!("~{}m", minutes.max(1))
+    } else if slots < 216_000 {
+        let hours = total_secs / 3600;
+        format!("~{}h", hours.max(1))
+    } else {
+        let days = total_secs / 86400;
+        format!("~{}d", days.max(1))
+    }
+}
+
 pub fn format_delta(before: u64, after: u64) -> String {
     if after > before {
         format!("+{}", lamports_to_sol(after - before))
