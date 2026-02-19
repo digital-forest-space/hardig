@@ -134,13 +134,21 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     let admin_asset_key = ctx.accounts.position.admin_asset;
     let signer_seeds: &[&[&[u8]]] = &[&[b"authority", admin_asset_key.as_ref(), &[bump]]];
 
+    let pp_info = ctx.accounts.personal_position.to_account_info();
+
+    // Read debt BEFORE the repay CPI
+    let debt_before = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+
     invoke_signed(
         &ix,
         &[
             ctx.accounts.program_pda.to_account_info(),
             ctx.accounts.market_meta.to_account_info(),
             ctx.accounts.mayflower_market.to_account_info(),
-            ctx.accounts.personal_position.to_account_info(),
+            pp_info.clone(),
             ctx.accounts.wsol_mint.to_account_info(),
             ctx.accounts.user_base_token_ata.to_account_info(),
             ctx.accounts.market_base_vault.to_account_info(),
@@ -151,11 +159,20 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
         signer_seeds,
     )?;
 
+    // Read debt AFTER the repay CPI to get actual repaid amount
+    let debt_after = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+    let actual_repaid = debt_before
+        .checked_sub(debt_after)
+        .ok_or(HardigError::InsufficientFunds)?;
+
     ctx.accounts.position.user_debt = ctx
         .accounts
         .position
         .user_debt
-        .checked_sub(amount)
+        .checked_sub(actual_repaid)
         .ok_or(HardigError::InsufficientFunds)?;
 
     Ok(())
