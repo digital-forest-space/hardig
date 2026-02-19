@@ -1708,23 +1708,19 @@ impl App {
                         continue;
                     }
 
-                    // Read the asset's update_authority to find which position it belongs to
-                    let ua = match self.read_asset_update_authority(&ks.asset) {
-                        Some(ua) => ua,
+                    // Read the "position" attribute to find which position it belongs to
+                    let bound_to = match self.read_asset_position_binding(&ks.asset) {
+                        Some(p) => p,
                         None => continue,
                     };
 
-                    // Find the position whose program_pda matches this update_authority
+                    // Find the position whose admin_asset matches this key's binding
                     for (pos_pda, pos_acc) in &positions {
                         let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
                             Ok(p) => p,
                             Err(_) => continue,
                         };
-                        let (expected_pda, _) = Pubkey::find_program_address(
-                            &[b"authority", pos.admin_asset.as_ref()],
-                            &hardig::ID,
-                        );
-                        if expected_pda == ua {
+                        if pos.admin_asset == bound_to {
                             found_position = Some(*pos_pda);
                             found_pos_data = Some(pos);
                             break;
@@ -1776,9 +1772,9 @@ impl App {
                         if !self.check_asset_owner(&ks.asset, &signer) {
                             continue;
                         }
-                        // Verify this key belongs to this position
-                        if let Some(ua) = self.read_asset_update_authority(&ks.asset) {
-                            if ua == program_pda {
+                        // Verify this key belongs to this position via "position" attribute
+                        if let Some(bound_to) = self.read_asset_position_binding(&ks.asset) {
+                            if bound_to == admin_asset {
                                 if let Some(perms) = self.read_asset_permissions(&ks.asset) {
                                     self.my_permissions = Some(perms);
                                     self.my_key_state_pda = Some(*ks_pda);
@@ -1865,12 +1861,12 @@ impl App {
                         Ok(k) => k,
                         Err(_) => continue,
                     };
-                    // Check if this key belongs to this position (update_authority == program_pda)
-                    let ua = match self.read_asset_update_authority(&ks.asset) {
-                        Some(ua) => ua,
+                    // Check if this key belongs to this position via "position" attribute
+                    let bound_to = match self.read_asset_position_binding(&ks.asset) {
+                        Some(p) => p,
                         None => continue,
                     };
-                    if ua != program_pda {
+                    if bound_to != admin_asset {
                         continue;
                     }
                     let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
@@ -1977,21 +1973,6 @@ impl App {
         false
     }
 
-    /// Read the update_authority pubkey from an MPL-Core asset account.
-    /// The update_authority is a borsh-encoded enum at byte 33+.
-    /// Tag 1 = UpdateAuthority::Address, followed by 32-byte pubkey.
-    fn read_asset_update_authority(&self, asset: &Pubkey) -> Option<Pubkey> {
-        let acc = self.rpc.get_account(asset).ok()?;
-        if acc.data.len() < 66 {
-            return None;
-        }
-        let ua_tag = acc.data[33];
-        if ua_tag != 1 {
-            return None;
-        }
-        Pubkey::try_from(&acc.data[34..66]).ok()
-    }
-
     /// Read the permissions value from an MPL-Core asset's Attributes plugin.
     fn read_asset_permissions(&self, asset: &Pubkey) -> Option<u8> {
         use mpl_core::{
@@ -2023,6 +2004,39 @@ impl App {
             .iter()
             .find(|a| a.key == "permissions")
             .and_then(|a| a.value.parse::<u8>().ok())
+    }
+
+    /// Read the "position" attribute from an MPL-Core asset's Attributes plugin.
+    /// Returns the admin_asset pubkey that this key is bound to.
+    fn read_asset_position_binding(&self, asset: &Pubkey) -> Option<Pubkey> {
+        use mpl_core::{
+            accounts::BaseAssetV1,
+            fetch_plugin,
+            types::{Attributes, PluginType},
+        };
+        let acc = self.rpc.get_account(asset).ok()?;
+        let asset_key = *asset;
+        let mut lamports = acc.lamports;
+        let mut data = acc.data.clone();
+        let account_info = solana_sdk::account_info::AccountInfo::new(
+            &asset_key,
+            false,
+            false,
+            &mut lamports,
+            &mut data,
+            &acc.owner,
+            false,
+            0,
+        );
+        let (_, attributes, _) = fetch_plugin::<BaseAssetV1, Attributes>(
+            &account_info,
+            PluginType::Attributes,
+        ).ok()?;
+        attributes
+            .attribute_list
+            .iter()
+            .find(|a| a.key == "position")
+            .and_then(|a| a.value.parse::<Pubkey>().ok())
     }
 
     pub fn take_snapshot(&self) -> Option<PositionSnapshot> {

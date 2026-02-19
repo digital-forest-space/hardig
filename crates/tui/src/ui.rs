@@ -206,31 +206,44 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let header = Row::new(vec!["", "Role", "Asset", "Held"])
+    let header = Row::new(vec!["", "Name", "Asset", "Held"])
         .style(Style::default().add_modifier(Modifier::BOLD))
         .bottom_margin(0);
 
-    let rows: Vec<Row> = app
-        .keyring
-        .iter()
-        .enumerate()
-        .map(|(i, k)| {
-            let marker = if i == app.key_cursor { ">" } else { " " };
-            let held = if k.held_by_signer { "YOU" } else { "" };
-            let style = if k.held_by_signer {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default()
-            };
+    let is_admin = |k: &app::KeyEntry| k.permissions == hardig::state::PRESET_ADMIN;
+
+    let mut rows: Vec<Row> = Vec::new();
+    for (i, k) in app.keyring.iter().enumerate() {
+        let marker = if i == app.key_cursor { ">" } else { " " };
+        let held = if k.held_by_signer { "YOU" } else { "" };
+        let name = if is_admin(k) { "Admin" } else { "Delegated" };
+        let style = if k.held_by_signer {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default()
+        };
+        rows.push(
             Row::new(vec![
                 marker.to_string(),
-                app::permissions_name(k.permissions).to_string(),
+                name.to_string(),
                 app::short_pubkey(&k.asset),
                 held.to_string(),
             ])
-            .style(style)
-        })
-        .collect();
+            .style(style),
+        );
+        // Sub-row for delegated keys showing permissions
+        if !is_admin(k) {
+            rows.push(
+                Row::new(vec![
+                    String::new(),
+                    format!("  {}", app::permissions_name(k.permissions)),
+                    String::new(),
+                    String::new(),
+                ])
+                .style(Style::default().fg(Color::DarkGray)),
+            );
+        }
+    }
 
     let widths = [
         Constraint::Length(2),
