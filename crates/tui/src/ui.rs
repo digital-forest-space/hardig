@@ -274,7 +274,7 @@ fn format_rate_limits(k: &app::KeyEntry, current_slot: u64) -> String {
     if let Some(ref bucket) = k.sell_bucket {
         let avail = bucket.available_now(current_slot);
         parts.push(format!(
-            "Sell: {}/{} SOL ({})",
+            "Sell: {}/{} navSOL ({})",
             app::lamports_to_sol(avail),
             app::lamports_to_sol(bucket.capacity),
             app::format_refill_time(bucket.refill_period),
