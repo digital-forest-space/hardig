@@ -2139,7 +2139,7 @@ pub fn lamports_to_sol(lamports: u64) -> String {
         let frac = lamports % 1_000_000_000;
         // Full precision, trim trailing zeros — lossless round-trip with parse_sol_to_lamports
         let s = format!("{}.{:09}", whole, frac);
-        s.trim_end_matches('0').to_string()
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
 }
 
@@ -2184,24 +2184,6 @@ pub fn slots_to_human(slots: u64) -> String {
     } else {
         let days = total_secs / 86400;
         format!("~{}d", days.max(1))
-    }
-}
-
-/// Format a refill period in slots as a human-readable duration for rate-limit display.
-/// Assumes ~400ms per slot (Solana mainnet average).
-pub fn format_refill_time(refill_period: u64) -> String {
-    let seconds = (refill_period as f64) * 0.4;
-    if seconds < 60.0 {
-        format!("~{}s", seconds as u64)
-    } else if seconds < 3600.0 {
-        format!("~{}m", (seconds / 60.0).round() as u64)
-    } else {
-        let hours = seconds / 3600.0;
-        if hours < 24.0 {
-            format!("~{:.1}h", hours)
-        } else {
-            format!("~{:.1}d", hours / 24.0)
-        }
     }
 }
 

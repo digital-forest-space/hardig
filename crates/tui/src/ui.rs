@@ -231,24 +231,28 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
             ])
             .style(style),
         );
-        // Sub-row for delegated keys showing permissions and rate limits
+        // Sub-rows for delegated keys: permissions, then rate limits
         if !is_admin(k) {
-            let perms = app::permissions_name(k.permissions);
-            let rate_info = format_rate_limits(k, app.current_slot);
-            let detail = if rate_info.is_empty() {
-                perms
-            } else {
-                format!("{} | {}", perms, rate_info)
+            let sub_style = Style::default().fg(Color::DarkGray);
+            let sub_row = |text: String| {
+                Row::new(vec![String::new(), format!("  {}", text), String::new(), String::new()])
+                    .style(sub_style)
             };
-            rows.push(
-                Row::new(vec![
-                    String::new(),
-                    format!("  {}", detail),
-                    String::new(),
-                    String::new(),
-                ])
-                .style(Style::default().fg(Color::DarkGray)),
-            );
+            rows.push(sub_row(app::permissions_name(k.permissions)));
+            if let Some(ref bucket) = k.sell_bucket {
+                rows.push(sub_row(format!(
+                    "Sell: {} navSOL / {}",
+                    hardig::instructions::format_sol_amount(bucket.capacity),
+                    hardig::instructions::slots_to_duration(bucket.refill_period),
+                )));
+            }
+            if let Some(ref bucket) = k.borrow_bucket {
+                rows.push(sub_row(format!(
+                    "Borrow: {} SOL / {}",
+                    hardig::instructions::format_sol_amount(bucket.capacity),
+                    hardig::instructions::slots_to_duration(bucket.refill_period),
+                )));
+            }
         }
     }
 
@@ -275,37 +279,6 @@ fn live_field_value(app: &App, label: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Format rate-limit info for a single key entry.
-fn format_rate_limits(k: &app::KeyEntry, current_slot: u64) -> String {
-    let mut parts: Vec<String> = Vec::new();
-
-    if let Some(ref bucket) = k.sell_bucket {
-        let avail = bucket.available_now(current_slot);
-        parts.push(format!(
-            "Sell: {}/{} navSOL ({})",
-            app::lamports_to_sol(avail),
-            app::lamports_to_sol(bucket.capacity),
-            app::format_refill_time(bucket.refill_period),
-        ));
-    }
-
-    if let Some(ref bucket) = k.borrow_bucket {
-        let avail = bucket.available_now(current_slot);
-        parts.push(format!(
-            "Borrow: {}/{} SOL ({})",
-            app::lamports_to_sol(avail),
-            app::lamports_to_sol(bucket.capacity),
-            app::format_refill_time(bucket.refill_period),
-        ));
-    }
-
-    if parts.is_empty() {
-        String::new()
-    } else {
-        parts.join(" | ")
-    }
 }
 
 fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
