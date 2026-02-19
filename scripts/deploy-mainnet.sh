@@ -172,14 +172,14 @@ else
                 --filepath "$IDL_JSON" \
                 --provider.cluster "$SOLANA_RPC_URL" \
                 --provider.wallet "$PAYER_KP" \
-                -- --with-compute-unit-price 50000
+                --priority-fee 50000
         else
             echo "No existing IDL account — initializing..."
             anchor idl init "$PROGRAM_ID" \
                 --filepath "$IDL_JSON" \
                 --provider.cluster "$SOLANA_RPC_URL" \
                 --provider.wallet "$PAYER_KP" \
-                -- --with-compute-unit-price 50000
+                --priority-fee 50000
         fi
         echo ""
         echo "IDL uploaded successfully."
