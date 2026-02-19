@@ -3,6 +3,9 @@ import { PublicKey } from '@solana/web3.js';
 
 export const PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
 
+// MPL-Core program
+export const MPL_CORE_PROGRAM_ID = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
+
 // Mayflower (protocol-global)
 export const MAYFLOWER_PROGRAM_ID = new PublicKey('AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v');
 export const MAYFLOWER_TENANT = new PublicKey('81JEJdJSZbaXixpD8WQSBWBfkDa6m6KpXpSErzYUHq6z');
@@ -20,8 +23,6 @@ export const DEFAULT_WSOL_MINT = new PublicKey('So111111111111111111111111111111
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ATA_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 export const SYSTEM_PROGRAM_ID = new PublicKey('11111111111111111111111111111111');
-export const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
-export const RENT_SYSVAR = new PublicKey('SysvarRent111111111111111111111111111111111');
 
 // PDA seeds
 const PERSONAL_POSITION_SEED = Buffer.from('personal_position');
@@ -33,13 +34,13 @@ export const PP_DEPOSITED_SHARES_OFFSET = 104;
 export const PP_DEBT_OFFSET = 112;
 export const MARKET_FLOOR_PRICE_OFFSET = 104;
 
-// KeyAuthorization
-export const KEY_AUTH_SIZE = 138; // 8 + 32 + 32 + 1 + 1 + 32 + 32
+// KeyState account size: discriminator(8) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32) = 105
+export const KEY_STATE_SIZE = 105;
 
 // Derive per-position program PDA (authority)
-export function deriveProgramPda(adminNftMint) {
+export function deriveProgramPda(adminAsset) {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('authority'), adminNftMint.toBuffer()],
+    [Buffer.from('authority'), adminAsset.toBuffer()],
     PROGRAM_ID
   );
 }
@@ -50,17 +51,17 @@ export function deriveConfigPda() {
 }
 
 // Derive position PDA
-export function derivePositionPda(adminNftMint) {
+export function derivePositionPda(adminAsset) {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('position'), adminNftMint.toBuffer()],
+    [Buffer.from('position'), adminAsset.toBuffer()],
     PROGRAM_ID
   );
 }
 
-// Derive KeyAuthorization PDA
-export function deriveKeyAuthPda(positionPda, keyNftMint) {
+// Derive KeyState PDA (seeds = [b"key_state", asset_pubkey])
+export function deriveKeyStatePda(assetPubkey) {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('key_auth'), positionPda.toBuffer(), keyNftMint.toBuffer()],
+    [Buffer.from('key_state'), assetPubkey.toBuffer()],
     PROGRAM_ID
   );
 }
@@ -104,22 +105,6 @@ export function deriveLiqVaultMain(marketMeta = DEFAULT_MARKET_META) {
     [LIQ_VAULT_MAIN_SEED, marketMeta.toBuffer()],
     MAYFLOWER_PROGRAM_ID
   );
-}
-
-// Derive Metaplex Metadata PDA
-export function deriveMetadataPda(mint) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-    METADATA_PROGRAM_ID
-  )[0];
-}
-
-// Derive Metaplex Master Edition PDA
-export function deriveMasterEditionPda(mint) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer(), Buffer.from('edition')],
-    METADATA_PROGRAM_ID
-  )[0];
 }
 
 // Derive ATA

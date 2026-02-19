@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::associated_token::get_associated_token_address;
-use anchor_spl::token::{Token, TokenAccount};
+use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_REPAY};
+use crate::state::{MarketConfig, PositionNFT, PERM_REPAY};
 
 use super::validate_key::validate_key;
 
@@ -14,14 +14,9 @@ pub struct Repay<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    /// The signer's key NFT token account.
-    pub key_nft_ata: Account<'info, TokenAccount>,
-
-    /// The signer's KeyAuthorization.
-    #[account(
-        constraint = key_auth.position == position.key() @ HardigError::WrongPosition,
-    )]
-    pub key_auth: Account<'info, KeyAuthorization>,
+    /// The signer's key NFT (MPL-Core asset).
+    /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
+    pub key_asset: UncheckedAccount<'info>,
 
     /// The position to repay debt for.
     #[account(mut)]
@@ -39,7 +34,7 @@ pub struct Repay<'info> {
 
     /// Mutable because Mayflower CPI marks user_wallet as writable.
     /// CHECK: PDA derived from this program.
-    #[account(mut, seeds = [b"authority", position.admin_nft_mint.as_ref()], bump)]
+    #[account(mut, seeds = [b"authority", position.admin_asset.as_ref()], bump)]
     pub program_pda: UncheckedAccount<'info>,
 
     /// CHECK: Validated in handler via seed derivation.
@@ -85,9 +80,8 @@ pub struct Repay<'info> {
 pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     validate_key(
         &ctx.accounts.signer,
-        &ctx.accounts.key_nft_ata,
-        &ctx.accounts.key_auth,
-        &ctx.accounts.position.key(),
+        &ctx.accounts.key_asset.to_account_info(),
+        &ctx.accounts.program_pda.key(),
         PERM_REPAY,
     )?;
 
@@ -112,7 +106,7 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
         HardigError::InvalidMayflowerAccount
     );
 
-    if ctx.accounts.key_auth.key_nft_mint == ctx.accounts.position.admin_nft_mint {
+    if ctx.accounts.key_asset.key() == ctx.accounts.position.admin_asset {
         ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
     }
 
@@ -137,8 +131,8 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     );
 
     let bump = ctx.bumps.program_pda;
-    let mint_key = ctx.accounts.position.admin_nft_mint;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
+    let admin_asset_key = ctx.accounts.position.admin_asset;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", admin_asset_key.as_ref(), &[bump]]];
 
     invoke_signed(
         &ix,

@@ -15,7 +15,7 @@ export const protocolExists = signal(false);
 export const positionPda = signal(null);
 export const position = signal(null);
 export const myPermissions = signal(null); // u8 bitmask
-export const myKeyAuthPda = signal(null);
+export const myKeyAsset = signal(null);
 export const myNftMint = signal(null);
 export const keyring = signal([]);
 
@@ -117,7 +117,7 @@ export function resetPositionState() {
   positionPda.value = null;
   position.value = null;
   myPermissions.value = null;
-  myKeyAuthPda.value = null;
+  myKeyAsset.value = null;
   myNftMint.value = null;
   keyring.value = [];
   marketConfigPda.value = null;

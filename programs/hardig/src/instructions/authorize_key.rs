@@ -1,96 +1,65 @@
 use anchor_lang::prelude::*;
-use anchor_spl::metadata::{
-    create_master_edition_v3, create_metadata_accounts_v3,
-    mpl_token_metadata::types::DataV2,
-    CreateMasterEditionV3, CreateMetadataAccountsV3, Metadata as MetaplexProgram,
+use mpl_core::{
+    ID as MPL_CORE_ID,
+    instructions::CreateV2CpiBuilder,
+    types::{
+        Attribute, Attributes, PermanentBurnDelegate, PermanentTransferDelegate,
+        Plugin, PluginAuthority, PluginAuthorityPair,
+    },
 };
-use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount};
 
 use crate::errors::HardigError;
 use crate::state::{
-    KeyAuthorization, PositionNFT, RateBucket, PERM_LIMITED_BORROW, PERM_LIMITED_SELL,
-    PERM_MANAGE_KEYS,
+    KeyState, PositionNFT, RateBucket,
+    PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS,
 };
 
 use super::validate_key::validate_key;
+use super::{permission_attributes, format_sol_amount};
 
 #[derive(Accounts)]
 pub struct AuthorizeKey<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    /// The admin's key NFT token account (proves admin holds the key).
-    pub admin_nft_ata: Account<'info, TokenAccount>,
-
-    /// The admin's KeyAuthorization.
-    #[account(
-        constraint = admin_key_auth.position == position.key() @ HardigError::WrongPosition,
-    )]
-    pub admin_key_auth: Account<'info, KeyAuthorization>,
+    /// The admin's key NFT (MPL-Core asset).
+    /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
+    pub admin_key_asset: UncheckedAccount<'info>,
 
     /// The position to authorize a key for.
     pub position: Account<'info, PositionNFT>,
 
-    /// The mint for the new key NFT. Created fresh by the client, passed in as a signer.
-    #[account(
-        init,
-        payer = admin,
-        mint::decimals = 0,
-        mint::authority = program_pda,
-        mint::freeze_authority = program_pda,
-    )]
-    pub new_key_mint: Account<'info, Mint>,
-
-    /// The target wallet's ATA for the new key NFT.
-    #[account(
-        init,
-        payer = admin,
-        associated_token::mint = new_key_mint,
-        associated_token::authority = target_wallet,
-    )]
-    pub target_nft_ata: Account<'info, TokenAccount>,
+    /// The MPL-Core asset for the new key NFT. Created by MPL-Core CPI.
+    #[account(mut)]
+    pub new_key_asset: Signer<'info>,
 
     /// The wallet that will receive the new key NFT.
     /// CHECK: Any wallet can receive a key.
     pub target_wallet: UncheckedAccount<'info>,
 
-    /// The KeyAuthorization for the new key.
+    /// KeyState PDA for the new key (tracks mutable state like rate-limit buckets).
     #[account(
         init,
         payer = admin,
-        space = KeyAuthorization::SIZE,
-        seeds = [
-            KeyAuthorization::SEED,
-            position.key().as_ref(),
-            new_key_mint.key().as_ref(),
-        ],
+        space = KeyState::SIZE,
+        seeds = [KeyState::SEED, new_key_asset.key().as_ref()],
         bump,
     )]
-    pub new_key_auth: Account<'info, KeyAuthorization>,
+    pub key_state: Account<'info, KeyState>,
 
-    /// Per-position authority PDA used as mint authority.
-    /// CHECK: PDA derived from program, not read.
+    /// Per-position authority PDA.
+    /// CHECK: PDA derived from program.
     #[account(
-        seeds = [b"authority", position.admin_nft_mint.as_ref()],
+        seeds = [b"authority", position.admin_asset.as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
 
-    /// Metaplex Token Metadata PDA for the new key NFT.
-    /// CHECK: Created by Metaplex CPI; derived as ["metadata", metaplex_program, mint].
-    #[account(mut)]
-    pub metadata: UncheckedAccount<'info>,
+    /// CHECK: MPL-Core program validated by address constraint.
+    #[account(address = MPL_CORE_ID)]
+    pub mpl_core_program: UncheckedAccount<'info>,
 
-    /// Master Edition PDA for the new key NFT.
-    /// CHECK: Created by Metaplex CPI; derived as ["metadata", metaplex_program, mint, "edition"].
-    #[account(mut)]
-    pub master_edition: UncheckedAccount<'info>,
-
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
-    pub token_metadata_program: Program<'info, MetaplexProgram>,
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 pub fn handler(
@@ -104,9 +73,8 @@ pub fn handler(
     // Validate the admin holds their key
     validate_key(
         &ctx.accounts.admin,
-        &ctx.accounts.admin_nft_ata,
-        &ctx.accounts.admin_key_auth,
-        &ctx.accounts.position.key(),
+        &ctx.accounts.admin_key_asset.to_account_info(),
+        &ctx.accounts.program_pda.key(),
         PERM_MANAGE_KEYS,
     )?;
 
@@ -138,85 +106,57 @@ pub fn handler(
         );
     }
 
-    // Mint 1 key NFT to the target wallet
-    let bump = ctx.bumps.program_pda;
-    let mint_key = ctx.accounts.position.admin_nft_mint;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
+    // Build attribute list with human-readable permissions
+    let mut attrs = permission_attributes(permissions);
+    if permissions & PERM_LIMITED_SELL != 0 {
+        attrs.push(Attribute {
+            key: "sell_limit".to_string(),
+            value: format!("{} navSOL / {} slots", format_sol_amount(sell_bucket_capacity), sell_refill_period_slots),
+        });
+    }
+    if permissions & PERM_LIMITED_BORROW != 0 {
+        attrs.push(Attribute {
+            key: "borrow_limit".to_string(),
+            value: format!("{} SOL / {} slots", format_sol_amount(borrow_bucket_capacity), borrow_refill_period_slots),
+        });
+    }
 
-    token::mint_to(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            MintTo {
-                mint: ctx.accounts.new_key_mint.to_account_info(),
-                to: ctx.accounts.target_nft_ata.to_account_info(),
-                authority: ctx.accounts.program_pda.to_account_info(),
+    // Create the new key NFT via MPL-Core
+    CreateV2CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
+        .asset(&ctx.accounts.new_key_asset.to_account_info())
+        .payer(&ctx.accounts.admin.to_account_info())
+        .owner(Some(&ctx.accounts.target_wallet.to_account_info()))
+        .update_authority(Some(&ctx.accounts.program_pda.to_account_info()))
+        .system_program(&ctx.accounts.system_program.to_account_info())
+        .name("H\u{00e4}rdig Key".to_string())
+        .uri(String::new())
+        .plugins(vec![
+            PluginAuthorityPair {
+                plugin: Plugin::Attributes(Attributes {
+                    attribute_list: attrs,
+                }),
+                authority: Some(PluginAuthority::UpdateAuthority),
             },
-            signer_seeds,
-        ),
-        1,
-    )?;
-
-    // Create Metaplex metadata
-    create_metadata_accounts_v3(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_metadata_program.to_account_info(),
-            CreateMetadataAccountsV3 {
-                metadata: ctx.accounts.metadata.to_account_info(),
-                mint: ctx.accounts.new_key_mint.to_account_info(),
-                mint_authority: ctx.accounts.program_pda.to_account_info(),
-                payer: ctx.accounts.admin.to_account_info(),
-                update_authority: ctx.accounts.program_pda.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
-                rent: ctx.accounts.rent.to_account_info(),
+            PluginAuthorityPair {
+                plugin: Plugin::PermanentBurnDelegate(PermanentBurnDelegate {}),
+                authority: Some(PluginAuthority::UpdateAuthority),
             },
-            signer_seeds,
-        ),
-        DataV2 {
-            name: "H\u{00e4}rdig Key".to_string(),
-            symbol: "HKEY".to_string(),
-            uri: "https://gateway.irys.xyz/8o9S13VAezVYyU7TCzYxLkt9Uw25Z1bNb1jLTcdM2NBA".to_string(),
-            seller_fee_basis_points: 0,
-            creators: None,
-            collection: None,
-            uses: None,
-        },
-        true, // is_mutable
-        true, // update_authority_is_signer
-        None, // collection_details
-    )?;
-
-    // Create Master Edition (max_supply=0 freezes supply, replaces set_authority(None))
-    create_master_edition_v3(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_metadata_program.to_account_info(),
-            CreateMasterEditionV3 {
-                edition: ctx.accounts.master_edition.to_account_info(),
-                mint: ctx.accounts.new_key_mint.to_account_info(),
-                update_authority: ctx.accounts.program_pda.to_account_info(),
-                mint_authority: ctx.accounts.program_pda.to_account_info(),
-                payer: ctx.accounts.admin.to_account_info(),
-                metadata: ctx.accounts.metadata.to_account_info(),
-                token_program: ctx.accounts.token_program.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
-                rent: ctx.accounts.rent.to_account_info(),
+            PluginAuthorityPair {
+                plugin: Plugin::PermanentTransferDelegate(PermanentTransferDelegate {}),
+                authority: Some(PluginAuthority::UpdateAuthority),
             },
-            signer_seeds,
-        ),
-        Some(0),
-    )?;
+        ])
+        .invoke()?;
 
     let current_slot = Clock::get()?.slot;
 
-    // Create the KeyAuthorization
-    let key_auth = &mut ctx.accounts.new_key_auth;
-    key_auth.position = ctx.accounts.position.key();
-    key_auth.key_nft_mint = ctx.accounts.new_key_mint.key();
-    key_auth.permissions = permissions;
-    key_auth.bump = ctx.bumps.new_key_auth;
+    // Initialize the KeyState
+    let key_state = &mut ctx.accounts.key_state;
+    key_state.asset = ctx.accounts.new_key_asset.key();
+    key_state.bump = ctx.bumps.key_state;
 
-    // Initialize rate-limit buckets
     if permissions & PERM_LIMITED_SELL != 0 {
-        key_auth.sell_bucket = RateBucket {
+        key_state.sell_bucket = RateBucket {
             capacity: sell_bucket_capacity,
             refill_period: sell_refill_period_slots,
             level: sell_bucket_capacity, // starts full
@@ -224,7 +164,7 @@ pub fn handler(
         };
     }
     if permissions & PERM_LIMITED_BORROW != 0 {
-        key_auth.borrow_bucket = RateBucket {
+        key_state.borrow_bucket = RateBucket {
             capacity: borrow_bucket_capacity,
             refill_period: borrow_refill_period_slots,
             level: borrow_bucket_capacity, // starts full

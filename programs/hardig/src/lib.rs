@@ -45,7 +45,7 @@ pub mod hardig {
         )
     }
 
-    /// Revoke a key by closing its KeyAuthorization (admin only).
+    /// Revoke a key by burning its MPL-Core asset (admin only).
     pub fn revoke_key(ctx: Context<RevokeKey>) -> Result<()> {
         instructions::revoke_key::handler(ctx)
     }

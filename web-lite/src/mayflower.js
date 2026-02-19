@@ -75,7 +75,7 @@ export async function refreshMayflowerState(connection) {
   const marketMeta = mc ? mc.marketMeta : undefined;
   const mfMarket = mc ? mc.mayflowerMarket : DEFAULT_MAYFLOWER_MARKET;
 
-  const [programPda] = deriveProgramPda(position.value.adminNftMint);
+  const [programPda] = deriveProgramPda(position.value.adminAsset);
   const [ppPda] = derivePersonalPosition(programPda, marketMeta);
   const wsolAta = getAta(programPda, baseMint);
   const navAta = getAta(programPda, navMint);

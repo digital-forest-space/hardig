@@ -115,8 +115,8 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  Position: ", Style::default().fg(Color::Gray)),
             Span::raw(position_pda),
             Span::raw("    "),
-            Span::styled("Admin Mint: ", Style::default().fg(Color::Gray)),
-            Span::raw(app::short_pubkey(&pos.admin_nft_mint)),
+            Span::styled("Admin Asset: ", Style::default().fg(Color::Gray)),
+            Span::raw(app::short_pubkey(&pos.admin_asset)),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -206,7 +206,7 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let header = Row::new(vec!["", "Role", "Mint", "Held"])
+    let header = Row::new(vec!["", "Role", "Asset", "Held"])
         .style(Style::default().add_modifier(Modifier::BOLD))
         .bottom_margin(0);
 
@@ -225,7 +225,7 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
             Row::new(vec![
                 marker.to_string(),
                 app::permissions_name(k.permissions).to_string(),
-                app::short_pubkey(&k.mint),
+                app::short_pubkey(&k.asset),
                 held.to_string(),
             ])
             .style(style)

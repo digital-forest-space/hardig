@@ -1,10 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
-use anchor_spl::token::TokenAccount;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_MANAGE_KEYS};
+use crate::state::{MarketConfig, PositionNFT, PERM_MANAGE_KEYS};
 
 use super::validate_key::validate_key;
 
@@ -13,14 +12,9 @@ pub struct InitMayflowerPosition<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    /// The admin's key NFT token account.
-    pub admin_nft_ata: Account<'info, TokenAccount>,
-
-    /// The admin's KeyAuthorization.
-    #[account(
-        constraint = admin_key_auth.position == position.key() @ HardigError::WrongPosition,
-    )]
-    pub admin_key_auth: Account<'info, KeyAuthorization>,
+    /// The admin's key NFT (MPL-Core asset).
+    /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
+    pub admin_key_asset: UncheckedAccount<'info>,
 
     /// The position (mutated to store Mayflower PersonalPosition PDA and MarketConfig).
     #[account(mut)]
@@ -32,7 +26,7 @@ pub struct InitMayflowerPosition<'info> {
     /// Program PDA that will own the Mayflower PersonalPosition.
     /// CHECK: PDA derived from this program.
     #[account(
-        seeds = [b"authority", position.admin_nft_mint.as_ref()],
+        seeds = [b"authority", position.admin_asset.as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
@@ -72,9 +66,8 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
     // Validate admin holds admin key
     validate_key(
         &ctx.accounts.admin,
-        &ctx.accounts.admin_nft_ata,
-        &ctx.accounts.admin_key_auth,
-        &ctx.accounts.position.key(),
+        &ctx.accounts.admin_key_asset.to_account_info(),
+        &ctx.accounts.program_pda.key(),
         PERM_MANAGE_KEYS,
     )?;
 
@@ -131,8 +124,8 @@ pub fn handler(ctx: Context<InitMayflowerPosition>) -> Result<()> {
     );
 
     let bump = ctx.bumps.program_pda;
-    let mint_key = ctx.accounts.position.admin_nft_mint;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
+    let admin_asset_key = ctx.accounts.position.admin_asset;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", admin_asset_key.as_ref(), &[bump]]];
 
     invoke_signed(
         &ix,

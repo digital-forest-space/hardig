@@ -2,14 +2,13 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::associated_token::get_associated_token_address;
-use anchor_spl::token::{Token, TokenAccount};
+use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyAuthorization, MarketConfig, PositionNFT, PERM_BORROW, PERM_LIMITED_BORROW};
+use crate::state::{KeyState, MarketConfig, PositionNFT, PERM_BORROW, PERM_LIMITED_BORROW};
 
 use super::consume_rate_limit::consume_rate_limit;
-
 use super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -17,15 +16,13 @@ pub struct Borrow<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    /// The admin's key NFT token account.
-    pub key_nft_ata: Account<'info, TokenAccount>,
+    /// The signer's key NFT (MPL-Core asset).
+    /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
+    pub key_asset: UncheckedAccount<'info>,
 
-    /// The admin's KeyAuthorization (mut for rate-limit bucket updates).
-    #[account(
-        mut,
-        constraint = key_auth.position == position.key() @ HardigError::WrongPosition,
-    )]
-    pub key_auth: Account<'info, KeyAuthorization>,
+    /// Optional KeyState for rate-limited keys (validated in handler).
+    #[account(mut)]
+    pub key_state: Option<Account<'info, KeyState>>,
 
     /// The position to borrow against.
     #[account(mut)]
@@ -43,7 +40,7 @@ pub struct Borrow<'info> {
 
     /// Mutable because Mayflower CPI marks user_wallet as writable.
     /// CHECK: PDA derived from this program.
-    #[account(mut, seeds = [b"authority", position.admin_nft_mint.as_ref()], bump)]
+    #[account(mut, seeds = [b"authority", position.admin_asset.as_ref()], bump)]
     pub program_pda: UncheckedAccount<'info>,
 
     /// CHECK: Validated in handler via seed derivation.
@@ -102,20 +99,24 @@ pub struct Borrow<'info> {
 }
 
 pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
-    validate_key(
+    let permissions = validate_key(
         &ctx.accounts.admin,
-        &ctx.accounts.key_nft_ata,
-        &ctx.accounts.key_auth,
-        &ctx.accounts.position.key(),
+        &ctx.accounts.key_asset.to_account_info(),
+        &ctx.accounts.program_pda.key(),
         PERM_BORROW | PERM_LIMITED_BORROW,
     )?;
 
+    // Validate KeyState matches key_asset if provided
+    if let Some(ref ks) = ctx.accounts.key_state {
+        require!(ks.asset == ctx.accounts.key_asset.key(), HardigError::InvalidKey);
+    }
+
     // Enforce rate limit for PERM_LIMITED_BORROW (skipped if unlimited PERM_BORROW is set)
-    if ctx.accounts.key_auth.permissions & PERM_BORROW == 0
-        && ctx.accounts.key_auth.permissions & PERM_LIMITED_BORROW != 0
-    {
+    if permissions & PERM_BORROW == 0 && permissions & PERM_LIMITED_BORROW != 0 {
+        let key_state = ctx.accounts.key_state.as_deref_mut()
+            .ok_or(error!(HardigError::RateLimitExceeded))?;
         consume_rate_limit(
-            &mut ctx.accounts.key_auth.borrow_bucket,
+            &mut key_state.borrow_bucket,
             amount,
             Clock::get()?.slot,
         )?;
@@ -138,7 +139,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
         HardigError::InvalidMayflowerAccount
     );
 
-    if ctx.accounts.key_auth.key_nft_mint == ctx.accounts.position.admin_nft_mint {
+    if ctx.accounts.key_asset.key() == ctx.accounts.position.admin_asset {
         ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
     }
 
@@ -163,8 +164,8 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     );
 
     let bump = ctx.bumps.program_pda;
-    let mint_key = ctx.accounts.position.admin_nft_mint;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", mint_key.as_ref(), &[bump]]];
+    let admin_asset_key = ctx.accounts.position.admin_asset;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"authority", admin_asset_key.as_ref(), &[bump]]];
 
     invoke_signed(
         &ix,

@@ -61,7 +61,7 @@ export async function buildSetup(program, wallet) {
     const mc = marketConfig.value;
     const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
     const navMint = mc ? mc.navMint : DEFAULT_NAV_SOL_MINT;
-    const [programPda] = deriveProgramPda(position.value.adminNftMint);
+    const [programPda] = deriveProgramPda(position.value.adminAsset);
     const wsolAta = getAta(programPda, baseMint);
     const navAta = getAta(programPda, navMint);
 

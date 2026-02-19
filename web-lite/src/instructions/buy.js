@@ -13,20 +13,18 @@ import {
   DEFAULT_WSOL_MINT,
   DEFAULT_NAV_SOL_MINT,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, myPermissions, position, marketConfigPda, marketConfig } from '../state.js';
+import { myKeyAsset, positionPda, myPermissions, position, marketConfigPda, marketConfig } from '../state.js';
 import { shortPubkey, lamportsToSol, permissionsName } from '../utils.js';
 
 export async function buildBuy(program, wallet, amountLamports) {
-  const nftMint = myNftMint.value;
-  const keyAuth = myKeyAuthPda.value;
+  const keyAsset = myKeyAsset.value;
   const posPda = positionPda.value;
-  const nftAta = getAta(wallet, nftMint);
   const mc = marketConfig.value;
   const mcPda = marketConfigPda.value;
   const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
   const navMint = mc ? mc.navMint : DEFAULT_NAV_SOL_MINT;
   const marketMeta = mc ? mc.marketMeta : undefined;
-  const [programPda] = deriveProgramPda(position.value.adminNftMint);
+  const [programPda] = deriveProgramPda(position.value.adminAsset);
   const [ppPda] = derivePersonalPosition(programPda, marketMeta);
   const [escrowPda] = derivePersonalPositionEscrow(ppPda);
   const [logPda] = deriveLogAccount();
@@ -45,8 +43,7 @@ export async function buildBuy(program, wallet, amountLamports) {
     .buy(new BN(amountLamports), new BN(0)) // min_out = 0 (no slippage protection)
     .accounts({
       signer: wallet,
-      keyNftAta: nftAta,
-      keyAuth: keyAuth,
+      keyAsset: keyAsset,
       position: posPda,
       marketConfig: mcPda,
       programPda: programPda,

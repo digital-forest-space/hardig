@@ -3,34 +3,36 @@ import {
   deriveProgramPda,
   derivePersonalPosition,
   deriveLogAccount,
+  deriveKeyStatePda,
   getAta,
   MAYFLOWER_TENANT,
   MAYFLOWER_PROGRAM_ID,
   DEFAULT_WSOL_MINT,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
+import { myKeyAsset, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
 import { shortPubkey, lamportsToSol } from '../utils.js';
 
 export async function buildBorrow(program, wallet, amountLamports) {
-  const nftMint = myNftMint.value;
-  const keyAuth = myKeyAuthPda.value;
+  const keyAsset = myKeyAsset.value;
   const posPda = positionPda.value;
-  const nftAta = getAta(wallet, nftMint);
   const mc = marketConfig.value;
   const mcPda = marketConfigPda.value;
   const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
   const marketMeta = mc ? mc.marketMeta : undefined;
-  const [programPda] = deriveProgramPda(position.value.adminNftMint);
+  const [programPda] = deriveProgramPda(position.value.adminAsset);
   const [ppPda] = derivePersonalPosition(programPda, marketMeta);
   const [logPda] = deriveLogAccount();
   const wsolAta = getAta(programPda, baseMint);
+
+  // Include keyState if the key might be rate-limited
+  const [keyStatePda] = deriveKeyStatePda(keyAsset);
 
   const ix = await program.methods
     .borrow(new BN(amountLamports))
     .accounts({
       admin: wallet,
-      keyNftAta: nftAta,
-      keyAuth: keyAuth,
+      keyAsset: keyAsset,
+      keyState: keyStatePda,
       position: posPda,
       marketConfig: mcPda,
       programPda: programPda,

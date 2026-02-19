@@ -29,15 +29,9 @@
           "signer": true
         },
         {
-          "name": "admin_nft_ata",
+          "name": "admin_key_asset",
           "docs": [
-            "The admin's key NFT token account (proves admin holds the key)."
-          ]
-        },
-        {
-          "name": "admin_key_auth",
-          "docs": [
-            "The admin's KeyAuthorization."
+            "The admin's key NFT (MPL-Core asset)."
           ]
         },
         {
@@ -47,105 +41,12 @@
           ]
         },
         {
-          "name": "new_key_mint",
+          "name": "new_key_asset",
           "docs": [
-            "The mint for the new key NFT. Created fresh by the client, passed in as a signer."
+            "The MPL-Core asset for the new key NFT. Created by MPL-Core CPI."
           ],
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "target_nft_ata",
-          "docs": [
-            "The target wallet's ATA for the new key NFT."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "target_wallet"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "new_key_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
         },
         {
           "name": "target_wallet",
@@ -154,9 +55,9 @@
           ]
         },
         {
-          "name": "new_key_auth",
+          "name": "key_state",
           "docs": [
-            "The KeyAuthorization for the new key."
+            "KeyState PDA for the new key (tracks mutable state like rate-limit buckets)."
           ],
           "writable": true,
           "pda": {
@@ -168,19 +69,16 @@
                   101,
                   121,
                   95,
-                  97,
-                  117,
+                  115,
                   116,
-                  104
+                  97,
+                  116,
+                  101
                 ]
               },
               {
                 "kind": "account",
-                "path": "position"
-              },
-              {
-                "kind": "account",
-                "path": "new_key_mint"
+                "path": "new_key_asset"
               }
             ]
           }
@@ -188,7 +86,7 @@
         {
           "name": "program_pda",
           "docs": [
-            "Per-position authority PDA used as mint authority."
+            "Per-position authority PDA."
           ],
           "pda": {
             "seeds": [
@@ -208,45 +106,22 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
           }
         },
         {
-          "name": "metadata",
+          "name": "mpl_core_program",
           "docs": [
-            "Metaplex Token Metadata PDA for the new key NFT."
+            "MPL-Core program."
           ],
-          "writable": true
-        },
-        {
-          "name": "master_edition",
-          "docs": [
-            "Master Edition PDA for the new key NFT."
-          ],
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "associated_token_program",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
-          "name": "token_metadata_program",
-          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
         },
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -294,17 +169,18 @@
           "signer": true
         },
         {
-          "name": "key_nft_ata",
+          "name": "key_asset",
           "docs": [
-            "The admin's key NFT token account."
+            "The signer's key NFT (MPL-Core asset)."
           ]
         },
         {
-          "name": "key_auth",
+          "name": "key_state",
           "docs": [
-            "The admin's KeyAuthorization (mut for rate-limit bucket updates)."
+            "Optional KeyState for rate-limited keys."
           ],
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "position",
@@ -347,7 +223,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
@@ -434,15 +310,9 @@
           "signer": true
         },
         {
-          "name": "key_nft_ata",
+          "name": "key_asset",
           "docs": [
-            "The signer's key NFT token account."
-          ]
-        },
-        {
-          "name": "key_auth",
-          "docs": [
-            "The signer's KeyAuthorization."
+            "The signer's key NFT (MPL-Core asset)."
           ]
         },
         {
@@ -487,7 +357,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
@@ -743,105 +613,12 @@
           "signer": true
         },
         {
-          "name": "admin_nft_mint",
+          "name": "admin_asset",
           "docs": [
-            "The mint for the admin key NFT. Created fresh by the client, passed in as a signer."
+            "The MPL-Core asset for the admin key NFT. Created by MPL-Core CPI."
           ],
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "admin_nft_ata",
-          "docs": [
-            "The admin's ATA for the admin key NFT."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "admin"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "admin_nft_mint"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
         },
         {
           "name": "position",
@@ -866,39 +643,7 @@
               },
               {
                 "kind": "account",
-                "path": "admin_nft_mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "admin_key_auth",
-          "docs": [
-            "The KeyAuthorization for the admin key."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  107,
-                  101,
-                  121,
-                  95,
-                  97,
-                  117,
-                  116,
-                  104
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "position"
-              },
-              {
-                "kind": "account",
-                "path": "admin_nft_mint"
+                "path": "admin_asset"
               }
             ]
           }
@@ -906,7 +651,7 @@
         {
           "name": "program_pda",
           "docs": [
-            "Per-position authority PDA used as mint authority."
+            "Per-position authority PDA. Set as update_authority on the key NFT."
           ],
           "pda": {
             "seeds": [
@@ -926,44 +671,21 @@
               },
               {
                 "kind": "account",
-                "path": "admin_nft_mint"
+                "path": "admin_asset"
               }
             ]
           }
         },
         {
-          "name": "metadata",
+          "name": "mpl_core_program",
           "docs": [
-            "Metaplex Token Metadata PDA for the admin NFT."
+            "MPL-Core program."
           ],
-          "writable": true
-        },
-        {
-          "name": "master_edition",
-          "docs": [
-            "Master Edition PDA for the admin NFT."
-          ],
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "associated_token_program",
-          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
-        },
-        {
-          "name": "token_metadata_program",
-          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
         },
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
       "args": [
@@ -996,15 +718,9 @@
           "signer": true
         },
         {
-          "name": "admin_nft_ata",
+          "name": "admin_key_asset",
           "docs": [
-            "The admin's key NFT token account."
-          ]
-        },
-        {
-          "name": "admin_key_auth",
-          "docs": [
-            "The admin's KeyAuthorization."
+            "The admin's key NFT (MPL-Core asset)."
           ]
         },
         {
@@ -1043,7 +759,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
@@ -1169,15 +885,9 @@
           "signer": true
         },
         {
-          "name": "key_nft_ata",
+          "name": "key_asset",
           "docs": [
-            "The signer's key NFT token account."
-          ]
-        },
-        {
-          "name": "key_auth",
-          "docs": [
-            "The signer's KeyAuthorization."
+            "The signer's key NFT (MPL-Core asset)."
           ]
         },
         {
@@ -1221,7 +931,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
@@ -1327,15 +1037,9 @@
           "signer": true
         },
         {
-          "name": "key_nft_ata",
+          "name": "key_asset",
           "docs": [
-            "The signer's key NFT token account."
-          ]
-        },
-        {
-          "name": "key_auth",
-          "docs": [
-            "The signer's KeyAuthorization."
+            "The signer's key NFT (MPL-Core asset)."
           ]
         },
         {
@@ -1379,7 +1083,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
@@ -1432,7 +1136,7 @@
     {
       "name": "revoke_key",
       "docs": [
-        "Revoke a key by closing its KeyAuthorization (admin only)."
+        "Revoke a key by burning the asset and closing its KeyState (admin only)."
       ],
       "discriminator": [
         162,
@@ -1451,15 +1155,9 @@
           "signer": true
         },
         {
-          "name": "admin_nft_ata",
+          "name": "admin_key_asset",
           "docs": [
-            "The admin's key NFT token account."
-          ]
-        },
-        {
-          "name": "admin_key_auth",
-          "docs": [
-            "The admin's KeyAuthorization."
+            "The admin's key NFT (MPL-Core asset)."
           ]
         },
         {
@@ -1469,52 +1167,54 @@
           ]
         },
         {
-          "name": "target_key_auth",
+          "name": "target_asset",
           "docs": [
-            "The KeyAuthorization to revoke. Closed, rent refunded to admin."
+            "The target key asset to revoke and burn."
           ],
           "writable": true
         },
         {
-          "name": "target_nft_mint",
+          "name": "target_key_state",
           "docs": [
-            "The mint of the key NFT being revoked."
+            "The target key's KeyState PDA. Closed, rent refunded to admin."
           ],
           "writable": true
         },
         {
-          "name": "target_nft_ata",
+          "name": "program_pda",
           "docs": [
-            "The ATA holding the key NFT. Optional — only needed when the admin holds",
-            "the target NFT and wants it burned during revoke."
+            "Per-position authority PDA (signs burn as PermanentBurnDelegate)."
           ],
-          "writable": true,
-          "optional": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position.admin_asset",
+                "account": "PositionNFT"
+              }
+            ]
+          }
         },
         {
-          "name": "metadata",
+          "name": "mpl_core_program",
           "docs": [
-            "Metaplex Metadata PDA for the target NFT. Optional — required for burn."
+            "MPL-Core program."
           ],
-          "writable": true,
-          "optional": true
-        },
-        {
-          "name": "master_edition",
-          "docs": [
-            "Master Edition PDA for the target NFT. Optional — required for burn."
-          ],
-          "writable": true,
-          "optional": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "token_metadata_program",
-          "optional": true,
-          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
         },
         {
           "name": "system_program",
@@ -1593,17 +1293,18 @@
           "signer": true
         },
         {
-          "name": "key_nft_ata",
+          "name": "key_asset",
           "docs": [
-            "The admin's key NFT token account."
+            "The signer's key NFT (MPL-Core asset)."
           ]
         },
         {
-          "name": "key_auth",
+          "name": "key_state",
           "docs": [
-            "The admin's KeyAuthorization (mut for rate-limit bucket updates)."
+            "Optional KeyState for rate-limited keys."
           ],
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "position",
@@ -1646,7 +1347,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_nft_mint",
+                "path": "position.admin_asset",
                 "account": "PositionNFT"
               }
             ]
@@ -1726,16 +1427,16 @@
   ],
   "accounts": [
     {
-      "name": "KeyAuthorization",
+      "name": "KeyState",
       "discriminator": [
-        224,
-        196,
-        58,
-        181,
-        100,
-        86,
-        61,
-        163
+        114,
+        54,
+        13,
+        140,
+        51,
+        154,
+        241,
+        150
       ]
     },
     {
@@ -1802,12 +1503,12 @@
     {
       "code": 6004,
       "name": "InvalidKey",
-      "msg": "Key NFT mint does not match KeyAuthorization"
+      "msg": "Key NFT is not a valid MPL-Core asset or does not match KeyState"
     },
     {
       "code": 6005,
       "name": "WrongPosition",
-      "msg": "KeyAuthorization is for a different position"
+      "msg": "Key asset update_authority does not match position authority PDA"
     },
     {
       "code": 6006,
@@ -1882,34 +1583,20 @@
   ],
   "types": [
     {
-      "name": "KeyAuthorization",
+      "name": "KeyState",
       "docs": [
-        "Links a key NFT to a position with a permission bitmask.",
-        "PDA seeds = [b\"key_auth\", position, key_nft_mint]."
+        "Mutable state for a key NFT. Created for all delegated keys (via authorize_key).",
+        "PDA seeds = [b\"key_state\", asset]."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "position",
+            "name": "asset",
             "docs": [
-              "The position this key unlocks."
+              "The MPL-Core asset this state belongs to."
             ],
             "type": "pubkey"
-          },
-          {
-            "name": "key_nft_mint",
-            "docs": [
-              "The NFT mint that serves as the key."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "permissions",
-            "docs": [
-              "Permission bitmask (see PERM_* constants)."
-            ],
-            "type": "u8"
           },
           {
             "name": "bump",
@@ -2022,15 +1709,15 @@
       "name": "PositionNFT",
       "docs": [
         "A navSOL position controlled by an NFT keyring.",
-        "PDA seeds = [b\"position\", admin_nft_mint]."
+        "PDA seeds = [b\"position\", admin_asset]."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "admin_nft_mint",
+            "name": "admin_asset",
             "docs": [
-              "The admin key NFT mint (master key, only one per position)."
+              "The admin key NFT (MPL-Core asset pubkey, master key, only one per position)."
             ],
             "type": "pubkey"
           },
@@ -2087,7 +1774,7 @@
           {
             "name": "authority_bump",
             "docs": [
-              "Bump seed for the per-position authority PDA (seeds = [b\"authority\", admin_nft_mint])."
+              "Bump seed for the per-position authority PDA (seeds = [b\"authority\", admin_asset])."
             ],
             "type": "u8"
           }
@@ -2122,7 +1809,7 @@
     {
       "name": "RateBucket",
       "docs": [
-        "Token-bucket rate limiter. Embedded in KeyAuthorization, not a standalone account."
+        "Token-bucket rate limiter. Embedded in KeyState."
       ],
       "type": {
         "kind": "struct",

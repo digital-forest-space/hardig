@@ -192,7 +192,7 @@ struct PositionStatus {
 #[derive(Serialize)]
 struct PositionInfo {
     pda: String,
-    admin_mint: String,
+    admin_asset: String,
     role: String,
     deposited_nav: String,
     debt: String,
@@ -210,7 +210,7 @@ struct MayflowerInfo {
 #[derive(Serialize)]
 struct KeyInfo {
     pda: String,
-    mint: String,
+    asset: String,
     role: String,
     held_by_signer: bool,
 }
@@ -656,7 +656,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
                 .position_pda
                 .map(|p| p.to_string())
                 .unwrap_or_default(),
-            admin_mint: pos.admin_nft_mint.to_string(),
+            admin_asset: pos.admin_asset.to_string(),
             role: app.my_permissions.map(permissions_name).unwrap_or("None").to_string(),
             deposited_nav: lamports_to_sol(pos.deposited_nav),
             debt: lamports_to_sol(pos.user_debt),
@@ -680,7 +680,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
         .iter()
         .map(|k| KeyInfo {
             pda: k.pda.to_string(),
-            mint: k.mint.to_string(),
+            asset: k.asset.to_string(),
             role: permissions_name(k.permissions).to_string(),
             held_by_signer: k.held_by_signer,
         })

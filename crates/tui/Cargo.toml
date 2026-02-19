@@ -16,6 +16,7 @@ solana-client = "2.3"
 solana-account-decoder = "2.3"
 spl-token = "8"
 spl-associated-token-account = "6"
+mpl-core = "0.11"
 anchor-lang = "0.32.1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

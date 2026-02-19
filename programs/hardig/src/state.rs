@@ -15,11 +15,11 @@ impl ProtocolConfig {
 }
 
 /// A navSOL position controlled by an NFT keyring.
-/// PDA seeds = [b"position", admin_nft_mint].
+/// PDA seeds = [b"position", admin_asset].
 #[account]
 pub struct PositionNFT {
-    /// The admin key NFT mint (master key, only one per position).
-    pub admin_nft_mint: Pubkey,
+    /// The admin key NFT (MPL-Core asset pubkey, master key, only one per position).
+    pub admin_asset: Pubkey,
     /// The Mayflower PersonalPosition PDA owned by this program.
     pub position_pda: Pubkey,
     /// The MarketConfig PDA this position is bound to (set during init_mayflower_position).
@@ -35,13 +35,13 @@ pub struct PositionNFT {
     pub last_admin_activity: i64,
     /// Bump seed for the position PDA.
     pub bump: u8,
-    /// Bump seed for the per-position authority PDA (seeds = [b"authority", admin_nft_mint]).
+    /// Bump seed for the per-position authority PDA (seeds = [b"authority", admin_asset]).
     pub authority_bump: u8,
 }
 
 impl PositionNFT {
     pub const SEED: &'static [u8] = b"position";
-    // discriminator(8) + admin_nft_mint(32) + position_pda(32) + market_config(32)
+    // discriminator(8) + admin_asset(32) + position_pda(32) + market_config(32)
     // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
     // + last_admin_activity(8) + bump(1) + authority_bump(1)
     pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1;
@@ -89,9 +89,9 @@ pub const PERM_REPAY: u8 = 0x08;
 pub const PERM_REINVEST: u8 = 0x10;
 pub const PERM_MANAGE_KEYS: u8 = 0x20;
 
-/// Rate-limited sell permission (bit 6). Enforced by token-bucket in KeyAuthorization.
+/// Rate-limited sell permission (bit 6). Enforced by token-bucket in KeyState.
 pub const PERM_LIMITED_SELL: u8 = 0x40;
-/// Rate-limited borrow permission (bit 7). Enforced by token-bucket in KeyAuthorization.
+/// Rate-limited borrow permission (bit 7). Enforced by token-bucket in KeyState.
 pub const PERM_LIMITED_BORROW: u8 = 0x80;
 /// Mask for rate-limited permission bits.
 pub const PERM_LIMITED_MASK: u8 = 0xC0;
@@ -105,7 +105,7 @@ pub const PRESET_OPERATOR: u8 = 0x19; // buy + repay + reinvest
 pub const PRESET_DEPOSITOR: u8 = 0x09; // buy + repay
 pub const PRESET_KEEPER: u8 = 0x10; // reinvest only
 
-/// Token-bucket rate limiter. Embedded in KeyAuthorization, not a standalone account.
+/// Token-bucket rate limiter. Embedded in KeyState.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
 pub struct RateBucket {
     /// Maximum tokens (shares for sell, lamports for borrow).
@@ -118,16 +118,12 @@ pub struct RateBucket {
     pub last_update: u64,
 }
 
-/// Links a key NFT to a position with a permission bitmask.
-/// PDA seeds = [b"key_auth", position, key_nft_mint].
+/// Mutable state for a key NFT. Created for all delegated keys (via authorize_key).
+/// PDA seeds = [b"key_state", asset].
 #[account]
-pub struct KeyAuthorization {
-    /// The position this key unlocks.
-    pub position: Pubkey,
-    /// The NFT mint that serves as the key.
-    pub key_nft_mint: Pubkey,
-    /// Permission bitmask (see PERM_* constants).
-    pub permissions: u8,
+pub struct KeyState {
+    /// The MPL-Core asset this state belongs to.
+    pub asset: Pubkey,
     /// Bump seed for this PDA.
     pub bump: u8,
     /// Rate-limit bucket for PERM_LIMITED_SELL.
@@ -136,9 +132,8 @@ pub struct KeyAuthorization {
     pub borrow_bucket: RateBucket,
 }
 
-impl KeyAuthorization {
-    pub const SEED: &'static [u8] = b"key_auth";
-    // discriminator(8) + position(32) + key_nft_mint(32) + permissions(1) + bump(1)
-    // + sell_bucket(32) + borrow_bucket(32)
-    pub const SIZE: usize = 8 + 32 + 32 + 1 + 1 + 32 + 32;
+impl KeyState {
+    pub const SEED: &'static [u8] = b"key_state";
+    // discriminator(8) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32)
+    pub const SIZE: usize = 8 + 32 + 1 + 32 + 32;
 }

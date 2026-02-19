@@ -16,7 +16,7 @@ use solana_sdk::{
 };
 
 use hardig::state::{
-    KeyAuthorization, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_BUY,
+    KeyState, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_BUY,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
     PERM_SELL, PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
 };
@@ -37,9 +37,8 @@ const SPL_TOKEN_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuB
 const ATA_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
-const METADATA_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-const RENT_SYSVAR: Pubkey = solana_sdk::pubkey!("SysvarRent111111111111111111111111111111111");
+const MPL_CORE_PROGRAM_ID: Pubkey =
+    solana_sdk::pubkey!("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 
 fn get_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
@@ -63,22 +62,6 @@ fn create_ata_idempotent_ix(payer: &Pubkey, wallet: &Pubkey, mint: &Pubkey) -> I
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),
         ],
     )
-}
-
-fn metadata_pda(mint: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref()],
-        &METADATA_PROGRAM_ID,
-    )
-    .0
-}
-
-fn master_edition_pda(mint: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"metadata", METADATA_PROGRAM_ID.as_ref(), mint.as_ref(), b"edition"],
-        &METADATA_PROGRAM_ID,
-    )
-    .0
 }
 
 /// Anchor instruction discriminator: first 8 bytes of SHA-256("global:<name>")
@@ -111,7 +94,7 @@ pub enum FormKind {
 
 pub struct KeyEntry {
     pub pda: Pubkey,
-    pub mint: Pubkey,
+    pub asset: Pubkey,
     pub permissions: u8,
     pub held_by_signer: bool,
 }
@@ -150,8 +133,8 @@ pub struct App {
     pub position_pda: Option<Pubkey>,
     pub position: Option<PositionNFT>,
     pub my_permissions: Option<u8>,
-    pub my_key_auth_pda: Option<Pubkey>,
-    pub my_nft_mint: Option<Pubkey>,
+    pub my_key_state_pda: Option<Pubkey>,
+    pub my_asset: Option<Pubkey>,
     pub keyring: Vec<KeyEntry>,
 
     // Market config (loaded from position's market_config PDA)
@@ -218,8 +201,8 @@ impl App {
             position_pda: None,
             position: None,
             my_permissions: None,
-            my_key_auth_pda: None,
-            my_nft_mint: None,
+            my_key_state_pda: None,
+            my_asset: None,
             keyring: Vec::new(),
             market_config_pda: None,
             market_config: None,
@@ -526,12 +509,12 @@ impl App {
 
     fn enter_revoke_key(&mut self) {
         self.form_info = None;
-        let admin_mint = self.position.as_ref().map(|p| p.admin_nft_mint);
+        let admin_asset_key = self.position.as_ref().map(|p| p.admin_asset);
         let revocable: Vec<(usize, &KeyEntry)> = self
             .keyring
             .iter()
             .enumerate()
-            .filter(|(_, k)| Some(k.mint) != admin_mint)
+            .filter(|(_, k)| Some(k.asset) != admin_asset_key)
             .collect();
         if revocable.is_empty() {
             self.push_log("No non-admin keys to revoke.");
@@ -544,7 +527,7 @@ impl App {
             desc.push_str(&format!(
                 "{}: {} ({})\n",
                 idx,
-                short_pubkey(&k.mint),
+                short_pubkey(&k.asset),
                 permissions_name(k.permissions)
             ));
         }
@@ -642,48 +625,34 @@ impl App {
     }
 
     pub fn build_create_position(&mut self) {
-        let mint_kp = Keypair::new();
-        let mint = mint_kp.pubkey();
+        let asset_kp = Keypair::new();
+        let asset = asset_kp.pubkey();
         let admin = self.keypair.pubkey();
-        let admin_ata = get_ata(&admin, &mint);
         let (position_pda, _) =
-            Pubkey::find_program_address(&[PositionNFT::SEED, mint.as_ref()], &hardig::ID);
-        let (key_auth_pda, _) = Pubkey::find_program_address(
-            &[KeyAuthorization::SEED, position_pda.as_ref(), mint.as_ref()],
-            &hardig::ID,
-        );
+            Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &hardig::ID);
         let (prog_pda, _) =
-            Pubkey::find_program_address(&[b"authority", mint.as_ref()], &hardig::ID);
-        let metadata = metadata_pda(&mint);
-        let master_edition = master_edition_pda(&mint);
+            Pubkey::find_program_address(&[b"authority", asset.as_ref()], &hardig::ID);
 
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
 
         let accounts = vec![
             AccountMeta::new(admin, true),
-            AccountMeta::new(mint, true),
-            AccountMeta::new(admin_ata, false),
+            AccountMeta::new(asset, true),
             AccountMeta::new(position_pda, false),
-            AccountMeta::new(key_auth_pda, false),
             AccountMeta::new_readonly(prog_pda, false),
-            AccountMeta::new(metadata, false),
-            AccountMeta::new(master_edition, false),
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
-            AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(METADATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-            AccountMeta::new_readonly(RENT_SYSVAR, false),
         ];
 
         self.goto_confirm(PendingAction {
             description: vec![
                 "Create Position".into(),
-                format!("Admin NFT Mint: {}", mint),
+                format!("Admin Asset: {}", asset),
                 format!("Position PDA: {}", position_pda),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
-            extra_signers: vec![mint_kp],
+            extra_signers: vec![asset_kp],
         });
     }
 
@@ -718,18 +687,14 @@ impl App {
                 return;
             }
         };
-        let admin_nft_mint = self.my_nft_mint.unwrap();
-        let admin_nft_ata = get_ata(&self.keypair.pubkey(), &admin_nft_mint);
-        let admin_key_auth = self.my_key_auth_pda.unwrap();
+        let admin_asset = self.my_asset.unwrap();
 
-        let mint_kp = Keypair::new();
-        let new_mint = mint_kp.pubkey();
-        let target_ata = get_ata(&target_wallet, &new_mint);
-        let (new_key_auth, _) = Pubkey::find_program_address(
+        let asset_kp = Keypair::new();
+        let new_asset = asset_kp.pubkey();
+        let (new_key_state, _) = Pubkey::find_program_address(
             &[
-                KeyAuthorization::SEED,
-                position_pda.as_ref(),
-                new_mint.as_ref(),
+                KeyState::SEED,
+                new_asset.as_ref(),
             ],
             &hardig::ID,
         );
@@ -748,9 +713,6 @@ impl App {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(0);
 
-        let metadata = metadata_pda(&new_mint);
-        let master_edition = master_edition_pda(&new_mint);
-
         let mut data = sighash("authorize_key");
         data.push(permissions_u8);
         data.extend_from_slice(&sell_cap.to_le_bytes());
@@ -760,21 +722,14 @@ impl App {
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
-            AccountMeta::new_readonly(admin_nft_ata, false),
-            AccountMeta::new_readonly(admin_key_auth, false),
+            AccountMeta::new_readonly(admin_asset, false),
             AccountMeta::new_readonly(position_pda, false),
-            AccountMeta::new(new_mint, true),
-            AccountMeta::new(target_ata, false),
+            AccountMeta::new(new_asset, true),
             AccountMeta::new_readonly(target_wallet, false),
-            AccountMeta::new(new_key_auth, false),
+            AccountMeta::new(new_key_state, false),
             AccountMeta::new_readonly(self.program_pda, false),
-            AccountMeta::new(metadata, false),
-            AccountMeta::new(master_edition, false),
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
-            AccountMeta::new_readonly(ATA_PROGRAM_ID, false),
-            AccountMeta::new_readonly(METADATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-            AccountMeta::new_readonly(RENT_SYSVAR, false),
         ];
 
         self.goto_confirm(PendingAction {
@@ -782,19 +737,19 @@ impl App {
                 "Authorize Key".into(),
                 format!("Target: {}", target_wallet),
                 format!("Permissions: {} (0x{:02X})", permissions_name(permissions_u8), permissions_u8),
-                format!("Key NFT Mint: {}", new_mint),
+                format!("Key Asset: {}", new_asset),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
-            extra_signers: vec![mint_kp],
+            extra_signers: vec![asset_kp],
         });
     }
 
     pub fn build_revoke_key(&mut self) {
-        let admin_mint = self.position.as_ref().map(|p| p.admin_nft_mint);
+        let admin_asset_key = self.position.as_ref().map(|p| p.admin_asset);
         let revocable: Vec<&KeyEntry> = self
             .keyring
             .iter()
-            .filter(|k| Some(k.mint) != admin_mint)
+            .filter(|k| Some(k.asset) != admin_asset_key)
             .collect();
         let idx: usize = match self.form_fields[1].1.trim().parse() {
             Ok(v) => v,
@@ -810,44 +765,30 @@ impl App {
 
         let target = &revocable[idx];
         let position_pda = self.position_pda.unwrap();
-        let admin_nft_mint = self.my_nft_mint.unwrap();
-        let admin_nft_ata = get_ata(&self.keypair.pubkey(), &admin_nft_mint);
-        let admin_key_auth = self.my_key_auth_pda.unwrap();
+        let admin_asset = self.my_asset.unwrap();
 
-        // If the admin holds the target NFT, pass the admin's ATA + metadata
-        // accounts so the program can burn via Metaplex. Otherwise pass the
-        // program ID as the Anchor "None" sentinel to skip the burn.
-        let (target_nft_ata, metadata, master_edition, metadata_program) = if target.held_by_signer {
-            (
-                get_ata(&self.keypair.pubkey(), &target.mint),
-                metadata_pda(&target.mint),
-                master_edition_pda(&target.mint),
-                METADATA_PROGRAM_ID,
-            )
-        } else {
-            (hardig::ID, hardig::ID, hardig::ID, hardig::ID)
-        };
+        // Derive the target key's KeyState PDA
+        let (target_key_state, _) = Pubkey::find_program_address(
+            &[KeyState::SEED, target.asset.as_ref()],
+            &hardig::ID,
+        );
 
         let data = sighash("revoke_key");
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
-            AccountMeta::new_readonly(admin_nft_ata, false),
-            AccountMeta::new_readonly(admin_key_auth, false),
+            AccountMeta::new_readonly(admin_asset, false),
             AccountMeta::new_readonly(position_pda, false),
-            AccountMeta::new(target.pda, false),
-            AccountMeta::new(target.mint, false),
-            AccountMeta::new(target_nft_ata, false),
-            AccountMeta::new(metadata, false),
-            AccountMeta::new(master_edition, false),
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
-            AccountMeta::new_readonly(metadata_program, false),
+            AccountMeta::new(target.asset, false),
+            AccountMeta::new(target_key_state, false),
+            AccountMeta::new_readonly(self.program_pda, false),
+            AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
 
         self.goto_confirm(PendingAction {
             description: vec![
                 "Revoke Key".into(),
-                format!("Key Mint: {}", target.mint),
+                format!("Key Asset: {}", target.asset),
                 format!("Permissions: {}", permissions_name(target.permissions)),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
@@ -971,9 +912,7 @@ impl App {
 
         // Step 1: Init Mayflower position if needed
         if !self.mayflower_initialized {
-            let admin_nft_mint = self.my_nft_mint.unwrap();
-            let admin_nft_ata = get_ata(&self.keypair.pubkey(), &admin_nft_mint);
-            let admin_key_auth = self.my_key_auth_pda.unwrap();
+            let admin_asset = self.my_asset.unwrap();
 
             let market_meta = self
                 .market_config
@@ -989,8 +928,7 @@ impl App {
             let data = sighash("init_mayflower_position");
             let accounts = vec![
                 AccountMeta::new(self.keypair.pubkey(), true),
-                AccountMeta::new_readonly(admin_nft_ata, false),
-                AccountMeta::new_readonly(admin_key_auth, false),
+                AccountMeta::new_readonly(admin_asset, false),
                 AccountMeta::new(position_pda, false),
                 AccountMeta::new_readonly(mc_pda, false),
                 AccountMeta::new_readonly(self.program_pda, false),
@@ -1074,9 +1012,7 @@ impl App {
             }
         };
 
-        let nft_mint = self.my_nft_mint.unwrap();
-        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
-        let key_auth = self.my_key_auth_pda.unwrap();
+        let key_asset = self.my_asset.unwrap();
         let mc_pda = self.market_config_pda.unwrap();
         let mc = self.market_config.as_ref().unwrap();
 
@@ -1086,8 +1022,7 @@ impl App {
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
-            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new_readonly(key_asset, false),            // key_asset
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1159,9 +1094,7 @@ impl App {
             }
         };
 
-        let nft_mint = self.my_nft_mint.unwrap();
-        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
-        let key_auth = self.my_key_auth_pda.unwrap();
+        let key_asset = self.my_asset.unwrap();
         let mc_pda = self.market_config_pda.unwrap();
         let mc = self.market_config.as_ref().unwrap();
 
@@ -1169,10 +1102,21 @@ impl App {
         data.extend_from_slice(&amount.to_le_bytes());
         data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
 
-        let accounts = vec![
+        // For sell/withdraw, key_state is optional (only needed for rate-limited keys).
+        // Pass it if we have a KeyState PDA for this key.
+        let key_state_pda = self.my_key_state_pda;
+
+        let mut accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // admin
-            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new(key_auth, false),                      // key_auth (mut for rate limits)
+            AccountMeta::new_readonly(key_asset, false),            // key_asset
+        ];
+        // Optional key_state account (Anchor Option<Account>)
+        if let Some(ks_pda) = key_state_pda {
+            accounts.push(AccountMeta::new(ks_pda, false));         // key_state (Some)
+        } else {
+            accounts.push(AccountMeta::new_readonly(hardig::ID, false)); // key_state (None sentinel)
+        }
+        accounts.extend_from_slice(&[
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1193,7 +1137,7 @@ impl App {
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
             AccountMeta::new(self.log_pda, false),                  // log_account
-        ];
+        ]);
 
         // Sell CPI uses ~170K CUs inside Mayflower + close_account — needs extra compute
         let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
@@ -1232,19 +1176,27 @@ impl App {
             }
         };
 
-        let nft_mint = self.my_nft_mint.unwrap();
-        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
-        let key_auth = self.my_key_auth_pda.unwrap();
+        let key_asset = self.my_asset.unwrap();
         let mc_pda = self.market_config_pda.unwrap();
         let mc = self.market_config.as_ref().unwrap();
 
         let mut data = sighash("borrow");
         data.extend_from_slice(&amount.to_le_bytes());
 
-        let accounts = vec![
+        // For borrow, key_state is optional (only needed for rate-limited keys).
+        let key_state_pda = self.my_key_state_pda;
+
+        let mut accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // admin
-            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new(key_auth, false),                      // key_auth (mut for rate limits)
+            AccountMeta::new_readonly(key_asset, false),            // key_asset
+        ];
+        // Optional key_state account (Anchor Option<Account>)
+        if let Some(ks_pda) = key_state_pda {
+            accounts.push(AccountMeta::new(ks_pda, false));         // key_state (Some)
+        } else {
+            accounts.push(AccountMeta::new_readonly(hardig::ID, false)); // key_state (None sentinel)
+        }
+        accounts.extend_from_slice(&[
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1262,7 +1214,7 @@ impl App {
             AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false), // mayflower_program
             AccountMeta::new_readonly(SPL_TOKEN_ID, false),         // token_program
             AccountMeta::new(self.log_pda, false),                  // log_account
-        ];
+        ]);
 
         // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell/borrow)
         let create_ata_ix = create_ata_idempotent_ix(
@@ -1298,9 +1250,7 @@ impl App {
             }
         };
 
-        let nft_mint = self.my_nft_mint.unwrap();
-        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
-        let key_auth = self.my_key_auth_pda.unwrap();
+        let key_asset = self.my_asset.unwrap();
         let mc_pda = self.market_config_pda.unwrap();
         let mc = self.market_config.as_ref().unwrap();
 
@@ -1309,8 +1259,7 @@ impl App {
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
-            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new_readonly(key_asset, false),            // key_asset
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1364,9 +1313,7 @@ impl App {
             }
         };
 
-        let nft_mint = self.my_nft_mint.unwrap();
-        let nft_ata = get_ata(&self.keypair.pubkey(), &nft_mint);
-        let key_auth = self.my_key_auth_pda.unwrap();
+        let key_asset = self.my_asset.unwrap();
         let mc_pda = self.market_config_pda.unwrap();
         let mc = self.market_config.as_ref().unwrap();
 
@@ -1375,8 +1322,7 @@ impl App {
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
-            AccountMeta::new_readonly(nft_ata, false),              // key_nft_ata
-            AccountMeta::new_readonly(key_auth, false),             // key_auth
+            AccountMeta::new_readonly(key_asset, false),            // key_asset
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
@@ -1545,16 +1491,16 @@ impl App {
         self.position_pda = None;
         self.position = None;
         self.my_permissions = None;
-        self.my_key_auth_pda = None;
-        self.my_nft_mint = None;
+        self.my_key_state_pda = None;
+        self.my_asset = None;
         self.keyring.clear();
         self.market_config_pda = None;
         self.market_config = None;
 
-        // Get all KeyAuthorization accounts from the program
-        let config = RpcProgramAccountsConfig {
+        // Step 1: Get all PositionNFT accounts from the program
+        let pos_config = RpcProgramAccountsConfig {
             filters: Some(vec![RpcFilterType::DataSize(
-                KeyAuthorization::SIZE as u64,
+                PositionNFT::SIZE as u64,
             )]),
             account_config: RpcAccountInfoConfig {
                 encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
@@ -1564,7 +1510,7 @@ impl App {
             ..Default::default()
         };
 
-        let accounts = match self.rpc.get_program_accounts_with_config(&hardig::ID, config) {
+        let positions = match self.rpc.get_program_accounts_with_config(&hardig::ID, pos_config) {
             Ok(a) => a,
             Err(e) => {
                 self.push_log(format!("Scan failed: {}", e));
@@ -1572,113 +1518,226 @@ impl App {
             }
         };
 
-        // Find KeyAuthorizations where the signer holds the NFT.
-        // Prefer the key with the most permissions (highest popcount),
-        // tie-break by PERM_MANAGE_KEYS.
+        // Step 2: For each position, check if signer owns the admin asset
+        let signer = self.keypair.pubkey();
         let mut found_position: Option<Pubkey> = None;
-        let mut best: Option<(u8, Pubkey, Pubkey)> = None; // (permissions, auth_pda, mint)
+        let mut found_pos_data: Option<PositionNFT> = None;
 
-        for (pubkey, account) in &accounts {
-            let ka = match KeyAuthorization::try_deserialize(&mut account.data.as_slice()) {
-                Ok(k) => k,
+        for (pos_pda, pos_acc) in &positions {
+            let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+                Ok(p) => p,
                 Err(_) => continue,
             };
 
-            if self.check_holds_nft(&ka.key_nft_mint) {
-                let is_better = match &best {
-                    None => true,
-                    Some((p, _, _)) => {
-                        let new_pop = ka.permissions.count_ones();
-                        let old_pop = p.count_ones();
-                        new_pop > old_pop
-                            || (new_pop == old_pop
-                                && ka.permissions & PERM_MANAGE_KEYS != 0
-                                && *p & PERM_MANAGE_KEYS == 0)
+            if self.check_asset_owner(&pos.admin_asset, &signer) {
+                found_position = Some(*pos_pda);
+                found_pos_data = Some(pos);
+                break;
+            }
+        }
+
+        // Step 3: If not found via admin key, check delegated keys via KeyState accounts
+        if found_position.is_none() {
+            let ks_config = RpcProgramAccountsConfig {
+                filters: Some(vec![RpcFilterType::DataSize(
+                    KeyState::SIZE as u64,
+                )]),
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                    commitment: Some(CommitmentConfig::confirmed()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            if let Ok(key_states) = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config) {
+                for (_ks_pda, ks_acc) in &key_states {
+                    let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
+                        Ok(k) => k,
+                        Err(_) => continue,
+                    };
+
+                    if !self.check_asset_owner(&ks.asset, &signer) {
+                        continue;
                     }
-                };
-                if is_better {
-                    found_position = Some(ka.position);
-                    best = Some((ka.permissions, *pubkey, ka.key_nft_mint));
+
+                    // Read the asset's update_authority to find which position it belongs to
+                    let ua = match self.read_asset_update_authority(&ks.asset) {
+                        Some(ua) => ua,
+                        None => continue,
+                    };
+
+                    // Find the position whose program_pda matches this update_authority
+                    for (pos_pda, pos_acc) in &positions {
+                        let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+                            Ok(p) => p,
+                            Err(_) => continue,
+                        };
+                        let (expected_pda, _) = Pubkey::find_program_address(
+                            &[b"authority", pos.admin_asset.as_ref()],
+                            &hardig::ID,
+                        );
+                        if expected_pda == ua {
+                            found_position = Some(*pos_pda);
+                            found_pos_data = Some(pos);
+                            break;
+                        }
+                    }
+                    if found_position.is_some() {
+                        break;
+                    }
                 }
             }
         }
 
-        if let (Some(pos_pda), Some((perms, auth_pda, mint))) = (found_position, best) {
-            self.position_pda = Some(pos_pda);
-            self.my_permissions = Some(perms);
-            self.my_key_auth_pda = Some(auth_pda);
-            self.my_nft_mint = Some(mint);
+        if let (Some(pos_pda), Some(pos)) = (found_position, found_pos_data) {
+            // Derive the program_pda for this position
+            let admin_asset = pos.admin_asset;
+            let (program_pda, _) = Pubkey::find_program_address(
+                &[b"authority", admin_asset.as_ref()],
+                &hardig::ID,
+            );
 
-            if let Ok(acc) = self.rpc.get_account(&pos_pda) {
-                if let Ok(pos) = PositionNFT::try_deserialize(&mut acc.data.as_slice()) {
-                    self.mayflower_initialized = pos.position_pda != Pubkey::default();
+            // Check if signer holds the admin asset
+            let signer_is_admin = self.check_asset_owner(&admin_asset, &signer);
+            if signer_is_admin {
+                self.my_permissions = Some(PRESET_ADMIN);
+                self.my_key_state_pda = None; // Admin has no KeyState PDA
+                self.my_asset = Some(admin_asset);
+            }
 
-                    // Fetch market config: from position if set, otherwise try default
-                    let mc_key = if pos.market_config != Pubkey::default() {
-                        pos.market_config
-                    } else {
-                        Pubkey::find_program_address(
-                            &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
-                            &hardig::ID,
-                        )
-                        .0
-                    };
-                    if let Ok(mc_acc) = self.rpc.get_account(&mc_key) {
-                        if let Ok(mc) =
-                            MarketConfig::try_deserialize(&mut mc_acc.data.as_slice())
-                        {
-                            self.market_config_pda = Some(mc_key);
-                            self.market_config = Some(mc);
+            // If not admin, find the signer's delegated key
+            if !signer_is_admin {
+                // Scan KeyState accounts to find signer's key
+                let ks_config = RpcProgramAccountsConfig {
+                    filters: Some(vec![RpcFilterType::DataSize(
+                        KeyState::SIZE as u64,
+                    )]),
+                    account_config: RpcAccountInfoConfig {
+                        encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                        commitment: Some(CommitmentConfig::confirmed()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                if let Ok(key_states) = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config) {
+                    for (ks_pda, ks_acc) in &key_states {
+                        let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
+                            Ok(k) => k,
+                            Err(_) => continue,
+                        };
+                        if !self.check_asset_owner(&ks.asset, &signer) {
+                            continue;
+                        }
+                        // Verify this key belongs to this position
+                        if let Some(ua) = self.read_asset_update_authority(&ks.asset) {
+                            if ua == program_pda {
+                                if let Some(perms) = self.read_asset_permissions(&ks.asset) {
+                                    self.my_permissions = Some(perms);
+                                    self.my_key_state_pda = Some(*ks_pda);
+                                    self.my_asset = Some(ks.asset);
+                                }
+                                break;
+                            }
                         }
                     }
-
-                    // Derive per-position Mayflower addresses from admin_nft_mint
-                    let admin_nft_mint = pos.admin_nft_mint;
-                    let (program_pda, _) = Pubkey::find_program_address(
-                        &[b"authority", admin_nft_mint.as_ref()],
-                        &hardig::ID,
-                    );
-                    let market_meta = self
-                        .market_config
-                        .as_ref()
-                        .map(|mc| mc.market_meta)
-                        .unwrap_or(DEFAULT_MARKET_META);
-                    let (pp_pda, _) = derive_personal_position(&program_pda, &market_meta);
-                    let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
-                    self.program_pda = program_pda;
-                    self.pp_pda = pp_pda;
-                    self.escrow_pda = escrow_pda;
-                    let base_mint = self
-                        .market_config
-                        .as_ref()
-                        .map(|mc| mc.base_mint)
-                        .unwrap_or(DEFAULT_WSOL_MINT);
-                    let nav_mint = self
-                        .market_config
-                        .as_ref()
-                        .map(|mc| mc.nav_mint)
-                        .unwrap_or(DEFAULT_NAV_SOL_MINT);
-                    self.wsol_ata = get_ata(&program_pda, &base_mint);
-                    self.nav_sol_ata = get_ata(&program_pda, &nav_mint);
-
-                    self.position = Some(pos);
                 }
             }
 
-            // Load all keys for this position
-            for (pubkey, account) in &accounts {
-                if let Ok(ka) = KeyAuthorization::try_deserialize(&mut account.data.as_slice()) {
-                    if ka.position == pos_pda {
-                        self.keyring.push(KeyEntry {
-                            pda: *pubkey,
-                            mint: ka.key_nft_mint,
-                            permissions: ka.permissions,
-                            held_by_signer: self.check_holds_nft(&ka.key_nft_mint),
-                        });
+            self.position_pda = Some(pos_pda);
+            self.mayflower_initialized = pos.position_pda != Pubkey::default();
+
+            // Fetch market config: from position if set, otherwise try default
+            let mc_key = if pos.market_config != Pubkey::default() {
+                pos.market_config
+            } else {
+                Pubkey::find_program_address(
+                    &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
+                    &hardig::ID,
+                )
+                .0
+            };
+            if let Ok(mc_acc) = self.rpc.get_account(&mc_key) {
+                if let Ok(mc) =
+                    MarketConfig::try_deserialize(&mut mc_acc.data.as_slice())
+                {
+                    self.market_config_pda = Some(mc_key);
+                    self.market_config = Some(mc);
+                }
+            }
+
+            // Derive per-position Mayflower addresses from admin_asset
+            self.program_pda = program_pda;
+            let market_meta = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.market_meta)
+                .unwrap_or(DEFAULT_MARKET_META);
+            let (pp_pda, _) = derive_personal_position(&program_pda, &market_meta);
+            let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
+            self.pp_pda = pp_pda;
+            self.escrow_pda = escrow_pda;
+            let base_mint = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.base_mint)
+                .unwrap_or(DEFAULT_WSOL_MINT);
+            let nav_mint = self
+                .market_config
+                .as_ref()
+                .map(|mc| mc.nav_mint)
+                .unwrap_or(DEFAULT_NAV_SOL_MINT);
+            self.wsol_ata = get_ata(&program_pda, &base_mint);
+            self.nav_sol_ata = get_ata(&program_pda, &nav_mint);
+
+            self.position = Some(pos);
+
+            // Build keyring: admin key + all delegated keys (via KeyState scan)
+            self.keyring.push(KeyEntry {
+                pda: pos_pda,
+                asset: admin_asset,
+                permissions: PRESET_ADMIN,
+                held_by_signer: signer_is_admin,
+            });
+
+            // Scan KeyState accounts for delegated keys belonging to this position
+            let ks_config = RpcProgramAccountsConfig {
+                filters: Some(vec![RpcFilterType::DataSize(
+                    KeyState::SIZE as u64,
+                )]),
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                    commitment: Some(CommitmentConfig::confirmed()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            if let Ok(key_states) = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config) {
+                for (ks_pda, ks_acc) in &key_states {
+                    let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
+                        Ok(k) => k,
+                        Err(_) => continue,
+                    };
+                    // Check if this key belongs to this position (update_authority == program_pda)
+                    let ua = match self.read_asset_update_authority(&ks.asset) {
+                        Some(ua) => ua,
+                        None => continue,
+                    };
+                    if ua != program_pda {
+                        continue;
                     }
+                    let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
+                    let held = self.check_asset_owner(&ks.asset, &signer);
+                    self.keyring.push(KeyEntry {
+                        pda: *ks_pda,
+                        asset: ks.asset,
+                        permissions: perms,
+                        held_by_signer: held,
+                    });
                 }
             }
 
+            let perms = self.my_permissions.unwrap_or(0);
             self.push_log(format!(
                 "Found position {} (permissions: {}{})",
                 short_pubkey(&pos_pda),
@@ -1758,9 +1817,65 @@ impl App {
         }
     }
 
-    fn check_holds_nft(&self, mint: &Pubkey) -> bool {
-        let ata = get_ata(&self.keypair.pubkey(), mint);
-        self.read_token_balance(&ata) == Some(1)
+    /// Check if a given wallet owns an MPL-Core asset by reading the asset account's
+    /// owner field (bytes 1..33 of the account data).
+    fn check_asset_owner(&self, asset: &Pubkey, wallet: &Pubkey) -> bool {
+        if let Ok(acc) = self.rpc.get_account(asset) {
+            if acc.data.len() >= 33 {
+                if let Ok(owner) = Pubkey::try_from(&acc.data[1..33]) {
+                    return owner == *wallet;
+                }
+            }
+        }
+        false
+    }
+
+    /// Read the update_authority pubkey from an MPL-Core asset account.
+    /// The update_authority is a borsh-encoded enum at byte 33+.
+    /// Tag 1 = UpdateAuthority::Address, followed by 32-byte pubkey.
+    fn read_asset_update_authority(&self, asset: &Pubkey) -> Option<Pubkey> {
+        let acc = self.rpc.get_account(asset).ok()?;
+        if acc.data.len() < 66 {
+            return None;
+        }
+        let ua_tag = acc.data[33];
+        if ua_tag != 1 {
+            return None;
+        }
+        Pubkey::try_from(&acc.data[34..66]).ok()
+    }
+
+    /// Read the permissions value from an MPL-Core asset's Attributes plugin.
+    fn read_asset_permissions(&self, asset: &Pubkey) -> Option<u8> {
+        use mpl_core::{
+            accounts::BaseAssetV1,
+            fetch_plugin,
+            types::{Attributes, PluginType},
+        };
+        let acc = self.rpc.get_account(asset).ok()?;
+        // Create a temporary AccountInfo for fetch_plugin
+        let asset_key = *asset;
+        let mut lamports = acc.lamports;
+        let mut data = acc.data.clone();
+        let account_info = solana_sdk::account_info::AccountInfo::new(
+            &asset_key,
+            false,
+            false,
+            &mut lamports,
+            &mut data,
+            &acc.owner,
+            false,
+            0,
+        );
+        let (_, attributes, _) = fetch_plugin::<BaseAssetV1, Attributes>(
+            &account_info,
+            PluginType::Attributes,
+        ).ok()?;
+        attributes
+            .attribute_list
+            .iter()
+            .find(|a| a.key == "permissions")
+            .and_then(|a| a.value.parse::<u8>().ok())
     }
 
     pub fn take_snapshot(&self) -> Option<PositionSnapshot> {

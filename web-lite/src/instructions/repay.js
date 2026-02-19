@@ -10,19 +10,17 @@ import {
   TOKEN_PROGRAM_ID,
   DEFAULT_WSOL_MINT,
 } from '../constants.js';
-import { myNftMint, myKeyAuthPda, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
+import { myKeyAsset, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
 import { shortPubkey, lamportsToSol } from '../utils.js';
 
 export async function buildRepay(program, wallet, amountLamports) {
-  const nftMint = myNftMint.value;
-  const keyAuth = myKeyAuthPda.value;
+  const keyAsset = myKeyAsset.value;
   const posPda = positionPda.value;
-  const nftAta = getAta(wallet, nftMint);
   const mc = marketConfig.value;
   const mcPda = marketConfigPda.value;
   const baseMint = mc ? mc.baseMint : DEFAULT_WSOL_MINT;
   const marketMeta = mc ? mc.marketMeta : undefined;
-  const [programPda] = deriveProgramPda(position.value.adminNftMint);
+  const [programPda] = deriveProgramPda(position.value.adminAsset);
   const [ppPda] = derivePersonalPosition(programPda, marketMeta);
   const [logAccount] = deriveLogAccount();
   const wsolAta = getAta(programPda, baseMint);
@@ -39,8 +37,7 @@ export async function buildRepay(program, wallet, amountLamports) {
     .repay(new BN(amountLamports))
     .accounts({
       signer: wallet,
-      keyNftAta: nftAta,
-      keyAuth: keyAuth,
+      keyAsset: keyAsset,
       position: posPda,
       marketConfig: mcPda,
       programPda: programPda,

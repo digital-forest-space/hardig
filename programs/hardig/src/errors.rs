@@ -11,9 +11,9 @@ pub enum HardigError {
     InsufficientPermission,
     #[msg("Signer does not hold the key NFT")]
     KeyNotHeld,
-    #[msg("Key NFT mint does not match KeyAuthorization")]
+    #[msg("Key asset has invalid or missing attributes")]
     InvalidKey,
-    #[msg("KeyAuthorization is for a different position")]
+    #[msg("Key asset does not belong to this position")]
     WrongPosition,
 
     // Key management errors
