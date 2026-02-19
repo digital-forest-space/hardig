@@ -297,6 +297,26 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
     // Slippage check: verify navSOL shares received >= min_out
     require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
+    // Enforce reinvest spread limit
+    if ctx.accounts.position.max_reinvest_spread_bps > 0 && floor_price > 0 {
+        // effective_price = actual_amount * 1e9 / shares_received (lamports per share, 1e9 scaled)
+        let effective_price = (actual_amount as u128)
+            .checked_mul(1_000_000_000u128)
+            .ok_or(HardigError::InsufficientFunds)?
+            / (shares_received as u128);
+        // spread_bps = (effective_price - floor_price) * 10000 / floor_price
+        if effective_price > floor_price as u128 {
+            let spread_bps = (effective_price - floor_price as u128)
+                .checked_mul(10_000u128)
+                .ok_or(HardigError::InsufficientFunds)?
+                / (floor_price as u128);
+            require!(
+                spread_bps <= ctx.accounts.position.max_reinvest_spread_bps as u128,
+                HardigError::ReinvestSpreadTooHigh
+            );
+        }
+    }
+
     // Update accounting with actual amounts from Mayflower
     ctx.accounts.position.user_debt = ctx
         .accounts
