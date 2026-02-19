@@ -282,6 +282,10 @@ const ks = parseKeyState(accountData);
 const available = bucketAvailableNow(ks.sellBucket, currentSlot);
 ```
 
+## Disclaimer
+
+This program was built with [Claude Code](https://claude.ai/claude-code) and has **not been audited**. Use at your own risk. Do not deposit funds you cannot afford to lose.
+
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

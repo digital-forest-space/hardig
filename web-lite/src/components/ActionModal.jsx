@@ -24,7 +24,7 @@ import {
   buildAuthorizeKey,
   buildRevokeKey,
 } from '../instructions/index.js';
-import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, slotsToHuman, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
+import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR, PRESET_DEPOSITOR, PRESET_KEEPER } from '../utils.js';
 
 // Phase: form | building | confirm | result
 export function ActionModal({ action, onClose, onRefresh }) {
@@ -43,9 +43,13 @@ export function ActionModal({ action, onClose, onRefresh }) {
   const [permissions, setPermissions] = useState(String(PRESET_OPERATOR));
   const [revokeIdx, setRevokeIdx] = useState('0');
   const [sellCapacity, setSellCapacity] = useState('');
-  const [sellRefillSlots, setSellRefillSlots] = useState('');
+  const [sellDays, setSellDays] = useState('');
+  const [sellHours, setSellHours] = useState('');
+  const [sellMinutes, setSellMinutes] = useState('');
   const [borrowCapacity, setBorrowCapacity] = useState('');
-  const [borrowRefillSlots, setBorrowRefillSlots] = useState('');
+  const [borrowDays, setBorrowDays] = useState('');
+  const [borrowHours, setBorrowHours] = useState('');
+  const [borrowMinutes, setBorrowMinutes] = useState('');
 
   const walletPk = wallet.publicKey;
 
@@ -107,10 +111,13 @@ export function ActionModal({ action, onClose, onRefresh }) {
           const p = parseInt(permissions);
           if (p === 0) { setError('Permissions cannot be zero'); setPhase('form'); return; }
           if (p & PERM_MANAGE_KEYS) { setError('Cannot grant PERM_MANAGE_KEYS to delegated keys'); setPhase('form'); return; }
+          const toSlots = (d, h, m) => (parseInt(d) || 0) * 216000 + (parseInt(h) || 0) * 9000 + (parseInt(m) || 0) * 150;
           const sc = (p & PERM_LIMITED_SELL) ? (parseSolToLamports(sellCapacity) || 0) : 0;
-          const sr = (p & PERM_LIMITED_SELL) ? (parseInt(sellRefillSlots) || 0) : 0;
+          const sr = (p & PERM_LIMITED_SELL) ? toSlots(sellDays, sellHours, sellMinutes) : 0;
           const bc = (p & PERM_LIMITED_BORROW) ? (parseSolToLamports(borrowCapacity) || 0) : 0;
-          const br = (p & PERM_LIMITED_BORROW) ? (parseInt(borrowRefillSlots) || 0) : 0;
+          const br = (p & PERM_LIMITED_BORROW) ? toSlots(borrowDays, borrowHours, borrowMinutes) : 0;
+          if ((p & PERM_LIMITED_SELL) && (sc === 0 || sr === 0)) { setError('Sell capacity and refill period must be nonzero'); setPhase('form'); return; }
+          if ((p & PERM_LIMITED_BORROW) && (bc === 0 || br === 0)) { setError('Borrow capacity and refill period must be nonzero'); setPhase('form'); return; }
           built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p, sc, sr, bc, br);
           break;
         }
@@ -299,26 +306,34 @@ export function ActionModal({ action, onClose, onRefresh }) {
                     })}
                   </div>
                   {((parseInt(permissions) || 0) & PERM_LIMITED_SELL) !== 0 && (
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', paddingLeft: '20px' }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '11px' }}>Sell Capacity (SOL)</label>
-                        <input type="text" value={sellCapacity} onInput={(e) => setSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                    <div style={{ paddingLeft: '20px', marginTop: '6px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: '11px' }}>Sell Capacity (navSOL)</label>
+                          <input type="text" value={sellCapacity} onInput={(e) => setSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                        </div>
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '11px' }}>Sell Refill (slots){sellRefillSlots && parseInt(sellRefillSlots) > 0 ? ` ${slotsToHuman(parseInt(sellRefillSlots))}` : ''}</label>
-                        <input type="text" value={sellRefillSlots} onInput={(e) => setSellRefillSlots(e.target.value)} placeholder="e.g. 216000" />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'center' }}>
+                        <label style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>Sell Refill:</label>
+                        <div><label style={{ fontSize: '10px' }}>Days</label><input type="number" min="0" value={sellDays} onInput={(e) => setSellDays(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
+                        <div><label style={{ fontSize: '10px' }}>Hours</label><input type="number" min="0" max="23" value={sellHours} onInput={(e) => setSellHours(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
+                        <div><label style={{ fontSize: '10px' }}>Min</label><input type="number" min="0" max="59" value={sellMinutes} onInput={(e) => setSellMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
                       </div>
                     </div>
                   )}
                   {((parseInt(permissions) || 0) & PERM_LIMITED_BORROW) !== 0 && (
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', paddingLeft: '20px' }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '11px' }}>Borrow Capacity (SOL)</label>
-                        <input type="text" value={borrowCapacity} onInput={(e) => setBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                    <div style={{ paddingLeft: '20px', marginTop: '6px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: '11px' }}>Borrow Capacity (SOL)</label>
+                          <input type="text" value={borrowCapacity} onInput={(e) => setBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                        </div>
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '11px' }}>Borrow Refill (slots){borrowRefillSlots && parseInt(borrowRefillSlots) > 0 ? ` ${slotsToHuman(parseInt(borrowRefillSlots))}` : ''}</label>
-                        <input type="text" value={borrowRefillSlots} onInput={(e) => setBorrowRefillSlots(e.target.value)} placeholder="e.g. 216000" />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'center' }}>
+                        <label style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>Borrow Refill:</label>
+                        <div><label style={{ fontSize: '10px' }}>Days</label><input type="number" min="0" value={borrowDays} onInput={(e) => setBorrowDays(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
+                        <div><label style={{ fontSize: '10px' }}>Hours</label><input type="number" min="0" max="23" value={borrowHours} onInput={(e) => setBorrowHours(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
+                        <div><label style={{ fontSize: '10px' }}>Min</label><input type="number" min="0" max="59" value={borrowMinutes} onInput={(e) => setBorrowMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} /></div>
                       </div>
                     </div>
                   )}

@@ -1,13 +1,13 @@
 import { PublicKey } from '@solana/web3.js';
 import {
   PROGRAM_ID,
-  MPL_CORE_PROGRAM_ID,
   KEY_STATE_SIZE,
   derivePositionPda,
   deriveKeyStatePda,
   deriveMarketConfigPda,
   DEFAULT_NAV_SOL_MINT,
 } from './constants.js';
+import { parseKeyState } from './rateLimits.js';
 import {
   positionPda,
   position,
@@ -23,7 +23,7 @@ import {
   pushLog,
   resetPositionState,
 } from './state.js';
-import { shortPubkey, permissionsName, PERM_MANAGE_KEYS } from './utils.js';
+import { shortPubkey, permissionsName, PERM_MANAGE_KEYS, PRESET_ADMIN } from './utils.js';
 import { deriveConfigPda } from './constants.js';
 
 export async function checkProtocol(connection) {
@@ -60,36 +60,33 @@ function parseMplCoreAsset(data) {
   // Bytes 1..33: owner
   const owner = new PublicKey(data.slice(1, 33));
 
-  // Bytes 33: UpdateAuthority tag (1 = Address)
+  // Bytes 33: UpdateAuthority tag (0 = None, 1 = Address, 2 = Collection)
   const uaTag = data[33];
-  if (uaTag !== 1 || data.length < 66) return null;
-  const updateAuthority = new PublicKey(data.slice(34, 66));
+  let updateAuthority = null;
+  if ((uaTag === 1 || uaTag === 2) && data.length >= 66) {
+    updateAuthority = new PublicKey(data.slice(34, 66));
+  } else if (uaTag !== 0) {
+    return null; // unknown tag
+  }
 
   return { owner, updateAuthority };
 }
 
 /**
- * Read the permissions attribute from an MPL-Core asset's Attributes plugin.
- * This does a simple scan for the "permissions" key in the serialized plugin data.
- * Returns the permissions u8 value, or null if not found.
+ * Read a named attribute value from an MPL-Core asset's Attributes plugin.
+ * Scans the serialized plugin data for a borsh-encoded Attribute { key: String, value: String }.
+ * Returns the value string, or null if not found.
  */
-function readPermissionsFromAssetData(data) {
-  // Search for the "permissions" string in the asset data.
-  // Attributes plugin stores attribute_list as borsh-serialized Vec<Attribute>.
-  // Each Attribute has { key: String, value: String } where String is len(u32) + utf8.
-  // We search for the byte pattern of the "permissions" key.
-  const needle = 'permissions';
-  const needleBytes = new TextEncoder().encode(needle);
+function readAttributeFromAssetData(data, attributeName) {
+  const needleBytes = new TextEncoder().encode(attributeName);
 
   for (let i = 66; i < data.length - needleBytes.length - 8; i++) {
-    // Look for u32 length prefix matching "permissions" length (11)
     const view = new DataView(data.buffer, data.byteOffset);
     if (i + 4 + needleBytes.length + 4 > data.length) break;
 
     const keyLen = view.getUint32(i, true);
     if (keyLen !== needleBytes.length) continue;
 
-    // Check if the string matches
     let match = true;
     for (let j = 0; j < needleBytes.length; j++) {
       if (data[i + 4 + j] !== needleBytes[j]) {
@@ -99,178 +96,148 @@ function readPermissionsFromAssetData(data) {
     }
     if (!match) continue;
 
-    // Read the value string that follows
     const valueOffset = i + 4 + needleBytes.length;
     if (valueOffset + 4 > data.length) continue;
     const valueLen = view.getUint32(valueOffset, true);
-    if (valueLen === 0 || valueLen > 3 || valueOffset + 4 + valueLen > data.length) continue;
+    if (valueLen === 0 || valueLen > 200 || valueOffset + 4 + valueLen > data.length) continue;
 
-    const valueStr = new TextDecoder().decode(data.slice(valueOffset + 4, valueOffset + 4 + valueLen));
-    const parsed = parseInt(valueStr, 10);
-    if (!isNaN(parsed) && parsed >= 0 && parsed <= 255) {
-      return parsed;
-    }
+    return new TextDecoder().decode(data.slice(valueOffset + 4, valueOffset + 4 + valueLen));
   }
 
   return null;
 }
 
+/**
+ * Read the permissions attribute from an MPL-Core asset.
+ * Returns the permissions u8 value, or null if not found.
+ */
+function readPermissionsFromAssetData(data) {
+  const value = readAttributeFromAssetData(data, 'permissions');
+  if (value === null) return null;
+  const parsed = parseInt(value, 10);
+  return (!isNaN(parsed) && parsed >= 0 && parsed <= 255) ? parsed : null;
+}
+
+/**
+ * Read the "position" attribute from an MPL-Core asset.
+ * Returns the admin_asset pubkey string that this key is bound to, or null.
+ */
+function readPositionBindingFromAssetData(data) {
+  return readAttributeFromAssetData(data, 'position');
+}
+
 export async function discoverPosition(connection, wallet) {
   resetPositionState();
 
-  // Fetch all KeyState accounts (used for delegated keys)
-  const keyStateAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
-    filters: [{ dataSize: KEY_STATE_SIZE }],
-    commitment: 'confirmed',
-  });
+  // Discovery strategy: scan PositionNFT and KeyState accounts from the hardig program
+  // (small account set), then load specific MPL-Core assets by pubkey.
+  // This avoids getProgramAccounts on MPL Core which most RPC providers reject.
 
-  // Parse KeyState accounts: extract the asset pubkey
+  const POSITION_SIZE = 132; // PositionNFT account size
+
+  const [positionAccounts, keyStateAccounts] = await Promise.all([
+    connection.getProgramAccounts(PROGRAM_ID, {
+      filters: [{ dataSize: POSITION_SIZE }],
+      commitment: 'confirmed',
+    }),
+    connection.getProgramAccounts(PROGRAM_ID, {
+      filters: [{ dataSize: KEY_STATE_SIZE }],
+      commitment: 'confirmed',
+    }),
+  ]);
+
+  // Parse KeyState accounts: extract asset pubkey and rate-limit buckets
   const keyStates = [];
   for (const { pubkey, account } of keyStateAccounts) {
     const data = account.data;
     if (data.length < KEY_STATE_SIZE) continue;
     const asset = new PublicKey(data.slice(8, 40));
-    keyStates.push({ pubkey, asset });
+    const buckets = parseKeyState(data);
+    keyStates.push({ pubkey, asset, buckets });
   }
 
-  // Also discover admin keys by scanning MPL-Core assets owned by the wallet.
-  // We need to find all MPL-Core assets where:
-  //   1. owner == wallet
-  //   2. update_authority is a Hardig program PDA
-  //
-  // Strategy: fetch all MPL-Core assets owned by this wallet, then check update_authority.
-  const mplCoreAssets = await connection.getProgramAccounts(MPL_CORE_PROGRAM_ID, {
-    filters: [
-      { memcmp: { offset: 0, bytes: 'A' } }, // Key::AssetV1 = 1 (base58 'A' maps to 0x01 not right)
-    ],
-    commitment: 'confirmed',
-  }).catch(() => []);
+  // Parse all PositionNFT accounts to get admin_asset pubkeys
+  const positions = []; // { posPda, adminAsset }
+  for (const { pubkey, account } of positionAccounts) {
+    const data = account.data;
+    if (data.length < POSITION_SIZE) continue;
+    const adminAsset = new PublicKey(data.slice(8, 40));
+    positions.push({ posPda: pubkey, adminAsset });
+  }
 
-  // The above filter won't work well. Instead, let's use a different approach:
-  // For each KeyState, load the asset and check if the wallet owns it.
-  // For admin keys (which have no KeyState), we search differently.
-  //
-  // Better approach: Use getTokenAccountsByOwner equivalent for MPL-Core.
-  // MPL-Core assets store owner at bytes 1-33. We can filter on that.
-  const walletAssets = await connection.getProgramAccounts(MPL_CORE_PROGRAM_ID, {
-    filters: [
-      { memcmp: { offset: 1, bytes: wallet.toBase58() } },
-    ],
-    commitment: 'confirmed',
-  }).catch(() => []);
-
-  if (walletAssets.length === 0 && keyStates.length === 0) {
+  if (positions.length === 0 && keyStates.length === 0) {
     pushLog('No positions found on-chain.');
     return;
   }
 
-  // Parse all wallet-held MPL-Core assets
-  const heldAssets = []; // { assetPubkey, updateAuthority, permissions }
-  for (const { pubkey, account } of walletAssets) {
-    const parsed = parseMplCoreAsset(account.data);
-    if (!parsed) continue;
-    const permissions = readPermissionsFromAssetData(account.data);
-    if (permissions === null) continue; // Not a Hardig key NFT
-    heldAssets.push({
-      assetPubkey: pubkey,
-      updateAuthority: parsed.updateAuthority,
-      permissions,
-    });
+  // Build lookup: admin_asset string -> posPda
+  const adminAssetToPos = new Map();
+  for (const p of positions) {
+    adminAssetToPos.set(p.adminAsset.toString(), p.posPda);
   }
 
-  if (heldAssets.length === 0) {
-    pushLog('No position found for this wallet.');
-    return;
-  }
+  // Step 1: Check admin keys — load each position's admin_asset and check owner
+  const adminAssetPubkeys = positions.map((p) => p.adminAsset);
+  const adminAssetInfos = await connection.getMultipleAccountsInfo(adminAssetPubkeys);
 
-  // For each held asset, try to find the position it belongs to.
-  // The update_authority is the program_pda = [b"authority", admin_asset].
-  // We need to find which admin_asset maps to this program_pda.
-  // For admin keys: the asset itself IS the admin_asset, so position = [b"position", asset].
-  // For delegated keys: the asset has a KeyState, and we need to find the position
-  //   by checking all positions or by trying the admin_asset from the position data.
-  //
-  // Simplified approach: for each held asset, try deriving a position PDA assuming it's the admin key.
-  // If that position exists on-chain, it's an admin key. Otherwise, check if there's a KeyState for it
-  // and load the corresponding position.
-
-  // Batch: try position PDAs for all held assets (to find admin keys)
-  const positionPdaCandidates = heldAssets.map((a) => derivePositionPda(a.assetPubkey)[0]);
-  const positionInfos = await connection.getMultipleAccountsInfo(positionPdaCandidates);
-
-  // Build a map of update_authority -> admin_asset by checking found positions
-  const uaToAdminAsset = new Map();
-
-  // Also collect which held assets are admin keys vs delegated keys
   let bestPos = null;
   let best = null;
 
   function popcount(n) { let c = 0; while (n) { c += n & 1; n >>= 1; } return c; }
 
-  for (let i = 0; i < heldAssets.length; i++) {
-    const asset = heldAssets[i];
-    const posInfo = positionInfos[i];
+  for (let i = 0; i < positions.length; i++) {
+    const info = adminAssetInfos[i];
+    if (!info) continue;
+    const parsed = parseMplCoreAsset(info.data);
+    if (!parsed) continue;
+    if (!parsed.owner.equals(wallet)) continue;
 
-    if (posInfo) {
-      // This is an admin key — the position PDA exists for this asset
-      const posPda = positionPdaCandidates[i];
-      let isBetter = !best;
-      if (!isBetter) {
-        const newPop = popcount(asset.permissions);
-        const oldPop = popcount(best.permissions);
-        isBetter = newPop > oldPop
-          || (newPop === oldPop && (asset.permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
-      }
-      if (isBetter) {
-        bestPos = posPda;
-        best = { permissions: asset.permissions, assetPubkey: asset.assetPubkey };
-      }
-      // Record the update_authority -> admin_asset mapping
-      uaToAdminAsset.set(asset.updateAuthority.toString(), asset.assetPubkey);
+    const permissions = readPermissionsFromAssetData(info.data) ?? PRESET_ADMIN;
+    const posPda = positions[i].posPda;
+
+    let isBetter = !best;
+    if (!isBetter) {
+      const newPop = popcount(permissions);
+      const oldPop = popcount(best.permissions);
+      isBetter = newPop > oldPop
+        || (newPop === oldPop && (permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
+    }
+    if (isBetter) {
+      bestPos = posPda;
+      best = { permissions, assetPubkey: adminAssetPubkeys[i] };
     }
   }
 
-  // For delegated keys (non-admin), find their position by loading the position account
-  // that matches the update_authority.
-  // If we haven't found a position yet via admin key, check delegated keys.
-  if (!bestPos) {
-    // For each held asset, check if its update_authority corresponds to a known position.
-    // The update_authority is the program_pda = [b"authority", admin_asset].
-    // We don't directly know the admin_asset, so we need to scan positions.
-    // Alternatively, look at all PositionNFT accounts (size = 132) to find the matching one.
-    const POSITION_SIZE = 132; // 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1
-    const positionAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
-      filters: [{ dataSize: POSITION_SIZE }],
-      commitment: 'confirmed',
-    });
+  // Step 2: If no admin key found, check delegated keys via KeyState assets
+  if (!bestPos && keyStates.length > 0) {
+    const delegatedPubkeys = keyStates.map((ks) => ks.asset);
+    const delegatedInfos = await connection.getMultipleAccountsInfo(delegatedPubkeys);
 
-    // Build a map from program_pda (authority) to position data
-    const authToPosition = new Map();
-    for (const { pubkey, account } of positionAccounts) {
-      const data = account.data;
-      if (data.length < POSITION_SIZE) continue;
-      const adminAsset = new PublicKey(data.slice(8, 40));
-      const [programPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('authority'), adminAsset.toBuffer()],
-        PROGRAM_ID
-      );
-      authToPosition.set(programPda.toString(), { posPda: pubkey, adminAsset });
-    }
+    for (let i = 0; i < keyStates.length; i++) {
+      const info = delegatedInfos[i];
+      if (!info) continue;
+      const parsed = parseMplCoreAsset(info.data);
+      if (!parsed) continue;
+      if (!parsed.owner.equals(wallet)) continue;
 
-    for (const asset of heldAssets) {
-      const posMatch = authToPosition.get(asset.updateAuthority.toString());
-      if (!posMatch) continue;
+      const permissions = readPermissionsFromAssetData(info.data);
+      if (permissions === null) continue;
+      const positionBinding = readPositionBindingFromAssetData(info.data);
+      if (!positionBinding) continue;
+
+      const posPda = adminAssetToPos.get(positionBinding);
+      if (!posPda) continue;
 
       let isBetter = !best;
       if (!isBetter) {
-        const newPop = popcount(asset.permissions);
+        const newPop = popcount(permissions);
         const oldPop = popcount(best.permissions);
         isBetter = newPop > oldPop
-          || (newPop === oldPop && (asset.permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
+          || (newPop === oldPop && (permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
       }
       if (isBetter) {
-        bestPos = posMatch.posPda;
-        best = { permissions: asset.permissions, assetPubkey: asset.assetPubkey };
+        bestPos = posPda;
+        best = { permissions, assetPubkey: delegatedPubkeys[i] };
       }
     }
   }
@@ -345,50 +312,68 @@ export async function discoverPosition(connection, wallet) {
     pushLog('Failed to load position: ' + e.message);
   }
 
-  // Load all keys for this position by finding all held assets with matching update_authority
+  // Build keyring: admin key + all delegated keys for this position
   const posKeys = [];
   const posAdminAsset = position.value?.adminAsset;
   if (posAdminAsset) {
-    const [expectedProgramPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from('authority'), posAdminAsset.toBuffer()],
-      PROGRAM_ID
-    );
+    const adminAssetStr = posAdminAsset.toString();
 
-    for (const asset of heldAssets) {
-      if (asset.updateAuthority.equals(expectedProgramPda)) {
-        posKeys.push({
-          pda: null, // No more KeyAuthorization PDA
-          mint: asset.assetPubkey,
-          permissions: asset.permissions,
-          heldBySigner: true,
-        });
-      }
+    // Build a map of asset pubkey -> KeyState data for bucket info
+    const keyStateMap = new Map();
+    for (const ks of keyStates) {
+      keyStateMap.set(ks.asset.toString(), ks);
     }
 
-    // Also include delegated keys (those with KeyState) that belong to this position
-    // but are NOT held by the current wallet
-    for (const ks of keyStates) {
-      // Skip if already in heldAssets
-      if (heldAssets.some((a) => a.assetPubkey.equals(ks.asset))) continue;
+    function attachBuckets(assetPubkey) {
+      const ks = keyStateMap.get(assetPubkey.toString());
+      if (!ks || !ks.buckets) return { sellBucket: null, borrowBucket: null };
+      const { sellBucket, borrowBucket } = ks.buckets;
+      return {
+        sellBucket: sellBucket && sellBucket.capacity > 0 ? sellBucket : null,
+        borrowBucket: borrowBucket && borrowBucket.capacity > 0 ? borrowBucket : null,
+      };
+    }
 
-      // Load the asset to check its update_authority
+    // Admin key: we already loaded it above; re-read owner to check if signer holds it
+    const adminIdx = adminAssetPubkeys.findIndex((pk) => pk.equals(posAdminAsset));
+    if (adminIdx >= 0 && adminAssetInfos[adminIdx]) {
+      const parsed = parseMplCoreAsset(adminAssetInfos[adminIdx].data);
+      const held = parsed && parsed.owner.equals(wallet);
+      posKeys.push({
+        pda: null,
+        mint: posAdminAsset,
+        permissions: PRESET_ADMIN,
+        heldBySigner: !!held,
+      });
+    }
+
+    // Delegated keys: load all KeyState assets, check position binding
+    for (const ks of keyStates) {
+      let info;
+      // Reuse already-loaded data if this key was loaded above (i.e., wallet held it)
+      const delegIdx = keyStates.indexOf(ks);
+      // We need to load it — delegated infos were only loaded in step 2 if bestPos wasn't found via admin.
+      // Safest: just load them now.
       try {
-        const assetInfo = await connection.getAccountInfo(ks.asset);
-        if (!assetInfo) continue;
-        const parsed = parseMplCoreAsset(assetInfo.data);
-        if (!parsed) continue;
-        if (!parsed.updateAuthority.equals(expectedProgramPda)) continue;
-        const permissions = readPermissionsFromAssetData(assetInfo.data);
-        if (permissions === null) continue;
-        posKeys.push({
-          pda: null,
-          mint: ks.asset,
-          permissions,
-          heldBySigner: false,
-        });
-      } catch {
-        // Skip assets we can't load
-      }
+        info = await connection.getAccountInfo(ks.asset);
+      } catch { continue; }
+      if (!info) continue;
+
+      const permissions = readPermissionsFromAssetData(info.data);
+      if (permissions === null) continue;
+      const binding = readPositionBindingFromAssetData(info.data);
+      if (binding !== adminAssetStr) continue;
+
+      const parsed = parseMplCoreAsset(info.data);
+      const held = parsed && parsed.owner.equals(wallet);
+
+      posKeys.push({
+        pda: null,
+        mint: ks.asset,
+        permissions,
+        heldBySigner: !!held,
+        ...attachBuckets(ks.asset),
+      });
     }
   }
   keyring.value = posKeys;

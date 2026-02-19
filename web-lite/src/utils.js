@@ -95,6 +95,40 @@ export function slotsToHuman(slots) {
   }
 }
 
+/**
+ * Convert a slot count to a human-readable duration matching on-chain format.
+ * NOTE: Must match programs/hardig/src/instructions/mod.rs slots_to_duration().
+ * Examples: "30 days", "1 day, 12 hours", "6 hours", "45 minutes".
+ */
+export function slotsToDuration(slots) {
+  if (!slots || slots <= 0) return '1 minute';
+  const totalSecs = Math.floor((slots * 400) / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const minutes = Math.floor((totalSecs % 3600) / 60);
+  const parts = [];
+  if (days > 0) parts.push(days === 1 ? '1 day' : `${days} days`);
+  if (hours > 0) parts.push(hours === 1 ? '1 hour' : `${hours} hours`);
+  if (parts.length === 0) {
+    const m = Math.max(1, minutes);
+    parts.push(m === 1 ? '1 minute' : `${m} minutes`);
+  }
+  return parts.join(', ');
+}
+
+/**
+ * Format a raw u64 amount (lamports/shares, 9 decimals) as a clean string.
+ * NOTE: Must match programs/hardig/src/instructions/mod.rs format_sol_amount().
+ */
+export function formatSolAmount(raw) {
+  if (typeof raw === 'bigint') raw = Number(raw);
+  const whole = Math.floor(raw / 1_000_000_000);
+  const frac = raw % 1_000_000_000;
+  if (frac === 0) return String(whole);
+  const fracStr = String(frac).padStart(9, '0').replace(/0+$/, '');
+  return `${whole}.${fracStr}`;
+}
+
 export function explorerUrl(sig, cluster) {
   const base = 'https://explorer.solana.com/tx/' + sig;
   if (cluster === 'mainnet-beta') return base;

@@ -1,9 +1,13 @@
 import { signal, computed } from '@preact/signals';
 import { PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW } from './utils.js';
 
-// Cluster
-export const cluster = signal('localnet');
-export const customUrl = signal('');
+// Cluster — persisted in localStorage so custom RPC URLs survive page reloads
+export const cluster = signal(localStorage.getItem('hardig_cluster') || 'localnet');
+export const customUrl = signal(localStorage.getItem('hardig_customUrl') || '');
+
+// Auto-persist changes
+cluster.subscribe((v) => localStorage.setItem('hardig_cluster', v));
+customUrl.subscribe((v) => localStorage.setItem('hardig_customUrl', v));
 
 // Wallet connection state
 export const connected = signal(false);
