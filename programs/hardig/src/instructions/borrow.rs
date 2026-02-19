@@ -167,6 +167,14 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     let admin_asset_key = ctx.accounts.position.admin_asset;
     let signer_seeds: &[&[&[u8]]] = &[&[b"authority", admin_asset_key.as_ref(), &[bump]]];
 
+    let pp_info = ctx.accounts.personal_position.to_account_info();
+
+    // Read debt BEFORE the borrow CPI
+    let debt_before = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+
     invoke_signed(
         &ix,
         &[
@@ -180,13 +188,22 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
             ctx.accounts.wsol_mint.to_account_info(),
             ctx.accounts.user_base_token_ata.to_account_info(),
             ctx.accounts.mayflower_market.to_account_info(),
-            ctx.accounts.personal_position.to_account_info(),
+            pp_info.clone(),
             ctx.accounts.token_program.to_account_info(),
             ctx.accounts.log_account.to_account_info(),
             ctx.accounts.mayflower_program.to_account_info(),
         ],
         signer_seeds,
     )?;
+
+    // Read debt AFTER the borrow CPI to get actual borrowed amount
+    let debt_after = {
+        let data = pp_info.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+    let actual_borrowed = debt_after
+        .checked_sub(debt_before)
+        .ok_or(HardigError::BorrowCapacityExceeded)?;
 
     // Close PDA's wSOL ATA — returns borrowed wSOL + rent as native SOL to admin
     // Only attempt if the account is an initialized SPL token account (state byte at offset 108)
@@ -219,7 +236,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
         .accounts
         .position
         .user_debt
-        .checked_add(amount)
+        .checked_add(actual_borrowed)
         .ok_or(HardigError::BorrowCapacityExceeded)?;
 
     Ok(())
