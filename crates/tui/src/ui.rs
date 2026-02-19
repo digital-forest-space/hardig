@@ -34,7 +34,7 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
     let role_str = app
         .my_permissions
         .map(app::permissions_name)
-        .unwrap_or("No Position");
+        .unwrap_or_else(|| "No Position".into());
     let refresh_str = app
         .last_refresh
         .map(|t| format!("{}s ago", t.elapsed().as_secs()))
@@ -234,7 +234,7 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     let widths = [
         Constraint::Length(2),
-        Constraint::Length(12),
+        Constraint::Min(20),
         Constraint::Length(14),
         Constraint::Length(5),
     ];

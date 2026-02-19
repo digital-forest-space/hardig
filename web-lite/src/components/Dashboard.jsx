@@ -5,7 +5,7 @@ import {
   myPermissions,
   connected,
 } from '../state.js';
-import { permissionsName } from '../utils.js';
+import { permissionsName, permissionsClass } from '../utils.js';
 import { PositionPanel } from './PositionPanel.jsx';
 import { MayflowerPanel } from './MayflowerPanel.jsx';
 import { KeyringTable } from './KeyringTable.jsx';
@@ -56,7 +56,7 @@ export function Dashboard({ onAction }) {
         <div class="data-row">
           <span class="label">Your Role</span>
           <span class="value">
-            <span class={`badge badge-${permissionsName(myPermissions.value).toLowerCase()}`}>
+            <span class={`badge ${permissionsClass(myPermissions.value)}`}>
               {permissionsName(myPermissions.value)}
             </span>
           </span>
