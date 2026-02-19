@@ -7,13 +7,16 @@ pub struct ProtocolConfig {
     pub admin: Pubkey,
     /// The MPL-Core collection for all Härdig key NFTs (Pubkey::default() = not yet created).
     pub collection: Pubkey,
+    /// Pending admin for two-step transfer (Pubkey::default() = no pending transfer).
+    pub pending_admin: Pubkey,
     /// Bump seed for the config PDA.
     pub bump: u8,
 }
 
 impl ProtocolConfig {
     pub const SEED: &'static [u8] = b"config";
-    pub const SIZE: usize = 8 + 32 + 32 + 1; // discriminator + admin + collection + bump
+    // discriminator + admin + collection + pending_admin + bump
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 1; // 105
 }
 
 /// A navSOL position controlled by an NFT keyring.

@@ -23,6 +23,7 @@ pub fn handler(ctx: Context<InitializeProtocol>) -> Result<()> {
     let config = &mut ctx.accounts.config;
     config.admin = ctx.accounts.admin.key();
     config.collection = Pubkey::default();
+    config.pending_admin = Pubkey::default();
     config.bump = ctx.bumps.config;
     Ok(())
 }

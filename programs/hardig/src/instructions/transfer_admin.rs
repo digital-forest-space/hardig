@@ -18,6 +18,6 @@ pub struct TransferAdmin<'info> {
 }
 
 pub fn handler(ctx: Context<TransferAdmin>, new_admin: Pubkey) -> Result<()> {
-    ctx.accounts.config.admin = new_admin;
+    ctx.accounts.config.pending_admin = new_admin;
     Ok(())
 }
