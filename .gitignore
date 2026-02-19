@@ -2,3 +2,5 @@ target/
 node_modules/
 .test-ledger/
 .anchor/
+test-fixtures/*.so
+web-lite/dist/
