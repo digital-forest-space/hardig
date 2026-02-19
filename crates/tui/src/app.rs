@@ -299,15 +299,9 @@ impl App {
             KeyCode::Char('I') if !self.protocol_exists => self.build_init_protocol(),
 
             KeyCode::Char('n') if self.position_pda.is_none() && self.protocol_exists => {
-                self.build_create_position()
+                self.build_create_position(None)
             }
 
-            // One-time Mayflower setup (admin only)
-            KeyCode::Char('S')
-                if self.has_perm(PERM_MANAGE_KEYS) && !self.cpi_ready() =>
-            {
-                self.build_setup(None)
-            }
             // Admin actions
             KeyCode::Char('a') if self.has_perm(PERM_MANAGE_KEYS) => {
                 self.enter_authorize_key()
@@ -704,7 +698,7 @@ impl App {
         });
     }
 
-    pub fn build_create_position(&mut self) {
+    pub fn build_create_position(&mut self, nav_mint: Option<Pubkey>) {
         let collection = match self.collection {
             Some(c) => c,
             None => {
@@ -712,6 +706,71 @@ impl App {
                 return;
             }
         };
+
+        // Resolve MarketConfig: use custom nav-mint, or fall back to default navSOL
+        let nav_mint_key = nav_mint.unwrap_or(DEFAULT_NAV_SOL_MINT);
+        let (mc_pda, _) = Pubkey::find_program_address(
+            &[MarketConfig::SEED, nav_mint_key.as_ref()],
+            &hardig::ID,
+        );
+
+        let mut instructions = Vec::new();
+        let mut description = vec![];
+
+        // Load MarketConfig from chain (or auto-create for default)
+        let mc = match self.rpc.get_account(&mc_pda) {
+            Ok(mc_acc) => {
+                match MarketConfig::try_deserialize(&mut mc_acc.data.as_slice()) {
+                    Ok(mc) => mc,
+                    Err(_) => {
+                        self.push_log("MarketConfig exists but failed to deserialize");
+                        return;
+                    }
+                }
+            }
+            Err(_) => {
+                if nav_mint.is_some() {
+                    self.push_log(format!(
+                        "No MarketConfig found for nav-mint {}. Create it first with create-market-config.",
+                        nav_mint_key,
+                    ));
+                    return;
+                }
+                // Auto-create default navSOL MarketConfig
+                let (config_pda, _) =
+                    Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+                let mut data = sighash("create_market_config");
+                data.extend_from_slice(DEFAULT_NAV_SOL_MINT.as_ref());
+                data.extend_from_slice(DEFAULT_WSOL_MINT.as_ref());
+                data.extend_from_slice(DEFAULT_MARKET_GROUP.as_ref());
+                data.extend_from_slice(DEFAULT_MARKET_META.as_ref());
+                data.extend_from_slice(DEFAULT_MAYFLOWER_MARKET.as_ref());
+                data.extend_from_slice(DEFAULT_MARKET_BASE_VAULT.as_ref());
+                data.extend_from_slice(DEFAULT_MARKET_NAV_VAULT.as_ref());
+                data.extend_from_slice(DEFAULT_FEE_VAULT.as_ref());
+                let accounts = vec![
+                    AccountMeta::new(self.keypair.pubkey(), true),
+                    AccountMeta::new_readonly(config_pda, false),
+                    AccountMeta::new(mc_pda, false),
+                    AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+                ];
+                instructions.push(Instruction::new_with_bytes(hardig::ID, &data, accounts));
+                description.push(format!("Create MarketConfig: {}", short_pubkey(&mc_pda)));
+                // Build a synthetic MarketConfig for PDA derivations
+                MarketConfig {
+                    nav_mint: DEFAULT_NAV_SOL_MINT,
+                    base_mint: DEFAULT_WSOL_MINT,
+                    market_group: DEFAULT_MARKET_GROUP,
+                    market_meta: DEFAULT_MARKET_META,
+                    mayflower_market: DEFAULT_MAYFLOWER_MARKET,
+                    market_base_vault: DEFAULT_MARKET_BASE_VAULT,
+                    market_nav_vault: DEFAULT_MARKET_NAV_VAULT,
+                    fee_vault: DEFAULT_FEE_VAULT,
+                    bump: 0,
+                }
+            }
+        };
+
         let asset_kp = Keypair::new();
         let asset = asset_kp.pubkey();
         let admin = self.keypair.pubkey();
@@ -722,27 +781,45 @@ impl App {
         let (config_pda, _) =
             Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
 
+        // Derive Mayflower PDAs
+        let (pp_pda, _) = derive_personal_position(&prog_pda, &mc.market_meta);
+        let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
+        let (log_pda, _) = derive_log_account();
+
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
 
         let accounts = vec![
-            AccountMeta::new(admin, true),
-            AccountMeta::new(asset, true),
-            AccountMeta::new(position_pda, false),
-            AccountMeta::new_readonly(prog_pda, false),
-            AccountMeta::new_readonly(config_pda, false),   // config
-            AccountMeta::new(collection, false),             // collection
-            AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),
-            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            AccountMeta::new(admin, true),                              // admin
+            AccountMeta::new(asset, true),                              // admin_asset
+            AccountMeta::new(position_pda, false),                      // position
+            AccountMeta::new_readonly(prog_pda, false),                 // program_pda
+            AccountMeta::new_readonly(config_pda, false),               // config
+            AccountMeta::new(collection, false),                        // collection
+            AccountMeta::new_readonly(mc_pda, false),                   // market_config
+            AccountMeta::new_readonly(MPL_CORE_PROGRAM_ID, false),      // mpl_core_program
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),        // system_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),             // token_program
+            AccountMeta::new(pp_pda, false),                            // mayflower_personal_position
+            AccountMeta::new(escrow_pda, false),                        // mayflower_user_shares
+            AccountMeta::new_readonly(mc.market_meta, false),           // mayflower_market_meta
+            AccountMeta::new_readonly(mc.nav_mint, false),              // nav_sol_mint
+            AccountMeta::new(log_pda, false),                           // mayflower_log
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),     // mayflower_program
         ];
 
+        // MPL-Core CreateV2 + Mayflower init_personal_position need extra compute
+        let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+        instructions.insert(0, compute_ix);
+        instructions.push(Instruction::new_with_bytes(hardig::ID, &data, accounts));
+
+        description.insert(0, "Create Position".into());
+        description.push(format!("Admin Asset: {}", asset));
+        description.push(format!("Position PDA: {}", position_pda));
+
         self.goto_confirm(PendingAction {
-            description: vec![
-                "Create Position".into(),
-                format!("Admin Asset: {}", asset),
-                format!("Position PDA: {}", position_pda),
-            ],
-            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            description,
+            instructions,
             extra_signers: vec![asset_kp],
         });
     }
@@ -929,206 +1006,6 @@ impl App {
                 format!("Permissions: {}", permissions_name(target.permissions)),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
-            extra_signers: vec![],
-        });
-    }
-
-    /// Combined one-time setup: init Mayflower position + create ATAs.
-    /// Only includes instructions for steps not yet completed.
-    ///
-    /// When `nav_mint` is `Some(mint)`, use that mint for deriving the
-    /// MarketConfig PDA.  The MarketConfig must already exist on-chain
-    /// (auto-creation only happens for the default navSOL mint).
-    ///
-    /// When `nav_mint` is `None`, keep existing behaviour: use defaults and
-    /// auto-create if needed.
-    pub fn build_setup(&mut self, nav_mint: Option<Pubkey>) {
-        let position_pda = match self.position_pda {
-            Some(p) => p,
-            None => {
-                self.push_log("No position loaded");
-                return;
-            }
-        };
-
-        // If a custom nav-mint was supplied, try to load its MarketConfig now
-        // (discover_position only loaded the default or position-stored one).
-        if let Some(custom_mint) = nav_mint {
-            let (custom_mc_pda, _) = Pubkey::find_program_address(
-                &[MarketConfig::SEED, custom_mint.as_ref()],
-                &hardig::ID,
-            );
-            // Only reload if we don't already have this exact MarketConfig
-            if self.market_config_pda != Some(custom_mc_pda) {
-                match self.rpc.get_account(&custom_mc_pda) {
-                    Ok(mc_acc) => {
-                        match MarketConfig::try_deserialize(&mut mc_acc.data.as_slice()) {
-                            Ok(mc) => {
-                                self.market_config_pda = Some(custom_mc_pda);
-                                self.market_config = Some(mc);
-                                // Re-derive Mayflower addresses with the new market config
-                                if self.position.is_some() {
-                                    let mc = self.market_config.as_ref().unwrap();
-                                    let (pp_pda, _) = derive_personal_position(&self.program_pda, &mc.market_meta);
-                                    let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
-                                    self.pp_pda = pp_pda;
-                                    self.escrow_pda = escrow_pda;
-                                    self.wsol_ata = get_ata(&self.program_pda, &mc.base_mint);
-                                    self.nav_sol_ata = get_ata(&self.program_pda, &mc.nav_mint);
-                                    // Re-check whether the Mayflower position is initialized
-                                    self.mayflower_initialized = self.rpc.get_account(&pp_pda).is_ok();
-                                    self.refresh_mayflower_state();
-                                    self.push_log(format!(
-                                        "Using custom nav-mint MarketConfig: {}",
-                                        short_pubkey(&custom_mc_pda),
-                                    ));
-                                }
-                            }
-                            Err(_) => {
-                                self.push_log(format!(
-                                    "MarketConfig at {} exists but failed to deserialize",
-                                    custom_mc_pda,
-                                ));
-                                return;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        self.push_log(format!(
-                            "No MarketConfig found for nav-mint {}. Create it first with create-market-config.",
-                            custom_mint,
-                        ));
-                        return;
-                    }
-                }
-            }
-        }
-
-        let mut instructions = Vec::new();
-        let mut description = vec!["Setup Mayflower Accounts".into()];
-
-        // Step 0: Create MarketConfig if it doesn't exist on-chain yet.
-        // Auto-creation only happens when using the default nav-mint (no custom
-        // --nav-mint was provided, or it matches the default).
-        let mc_pda = self.market_config_pda.unwrap_or_else(|| {
-            Pubkey::find_program_address(
-                &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
-                &hardig::ID,
-            )
-            .0
-        });
-        if self.market_config.is_none() {
-            // When a custom nav-mint is specified the MarketConfig must already
-            // exist — we returned early above if it didn't.  So reaching here
-            // means we are using the default and can auto-create.
-            let (config_pda, _) =
-                Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
-
-            let mut data = sighash("create_market_config");
-            data.extend_from_slice(DEFAULT_NAV_SOL_MINT.as_ref());
-            data.extend_from_slice(DEFAULT_WSOL_MINT.as_ref());
-            data.extend_from_slice(DEFAULT_MARKET_GROUP.as_ref());
-            data.extend_from_slice(DEFAULT_MARKET_META.as_ref());
-            data.extend_from_slice(DEFAULT_MAYFLOWER_MARKET.as_ref());
-            data.extend_from_slice(DEFAULT_MARKET_BASE_VAULT.as_ref());
-            data.extend_from_slice(DEFAULT_MARKET_NAV_VAULT.as_ref());
-            data.extend_from_slice(DEFAULT_FEE_VAULT.as_ref());
-
-            let accounts = vec![
-                AccountMeta::new(self.keypair.pubkey(), true),
-                AccountMeta::new_readonly(config_pda, false),
-                AccountMeta::new(mc_pda, false),
-                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-            ];
-            instructions.push(Instruction::new_with_bytes(hardig::ID, &data, accounts));
-            description.push(format!(
-                "Create MarketConfig: {}",
-                short_pubkey(&mc_pda)
-            ));
-        }
-
-        // Step 1: Init Mayflower position if needed
-        if !self.mayflower_initialized {
-            let admin_asset = self.my_asset.unwrap();
-
-            let market_meta = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.market_meta)
-                .unwrap_or(DEFAULT_MARKET_META);
-            let nav_mint = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.nav_mint)
-                .unwrap_or(DEFAULT_NAV_SOL_MINT);
-
-            let data = sighash("init_mayflower_position");
-            let accounts = vec![
-                AccountMeta::new(self.keypair.pubkey(), true),
-                AccountMeta::new_readonly(admin_asset, false),
-                AccountMeta::new(position_pda, false),
-                AccountMeta::new_readonly(mc_pda, false),
-                AccountMeta::new_readonly(self.program_pda, false),
-                AccountMeta::new(self.pp_pda, false),
-                AccountMeta::new(self.escrow_pda, false),
-                AccountMeta::new_readonly(market_meta, false),
-                AccountMeta::new_readonly(nav_mint, false),
-                AccountMeta::new(self.log_pda, false),
-                AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
-                AccountMeta::new_readonly(SPL_TOKEN_ID, false),
-                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
-            ];
-            instructions.push(Instruction::new_with_bytes(hardig::ID, &data, accounts));
-            description.push(format!(
-                "Init PersonalPosition: {}",
-                short_pubkey(&self.pp_pda)
-            ));
-        }
-
-        // Step 2: Create ATAs if needed
-        if !self.atas_exist {
-            let payer = self.keypair.pubkey();
-            let base_mint = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.base_mint)
-                .unwrap_or(DEFAULT_WSOL_MINT);
-            let nav_mint = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.nav_mint)
-                .unwrap_or(DEFAULT_NAV_SOL_MINT);
-            instructions.push(
-                spl_associated_token_account::instruction::create_associated_token_account(
-                    &payer,
-                    &self.program_pda,
-                    &base_mint,
-                    &SPL_TOKEN_ID,
-                ),
-            );
-            instructions.push(
-                spl_associated_token_account::instruction::create_associated_token_account(
-                    &payer,
-                    &self.program_pda,
-                    &nav_mint,
-                    &SPL_TOKEN_ID,
-                ),
-            );
-            description.push(format!("Create wSOL ATA: {}", short_pubkey(&self.wsol_ata)));
-            description.push(format!(
-                "Create navSOL ATA: {}",
-                short_pubkey(&self.nav_sol_ata)
-            ));
-        }
-
-        if instructions.is_empty() {
-            self.push_log("Setup already complete");
-            return;
-        }
-
-        self.goto_confirm(PendingAction {
-            description,
-            instructions,
             extra_signers: vec![],
         });
     }

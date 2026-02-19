@@ -53,7 +53,7 @@ function hasPerm(perm) {
 }
 
 // Computed permissions
-export const cpiReady = computed(() => mayflowerInitialized.value && atasExist.value);
+export const cpiReady = computed(() => mayflowerInitialized.value);
 
 export const canBuy = computed(
   () => cpiReady.value && hasPerm(PERM_BUY)
@@ -84,10 +84,6 @@ export const canAuthorize = computed(
 
 export const canRevoke = computed(
   () => hasPerm(PERM_MANAGE_KEYS) && keyring.value.length > 1
-);
-
-export const canSetup = computed(
-  () => hasPerm(PERM_MANAGE_KEYS) && positionPda.value !== null && !cpiReady.value
 );
 
 export const canInitProtocol = computed(() => !protocolExists.value);

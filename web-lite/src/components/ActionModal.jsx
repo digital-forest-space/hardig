@@ -15,7 +15,6 @@ import {
 import {
   buildInitializeProtocol,
   buildCreatePosition,
-  buildSetup,
   buildBuy,
   buildWithdraw,
   buildBorrow,
@@ -70,14 +69,6 @@ export function ActionModal({ action, onClose, onRefresh }) {
           break;
         case 'createPosition':
           built = await buildCreatePosition(program, walletPk);
-          break;
-        case 'setup':
-          built = await buildSetup(program, walletPk);
-          if (!built) {
-            pushLog('Setup already complete');
-            onClose();
-            return;
-          }
           break;
         case 'buy': {
           const lam = parseSolToLamports(amount);
@@ -144,7 +135,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
   }
 
   // Auto-submit for no-form actions (useEffect, not during render)
-  const noFormActions = ['initProtocol', 'createPosition', 'reinvest', 'setup'];
+  const noFormActions = ['initProtocol', 'createPosition', 'reinvest'];
   useEffect(() => {
     if (noFormActions.includes(action) && !didAutoSubmit.current) {
       didAutoSubmit.current = true;
@@ -212,7 +203,6 @@ export function ActionModal({ action, onClose, onRefresh }) {
   const titles = {
     initProtocol: 'Initialize Protocol',
     createPosition: 'Create Position',
-    setup: 'Setup Mayflower',
     buy: 'Buy navSOL',
     sell: 'Sell navSOL',
     borrow: 'Borrow SOL',

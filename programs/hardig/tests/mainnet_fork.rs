@@ -165,10 +165,42 @@ fn ix_create_market_config(admin: &Pubkey) -> Instruction {
     )
 }
 
-fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16) -> Instruction {
+fn config_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[ProtocolConfig::SEED], &program_id())
+}
+
+fn ix_create_collection(admin: &Pubkey) -> (Instruction, Keypair) {
+    let (config_pda, _) = config_pda();
+    let collection_kp = Keypair::new();
+
+    let mut data = sighash("create_collection");
+    let uri = "";
+    data.extend_from_slice(&(uri.len() as u32).to_le_bytes());
+    data.extend_from_slice(uri.as_bytes());
+
+    let ix = Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(collection_kp.pubkey(), true),
+            AccountMeta::new_readonly(MPL_CORE_ID, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ],
+    );
+    (ix, collection_kp)
+}
+
+fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16, collection: &Pubkey) -> Instruction {
     let (pos_pda, _) =
         Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
     let (prog_pda, _) = authority_pda(asset);
+    let (config_pda, _) = config_pda();
+    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
+    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
+    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
+    let (log_pda, _) = mayflower::derive_log_account();
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
@@ -177,12 +209,22 @@ fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16) -> Instru
         program_id(),
         &data,
         vec![
-            AccountMeta::new(*admin, true),              // admin
-            AccountMeta::new(*asset, true),               // admin_asset (signer)
-            AccountMeta::new(pos_pda, false),             // position
-            AccountMeta::new_readonly(prog_pda, false),   // program_pda
-            AccountMeta::new_readonly(MPL_CORE_ID, false), // mpl_core_program
-            AccountMeta::new_readonly(system_program::ID, false),
+            AccountMeta::new(*admin, true),                                    // admin
+            AccountMeta::new(*asset, true),                                    // admin_asset (signer)
+            AccountMeta::new(pos_pda, false),                                  // position
+            AccountMeta::new_readonly(prog_pda, false),                        // program_pda
+            AccountMeta::new_readonly(config_pda, false),                      // config
+            AccountMeta::new(*collection, false),                              // collection
+            AccountMeta::new_readonly(mc_pda, false),                          // market_config
+            AccountMeta::new_readonly(MPL_CORE_ID, false),                     // mpl_core_program
+            AccountMeta::new_readonly(system_program::ID, false),              // system_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),                    // token_program
+            AccountMeta::new(pp_pda, false),                                   // mayflower_personal_position
+            AccountMeta::new(escrow_pda, false),                               // mayflower_user_shares
+            AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false),  // mayflower_market_meta
+            AccountMeta::new_readonly(mayflower::DEFAULT_NAV_SOL_MINT, false), // nav_sol_mint
+            AccountMeta::new(log_pda, false),                                  // mayflower_log
+            AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // mayflower_program
         ],
     )
 }
@@ -364,39 +406,6 @@ fn ix_repay_with_cpi(
     )
 }
 
-/// Build init_mayflower_position instruction.
-fn ix_init_mayflower_position(
-    admin: &Pubkey,
-    admin_asset: &Pubkey,
-    position: &Pubkey,
-) -> Instruction {
-    let (prog_pda, _) = authority_pda(admin_asset);
-    let (pp_pda, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
-    let (escrow, _) = mayflower::derive_personal_position_escrow(&pp_pda);
-    let (log_account, _) = mayflower::derive_log_account();
-    let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
-
-    Instruction::new_with_bytes(
-        program_id(),
-        &sighash("init_mayflower_position"),
-        vec![
-            AccountMeta::new(*admin, true),                           // admin
-            AccountMeta::new_readonly(*admin_asset, false),           // admin_key_asset
-            AccountMeta::new(*position, false),                       // position
-            AccountMeta::new_readonly(mc_pda, false),                 // market_config
-            AccountMeta::new_readonly(prog_pda, false),               // program_pda
-            AccountMeta::new(pp_pda, false),                          // mayflower_personal_position
-            AccountMeta::new(escrow, false),                          // mayflower_user_shares
-            AccountMeta::new_readonly(mayflower::DEFAULT_MARKET_META, false), // mayflower_market_meta
-            AccountMeta::new_readonly(mayflower::DEFAULT_NAV_SOL_MINT, false), // nav_sol_mint
-            AccountMeta::new(log_account, false),                     // mayflower_log
-            AccountMeta::new_readonly(mayflower::MAYFLOWER_PROGRAM_ID, false), // mayflower_program
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),           // token_program
-            AccountMeta::new_readonly(system_program::ID, false),     // system_program
-        ],
-    )
-}
-
 /// Build reinvest instruction with all Mayflower CPI accounts.
 #[allow(dead_code)]
 fn ix_reinvest_with_cpi(
@@ -450,6 +459,8 @@ struct ForkHarness {
     admin: Keypair,
     admin_asset: Keypair,
     position_pda: Pubkey,
+    #[allow(dead_code)]
+    collection: Pubkey,
 }
 
 fn full_fork_setup(client: &RpcClient) -> ForkHarness {
@@ -458,6 +469,11 @@ fn full_fork_setup(client: &RpcClient) -> ForkHarness {
 
     // Init protocol
     send_and_confirm(client, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Create collection
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_and_confirm(client, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
 
     // Create MarketConfig for default navSOL market
     send_and_confirm(client, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
@@ -470,6 +486,7 @@ fn full_fork_setup(client: &RpcClient) -> ForkHarness {
             &admin.pubkey(),
             &admin_asset.pubkey(),
             500, // max_reinvest_spread_bps
+            &collection,
         )],
         &[&admin, &admin_asset],
     )
@@ -481,6 +498,7 @@ fn full_fork_setup(client: &RpcClient) -> ForkHarness {
         admin,
         admin_asset,
         position_pda: pos_pda,
+        collection,
     }
 }
 
@@ -526,57 +544,9 @@ fn test_mainnet_fork_init_protocol_and_position() {
 
 #[test]
 #[ignore]
-fn test_mainnet_fork_init_mayflower_position() {
-    let client = rpc();
-    let harness = full_fork_setup(&client);
-
-    // Init Mayflower PersonalPosition via CPI
-    let result = send_and_confirm(
-        &client,
-        &[ix_init_mayflower_position(
-            &harness.admin.pubkey(),
-            &harness.admin_asset.pubkey(),
-            &harness.position_pda,
-        )],
-        &[&harness.admin],
-    );
-    assert!(result.is_ok(), "init_mayflower_position failed: {:?}", result);
-
-    // Verify position_pda was stored
-    let pos = get_position(&client, &harness.position_pda);
-    let (prog_pda, _) = authority_pda(&harness.admin_asset.pubkey());
-    let (expected_pp, _) = mayflower::derive_personal_position(&prog_pda, &mayflower::DEFAULT_MARKET_META);
-    assert_eq!(pos.position_pda, expected_pp);
-
-    // Verify the Mayflower PersonalPosition account exists
-    let pp_data = client.get_account_data(&expected_pp).unwrap();
-    assert_eq!(pp_data.len(), mayflower::PP_SIZE);
-    assert_eq!(
-        &pp_data[..8],
-        &mayflower::PP_DISCRIMINATOR,
-        "PersonalPosition discriminator mismatch"
-    );
-
-    println!("Mayflower PersonalPosition created: {}", expected_pp);
-}
-
-#[test]
-#[ignore]
 fn test_mainnet_fork_buy_with_cpi() {
     let client = rpc();
     let harness = full_fork_setup(&client);
-
-    // First init Mayflower position
-    send_and_confirm(
-        &client,
-        &[ix_init_mayflower_position(
-            &harness.admin.pubkey(),
-            &harness.admin_asset.pubkey(),
-            &harness.position_pda,
-        )],
-        &[&harness.admin],
-    )
-    .unwrap();
 
     // Fund the program PDA's wSOL ATA for the buy.
     let (prog_pda, _) = authority_pda(&harness.admin_asset.pubkey());
@@ -652,18 +622,6 @@ fn test_mainnet_fork_buy_with_cpi() {
 fn test_mainnet_fork_borrow_against_floor() {
     let client = rpc();
     let harness = full_fork_setup(&client);
-
-    // Init Mayflower position
-    send_and_confirm(
-        &client,
-        &[ix_init_mayflower_position(
-            &harness.admin.pubkey(),
-            &harness.admin_asset.pubkey(),
-            &harness.position_pda,
-        )],
-        &[&harness.admin],
-    )
-    .unwrap();
 
     // Setup wSOL and navSOL ATAs + fund
     let (prog_pda, _) = authority_pda(&harness.admin_asset.pubkey());
@@ -755,18 +713,6 @@ fn test_mainnet_fork_borrow_against_floor() {
 fn test_mainnet_fork_repay_debt() {
     let client = rpc();
     let harness = full_fork_setup(&client);
-
-    // Init + buy + borrow (condensed setup)
-    send_and_confirm(
-        &client,
-        &[ix_init_mayflower_position(
-            &harness.admin.pubkey(),
-            &harness.admin_asset.pubkey(),
-            &harness.position_pda,
-        )],
-        &[&harness.admin],
-    )
-    .unwrap();
 
     let (prog_pda, _) = authority_pda(&harness.admin_asset.pubkey());
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);
@@ -865,18 +811,6 @@ fn test_mainnet_fork_repay_debt() {
 fn test_mainnet_fork_full_lifecycle() {
     let client = rpc();
     let harness = full_fork_setup(&client);
-
-    // 1. Init Mayflower position
-    send_and_confirm(
-        &client,
-        &[ix_init_mayflower_position(
-            &harness.admin.pubkey(),
-            &harness.admin_asset.pubkey(),
-            &harness.position_pda,
-        )],
-        &[&harness.admin],
-    )
-    .unwrap();
 
     let (prog_pda, _) = authority_pda(&harness.admin_asset.pubkey());
     let user_wsol_ata = get_ata(&prog_pda, &mayflower::DEFAULT_WSOL_MINT);

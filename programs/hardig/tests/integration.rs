@@ -115,7 +115,7 @@ fn plant_mayflower_stubs(svm: &mut LiteSVM) {
 }
 
 /// Plant the PersonalPosition and user_shares PDAs for a given admin_asset.
-/// Must be called AFTER the position is created (admin_asset is known).
+/// Must be called BEFORE create_position so the Mayflower CPI has accounts to write to.
 fn plant_position_stubs(svm: &mut LiteSVM, admin_asset: &Pubkey) {
     let (program_pda, _) = Pubkey::find_program_address(
         &[b"authority", admin_asset.as_ref()],
@@ -135,26 +135,6 @@ fn plant_position_stubs(svm: &mut LiteSVM, admin_asset: &Pubkey) {
     // Token accounts need 165 bytes (SPL token account size), owned by token program
     plant_account(svm, &wsol_ata, &SPL_TOKEN_ID, 165);
     plant_account(svm, &nav_sol_ata, &SPL_TOKEN_ID, 165);
-}
-
-/// Patch the PositionNFT account to set `market_config` and `position_pda` fields,
-/// simulating what `init_mayflower_position` would do via CPI.
-fn patch_position_for_cpi(svm: &mut LiteSVM, admin_asset: &Pubkey) {
-    let (pos_pda, _) = position_pda(admin_asset);
-    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
-
-    let (program_pda, _) = Pubkey::find_program_address(
-        &[b"authority", admin_asset.as_ref()],
-        &program_id(),
-    );
-    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
-
-    let mut account = svm.get_account(&pos_pda).unwrap();
-    // position_pda at offset 40..72
-    account.data[40..72].copy_from_slice(pp_pda.as_ref());
-    // market_config at offset 72..104
-    account.data[72..104].copy_from_slice(mc_pda.as_ref());
-    svm.set_account(pos_pda, account).unwrap();
 }
 
 fn plant_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usize) {
@@ -270,6 +250,10 @@ fn ix_create_position(
     let (program_pda, _) =
         Pubkey::find_program_address(&[b"authority", asset.as_ref()], &program_id());
     let (config_pda, _) = config_pda();
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
+    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
+    let (log_pda, _) = mayflower::derive_log_account();
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
@@ -278,14 +262,22 @@ fn ix_create_position(
         program_id(),
         &data,
         vec![
-            AccountMeta::new(*admin, true),              // admin
-            AccountMeta::new(*asset, true),               // admin_asset (signer)
-            AccountMeta::new(position_pda, false),        // position
-            AccountMeta::new_readonly(program_pda, false), // program_pda
-            AccountMeta::new_readonly(config_pda, false),  // config
-            AccountMeta::new(*collection, false),          // collection
-            AccountMeta::new_readonly(MPL_CORE_ID, false), // mpl_core_program
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new(*admin, true),                                    // admin
+            AccountMeta::new(*asset, true),                                    // admin_asset (signer)
+            AccountMeta::new(position_pda, false),                             // position
+            AccountMeta::new_readonly(program_pda, false),                     // program_pda
+            AccountMeta::new_readonly(config_pda, false),                      // config
+            AccountMeta::new(*collection, false),                              // collection
+            AccountMeta::new_readonly(mc_pda, false),                          // market_config
+            AccountMeta::new_readonly(MPL_CORE_ID, false),                     // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),  // system_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),                    // token_program
+            AccountMeta::new(pp_pda, false),                                   // mayflower_personal_position
+            AccountMeta::new(escrow_pda, false),                               // mayflower_user_shares
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),             // mayflower_market_meta
+            AccountMeta::new_readonly(DEFAULT_NAV_SOL_MINT, false),            // nav_sol_mint
+            AccountMeta::new(log_pda, false),                                  // mayflower_log
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),            // mayflower_program
         ],
     )
 }
@@ -663,8 +655,9 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
     // Create MarketConfig for default navSOL market
     send_tx(svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
 
-    // Create position
+    // Create position (plant Mayflower stubs first so the CPI has accounts to write to)
     let admin_asset = Keypair::new();
+    plant_position_stubs(svm, &admin_asset.pubkey());
     send_tx(
         svm,
         &[ix_create_position(
@@ -678,12 +671,6 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
     .unwrap();
 
     let (pos_pda, _) = position_pda(&admin_asset.pubkey());
-
-    // Plant Mayflower position stubs (personal_position, escrow, ATAs)
-    plant_position_stubs(svm, &admin_asset.pubkey());
-
-    // Patch PositionNFT to set market_config and position_pda (simulates init_mayflower_position)
-    patch_position_for_cpi(svm, &admin_asset.pubkey());
 
     // Authorize operator
     let operator = Keypair::new();
@@ -1253,10 +1240,11 @@ fn test_wrong_position_key_rejected() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    // Create a second position
+    // Create a second position (plant stubs before create_position for Mayflower CPI)
     let admin2 = Keypair::new();
     svm.airdrop(&admin2.pubkey(), 10_000_000_000).unwrap();
     let asset2 = Keypair::new();
+    plant_position_stubs(&mut svm, &asset2.pubkey());
     send_tx(
         &mut svm,
         &[ix_create_position(&admin2.pubkey(), &asset2.pubkey(), 300, &h.collection)],
@@ -1264,10 +1252,6 @@ fn test_wrong_position_key_rejected() {
     )
     .unwrap();
     let (pos2, _) = position_pda(&asset2.pubkey());
-
-    // Plant stubs for second position
-    plant_position_stubs(&mut svm, &asset2.pubkey());
-    patch_position_for_cpi(&mut svm, &asset2.pubkey());
 
     // Try to use admin1's key on position2 — should fail (update_authority mismatch)
     let ix = ix_buy(
@@ -1305,7 +1289,11 @@ fn test_create_position_and_admin_asset() {
     send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
     let collection = coll_kp.pubkey();
 
+    // Create MarketConfig for default navSOL market
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
     let asset_kp = Keypair::new();
+    plant_position_stubs(&mut svm, &asset_kp.pubkey());
     send_tx(
         &mut svm,
         &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 750, &collection)],
@@ -1320,7 +1308,8 @@ fn test_create_position_and_admin_asset() {
     assert_eq!(pos.max_reinvest_spread_bps, 750);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
-    assert_eq!(pos.market_config, Pubkey::default());
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    assert_eq!(pos.market_config, mc_pda);
 
     // Check MPL-Core asset exists (owned by MPL-Core program)
     let asset_account = svm.get_account(&asset_kp.pubkey());
@@ -2059,7 +2048,11 @@ fn test_create_position_creates_mpl_core_asset() {
     send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
     let collection = coll_kp.pubkey();
 
+    // Create MarketConfig for default navSOL market
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
     let asset_kp = Keypair::new();
+    plant_position_stubs(&mut svm, &asset_kp.pubkey());
     send_tx(
         &mut svm,
         &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 500, &collection)],

@@ -42,8 +42,6 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let mf_status = if app.mayflower_initialized {
         "CPI Ready"
-    } else if app.position_pda.is_some() {
-        "Need Init"
     } else {
         ""
     };
@@ -165,26 +163,6 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
                 "{} SOL",
                 app::lamports_to_sol(app.nav_sol_balance)
             )),
-        ]));
-    } else {
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(
-                "  Mayflower: ",
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                "Not initialized",
-                Style::default().fg(Color::DarkGray),
-            ),
-            if app.has_perm(hardig::state::PERM_MANAGE_KEYS) {
-                Span::styled(
-                    " - Press [S] to setup",
-                    Style::default().fg(Color::Yellow),
-                )
-            } else {
-                Span::raw("")
-            },
         ]));
     }
 
@@ -578,11 +556,6 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 "[n] New Position  [r] Refresh  [q] Quit".into()
             } else {
                 let mut parts: Vec<&str> = Vec::new();
-
-                // One-time setup (admin only)
-                if app.has_perm(hardig::state::PERM_MANAGE_KEYS) && !app.cpi_ready() {
-                    parts.push("[S]etup");
-                }
 
                 // Financial actions (require CPI)
                 if app.can_buy() { parts.push("[b]uy"); }

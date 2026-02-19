@@ -1,7 +1,5 @@
 export { buildInitializeProtocol } from './initializeProtocol.js';
 export { buildCreatePosition } from './createPosition.js';
-export { buildInitMayflowerPosition } from './initMayflowerPosition.js';
-export { buildSetup } from './setup.js';
 export { buildBuy } from './buy.js';
 export { buildWithdraw } from './withdraw.js';
 export { buildBorrow } from './borrow.js';

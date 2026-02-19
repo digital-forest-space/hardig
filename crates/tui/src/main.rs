@@ -48,10 +48,8 @@ enum Action {
         #[arg(long)]
         uri: String,
     },
-    /// Create a new position NFT
-    CreatePosition,
-    /// One-time setup: init Mayflower position + create ATAs
-    Setup {
+    /// Create a new position NFT (also initializes Mayflower PersonalPosition)
+    CreatePosition {
         /// Nav token mint to use (defaults to navSOL).
         /// When specified, the MarketConfig for this mint must already exist on-chain.
         #[arg(long)]
@@ -396,7 +394,6 @@ fn action_to_name(action: &Action) -> String {
         Action::MigrateConfig => "migrate-config".into(),
         Action::CreateCollection { .. } => "create-collection".into(),
         Action::CreatePosition { .. } => "create-position".into(),
-        Action::Setup { .. } => "setup".into(),
         Action::Buy { .. } => "buy".into(),
         Action::Sell { .. } => "sell".into(),
         Action::Borrow { .. } => "borrow".into(),
@@ -439,20 +436,11 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             }
             app.build_create_collection(uri.clone());
         }
-        Action::CreatePosition => {
+        Action::CreatePosition { ref nav_mint } => {
             if app.position_pda.is_some() {
                 return Some(CliOutput::Noop {
                     action: "create-position".into(),
                     message: "Position already exists for this keypair".into(),
-                });
-            }
-            app.build_create_position();
-        }
-        Action::Setup { ref nav_mint } => {
-            if app.cpi_ready() {
-                return Some(CliOutput::Noop {
-                    action: "setup".into(),
-                    message: "Mayflower position and ATAs already initialized".into(),
                 });
             }
             let parsed_mint = match nav_mint {
@@ -462,7 +450,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                         Ok(pk) => Some(pk),
                         Err(_) => {
                             return Some(CliOutput::Error {
-                                action: "setup".into(),
+                                action: "create-position".into(),
                                 error: format!("Invalid --nav-mint pubkey: {}", s),
                             });
                         }
@@ -470,7 +458,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 }
                 None => None,
             };
-            app.build_setup(parsed_mint);
+            app.build_create_position(parsed_mint);
         }
         Action::Buy { amount } => {
             app.form_fields = vec![("Amount (SOL)".into(), sol_amount_to_field(*amount))];

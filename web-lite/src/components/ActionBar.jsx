@@ -6,7 +6,6 @@ import {
   canReinvest,
   canAuthorize,
   canRevoke,
-  canSetup,
   canInitProtocol,
   canCreatePosition,
   positionPda,
@@ -26,11 +25,6 @@ export function ActionBar({ onAction }) {
       {canCreatePosition.value && (
         <button class="primary" onClick={() => onAction('createPosition')}>
           New Position
-        </button>
-      )}
-      {canSetup.value && (
-        <button class="primary" onClick={() => onAction('setup')}>
-          Setup Mayflower
         </button>
       )}
       {hasPosition && (

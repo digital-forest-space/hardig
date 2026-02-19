@@ -2,7 +2,7 @@
   "address": "4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p",
   "metadata": {
     "name": "hardig",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"
   },
@@ -767,90 +767,22 @@
           "writable": true
         },
         {
-          "name": "mpl_core_program",
-          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "max_reinvest_spread_bps",
-          "type": "u16"
-        }
-      ]
-    },
-    {
-      "name": "init_mayflower_position",
-      "docs": [
-        "Initialize a Mayflower PersonalPosition owned by this program's PDA.",
-        "Called once after create_position (admin only)."
-      ],
-      "discriminator": [
-        182,
-        3,
-        228,
-        23,
-        79,
-        67,
-        116,
-        234
-      ],
-      "accounts": [
-        {
-          "name": "admin",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "admin_key_asset",
-          "docs": [
-            "The admin's key NFT (MPL-Core asset)."
-          ]
-        },
-        {
-          "name": "position",
-          "docs": [
-            "The position (mutated to store Mayflower PersonalPosition PDA and MarketConfig)."
-          ],
-          "writable": true
-        },
-        {
           "name": "market_config",
           "docs": [
             "The MarketConfig for the target market."
           ]
         },
         {
-          "name": "program_pda",
-          "docs": [
-            "Program PDA that will own the Mayflower PersonalPosition."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  117,
-                  116,
-                  104,
-                  111,
-                  114,
-                  105,
-                  116,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "position.admin_asset",
-                "account": "PositionNFT"
-              }
-            ]
-          }
+          "name": "mpl_core_program",
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
           "name": "mayflower_personal_position",
@@ -890,17 +822,14 @@
           "docs": [
             "The Mayflower program."
           ]
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "max_reinvest_spread_bps",
+          "type": "u16"
+        }
+      ]
     },
     {
       "name": "initialize_protocol",
@@ -925,6 +854,57 @@
         },
         {
           "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_config",
+      "docs": [
+        "Migrate ProtocolConfig from v0 (41 bytes) to v1 (73 bytes, adds collection field)."
+      ],
+      "discriminator": [
+        92,
+        131,
+        58,
+        105,
+        210,
+        154,
+        224,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The config PDA. We use UncheckedAccount because the old layout",
+            "can't be deserialized as the new ProtocolConfig struct."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1664,16 +1644,21 @@
     },
     {
       "code": 6019,
+      "name": "AlreadyMigrated",
+      "msg": "Config account already has the expected size"
+    },
+    {
+      "code": 6020,
       "name": "InvalidNftMint",
       "msg": "Invalid NFT mint"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "InvalidPositionPda",
       "msg": "Invalid position PDA"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "PositionAlreadyExists",
       "msg": "Position already exists for this admin key"
     }
@@ -1828,7 +1813,7 @@
           {
             "name": "market_config",
             "docs": [
-              "The MarketConfig PDA this position is bound to (set during init_mayflower_position)."
+              "The MarketConfig PDA this position is bound to (set during create_position)."
             ],
             "type": "pubkey"
           },

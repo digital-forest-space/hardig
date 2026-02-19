@@ -24,7 +24,7 @@ pub struct PositionNFT {
     pub admin_asset: Pubkey,
     /// The Mayflower PersonalPosition PDA owned by this program.
     pub position_pda: Pubkey,
-    /// The MarketConfig PDA this position is bound to (set during init_mayflower_position).
+    /// The MarketConfig PDA this position is bound to (set during create_position).
     pub market_config: Pubkey,
     /// navSOL deposited (local tracking, Mayflower is source of truth).
     pub deposited_nav: u64,

@@ -88,12 +88,6 @@ pub mod hardig {
         instructions::reinvest::handler(ctx, min_out)
     }
 
-    /// Initialize a Mayflower PersonalPosition owned by this program's PDA.
-    /// Called once after create_position (admin only).
-    pub fn init_mayflower_position(ctx: Context<InitMayflowerPosition>) -> Result<()> {
-        instructions::init_mayflower_position::handler(ctx)
-    }
-
     /// Transfer protocol admin rights to a new pubkey (current admin only).
     pub fn transfer_admin(ctx: Context<TransferAdmin>, new_admin: Pubkey) -> Result<()> {
         instructions::transfer_admin::handler(ctx, new_admin)
