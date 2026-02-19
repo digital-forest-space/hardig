@@ -214,3 +214,7 @@ Anchor.toml                   # Anchor configuration
 8. **Borrow / Repay / Sell** — manage debt and withdraw as needed
 9. **Revoke Key** — close authorization; burns the NFT if admin holds it
 10. **Transfer Admin** — hand off protocol admin rights to a new wallet
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
