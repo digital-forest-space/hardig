@@ -103,6 +103,11 @@ pub mod hardig {
         instructions::accept_admin::handler(ctx)
     }
 
+    /// No-op liveness proof. Updates last_admin_activity to prove admin is active.
+    pub fn heartbeat(ctx: Context<Heartbeat>) -> Result<()> {
+        instructions::heartbeat::handler(ctx)
+    }
+
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
     pub fn create_market_config(
         ctx: Context<CreateMarketConfig>,
