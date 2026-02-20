@@ -174,7 +174,11 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
     for (i, k) in app.keyring.iter().enumerate() {
         let marker = if i == app.key_cursor { ">" } else { " " };
         let held = if k.held_by_signer { "YOU" } else { "" };
-        let name = if is_admin(k) { "Admin" } else { "Delegated" };
+        let display_name = if k.name.is_empty() {
+            if is_admin(k) { "Admin".to_string() } else { "Delegated".to_string() }
+        } else {
+            k.name.clone()
+        };
         let style = if k.held_by_signer {
             Style::default().fg(Color::Yellow)
         } else {
@@ -183,7 +187,7 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
         rows.push(
             Row::new(vec![
                 marker.to_string(),
-                name.to_string(),
+                display_name,
                 app::short_pubkey(&k.asset),
                 held.to_string(),
             ])
@@ -218,7 +222,7 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     let widths = [
         Constraint::Length(2),
-        Constraint::Min(20),
+        Constraint::Min(28),
         Constraint::Length(14),
         Constraint::Length(5),
     ];

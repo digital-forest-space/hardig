@@ -98,6 +98,8 @@ pub struct KeyEntry {
     pub asset: Pubkey,
     pub permissions: u8,
     pub held_by_signer: bool,
+    /// On-chain MPL-Core asset name (e.g. "Härdig Admin Key - Savings").
+    pub name: String,
     /// Rate-limit bucket for sell (populated for keys with PERM_LIMITED_SELL).
     pub sell_bucket: Option<RateBucket>,
     /// Rate-limit bucket for borrow (populated for keys with PERM_LIMITED_BORROW).
@@ -441,7 +443,7 @@ impl App {
         let borrow_days = self.find_field_value("Borrow Refill Days");
         let borrow_hours = self.find_field_value("Borrow Refill Hours");
         let borrow_mins = self.find_field_value("Borrow Refill Minutes");
-        let name_val = self.find_field_value("Name (optional)");
+        let name_val = self.find_field_value("Label (optional)");
 
         // Rebuild fields after index 1
         self.form_fields.truncate(2);
@@ -457,7 +459,7 @@ impl App {
             self.form_fields.push(("Borrow Refill Hours".into(), borrow_hours.unwrap_or("0".into())));
             self.form_fields.push(("Borrow Refill Minutes".into(), borrow_mins.unwrap_or("0".into())));
         }
-        self.form_fields.push(("Name (optional)".into(), name_val.unwrap_or_default()));
+        self.form_fields.push(("Label (optional)".into(), name_val.unwrap_or_default()));
 
         // Clamp cursor if fields were removed
         if self.input_field >= self.form_fields.len() {
@@ -519,7 +521,7 @@ impl App {
         self.screen = Screen::Form;
         self.form_info = None;
         self.form_kind = Some(FormKind::CreatePosition);
-        self.form_fields = vec![("Name (optional)".into(), String::new())];
+        self.form_fields = vec![("Label (optional)".into(), String::new())];
         self.input_field = 0;
         self.input_buf.clear();
     }
@@ -534,7 +536,7 @@ impl App {
         self.form_fields = vec![
             ("Target Wallet (pubkey)".into(), my_wallet.clone()),
             ("Permissions".into(), PRESET_OPERATOR.to_string()),
-            ("Name (optional)".into(), String::new()),
+            ("Label (optional)".into(), String::new()),
         ];
         self.input_field = 0;
         self.input_buf = my_wallet;
@@ -819,7 +821,7 @@ impl App {
         let (log_pda, _) = derive_log_account();
 
         // Read optional name from form field (index 0 when using TUI form)
-        let name_str = self.find_field_value("Name (optional)").unwrap_or_default();
+        let name_str = self.find_field_value("Label (optional)").unwrap_or_default();
         let name_bytes = match Self::serialize_optional_name(&name_str) {
             Ok(b) => b,
             Err(msg) => {
@@ -858,8 +860,10 @@ impl App {
 
         description.insert(0, "Create Position".into());
         let name_trimmed = name_str.trim();
-        if !name_trimmed.is_empty() {
-            description.push(format!("Name: {}", name_trimmed));
+        if name_trimmed.is_empty() {
+            description.push("Name: H\u{00e4}rdig Admin Key".into());
+        } else {
+            description.push(format!("Name: H\u{00e4}rdig Admin Key - {}", name_trimmed));
         }
         description.push(format!("Admin Asset: {}", asset));
         description.push(format!("Position PDA: {}", position_pda));
@@ -964,7 +968,7 @@ impl App {
         let (config_pda, _) = Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
 
         // Read optional name from form field
-        let name_str = self.find_field_value("Name (optional)").unwrap_or_default();
+        let name_str = self.find_field_value("Label (optional)").unwrap_or_default();
         let name_bytes = match Self::serialize_optional_name(&name_str) {
             Ok(b) => b,
             Err(msg) => {
@@ -1000,8 +1004,10 @@ impl App {
             format!("Permissions: {} (0x{:02X})", permissions_name(permissions_u8), permissions_u8),
         ];
         let name_trimmed = name_str.trim();
-        if !name_trimmed.is_empty() {
-            desc.push(format!("Name: {}", name_trimmed));
+        if name_trimmed.is_empty() {
+            desc.push("Name: H\u{00e4}rdig Key".into());
+        } else {
+            desc.push(format!("Name: H\u{00e4}rdig Key - {}", name_trimmed));
         }
         desc.push(format!("Key Asset: {}", new_asset));
 
@@ -1790,11 +1796,13 @@ impl App {
             self.position = Some(pos);
 
             // Build keyring: admin key + all delegated keys (via KeyState scan)
+            let admin_name = self.read_asset_name(&admin_asset).unwrap_or_default();
             self.keyring.push(KeyEntry {
                 pda: pos_pda,
                 asset: admin_asset,
                 permissions: PRESET_ADMIN,
                 held_by_signer: signer_is_admin,
+                name: admin_name,
                 sell_bucket: None,
                 borrow_bucket: None,
             });
@@ -1827,6 +1835,7 @@ impl App {
                     }
                     let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
                     let held = self.check_asset_owner(&ks.asset, &signer);
+                    let key_name = self.read_asset_name(&ks.asset).unwrap_or_default();
                     let sell_bucket = if perms & PERM_LIMITED_SELL != 0 {
                         Some(ks.sell_bucket.clone())
                     } else {
@@ -1842,6 +1851,7 @@ impl App {
                         asset: ks.asset,
                         permissions: perms,
                         held_by_signer: held,
+                        name: key_name,
                         sell_bucket,
                         borrow_bucket,
                     });
@@ -1972,6 +1982,14 @@ impl App {
             .iter()
             .find(|a| a.key == "permissions")
             .and_then(|a| a.value.parse::<u8>().ok())
+    }
+
+    /// Read the name field from an MPL-Core asset's BaseAssetV1 data.
+    fn read_asset_name(&self, asset: &Pubkey) -> Option<String> {
+        use mpl_core::accounts::BaseAssetV1;
+        let acc = self.rpc.get_account(asset).ok()?;
+        let base = BaseAssetV1::from_bytes(&acc.data).ok()?;
+        Some(base.name)
     }
 
     /// Read the "position" attribute from an MPL-Core asset's Attributes plugin.
