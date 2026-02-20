@@ -13,8 +13,8 @@ The on-chain program only enforces the inactivity threshold. Grace periods, aler
 ## Design Principles
 
 - Recovery is **repeatable**. Each new admin can configure a fresh recovery key. The position is only irrecoverable if both the current admin NFT and the current recovery NFT are lost simultaneously.
-- Recovery **invalidates itself**. After execution, the recovery key's authorization is closed and recovery must be explicitly reconfigured. No lingering recovery authority.
-- Recovery fits the **existing keyring model**. The recovery key is an NFT, validated through `KeyAuthorization` with a new `KeyRole::Recovery` role.
+- Recovery **invalidates itself**. After execution, the recovery key is burned and recovery must be explicitly reconfigured. No lingering recovery authority.
+- Recovery fits the **existing keyring model**. The recovery key is an MPL-Core NFT in the Hardig collection, with `position` attribute and permissions = 0 (no financial operations). It is validated directly via `position.recovery_asset`, not through `validate_key()`.
 - The **authority PDA is stable**. The Mayflower position remains accessible through any number of recovery rotations.
 
 ## State Changes
@@ -23,16 +23,13 @@ The on-chain program only enforces the inactivity threshold. Grace periods, aler
 
 | Field | Change | Type | Notes |
 |---|---|---|---|
-| `admin_nft_mint` | **Rename** to `authority_seed` | `Pubkey` | Permanent PDA seed, never changes. Initialized to the first admin NFT mint at position creation. |
-| `recovery_nft_mint` | **Add** | `Pubkey` | The recovery NFT mint. `Pubkey::default()` = no recovery configured. |
+| `admin_asset` | **Rename** to `authority_seed` | `Pubkey` | Permanent PDA seed, never changes. Initialized to the first admin MPL-Core asset pubkey at position creation. |
+| `current_admin_asset` | **Add** | `Pubkey` | The current admin key NFT (MPL-Core asset). Updated on recovery. Initialized to `admin_asset` value at creation. |
+| `recovery_asset` | **Add** | `Pubkey` | The recovery key NFT (MPL-Core asset). `Pubkey::default()` = no recovery configured. |
 | `recovery_lockout_secs` | **Add** | `i64` | Inactivity threshold in seconds before recovery can execute. |
 | `recovery_config_locked` | **Add** | `bool` | If true, recovery config cannot be changed. Prevents an attacker who gains admin from disabling recovery. |
 
-Space impact: 140 -> 181 bytes (+41 bytes, ~0.0005 SOL additional rent per position).
-
-### KeyRole enum (modified)
-
-Add `Recovery = 4`. This role is not included in any existing instruction's allowed roles, so a recovery key cannot perform any financial operation.
+Space impact: 132 -> 205 bytes (+73 bytes, ~0.001 SOL additional rent per position).
 
 ### HardigError enum (modified)
 
@@ -41,22 +38,48 @@ Add:
 - `RecoveryLockoutNotExpired` -- admin has been active within the lockout period
 - `RecoveryConfigLocked` -- recovery config is locked and cannot be changed
 
+### Permission model
+
+No new permission bits are needed. The recovery key has permissions = 0 in its MPL-Core Attributes, which means it fails all `validate_key()` checks (which require `permissions & required != 0`). The `execute_recovery` instruction validates the recovery key directly by checking:
+1. `key_asset_info.owner == mpl_core::ID` (valid MPL-Core account)
+2. Signer owns the asset (parsed from asset data bytes 1..33)
+3. `key_asset.key() == position.recovery_asset`
+
+This is a deliberate subset of `validate_key()` -- permissions are irrelevant for recovery, only ownership matters.
+
 ## New Instructions
 
 ### 1. `configure_recovery`
 
 **Who**: Admin only.
 
-**Purpose**: Sets the recovery NFT mint, lockout duration, and optional config lock.
+**Purpose**: Sets the recovery key, lockout duration, and optional config lock.
+
+**Accounts**:
+- `admin` (signer, mut) -- the admin wallet
+- `admin_key_asset` (unchecked) -- admin's MPL-Core key NFT, validated via `validate_key()`
+- `position` (mut) -- the PositionNFT account (may need realloc)
+- `recovery_asset` (signer) -- new MPL-Core asset to create for the recovery key
+- `target_wallet` (unchecked) -- wallet that will hold the recovery key
+- `config` -- ProtocolConfig PDA (for collection address)
+- `collection` (mut, unchecked) -- MPL-Core collection
+- `mpl_core_program` -- MPL-Core program
+- `system_program` -- System program
 
 **Behavior**:
-- Validates admin key via `validate_key()` with `KeyRole::Admin`.
-- Requires `position.recovery_config_locked == false`.
-- Sets `position.recovery_nft_mint`, `position.recovery_lockout_secs`, `position.recovery_config_locked`.
-- Creates a `KeyAuthorization` PDA for the recovery NFT mint with `KeyRole::Recovery`.
-- If replacing an existing recovery key, closes the old `KeyAuthorization` first.
+- Validates admin key via `validate_key()` with `PERM_MANAGE_KEYS`.
+- Requires `position.recovery_config_locked == false` (error: `RecoveryConfigLocked`).
+- If replacing an existing recovery key (`position.recovery_asset != Pubkey::default()`), burns the old recovery asset via `BurnV1CpiBuilder`.
+- Creates a new recovery key NFT via `CreateV2CpiBuilder`:
+  - Name: "Hardig Recovery Key" (or with optional suffix)
+  - Attributes: `permissions = 0`, `position = authority_seed`, `recovery = true`
+  - Plugins: `PermanentBurnDelegate`, `PermanentTransferDelegate` (same as other keys)
+  - Owner: `target_wallet` (should be a DIFFERENT wallet from admin)
+- Sets `position.recovery_asset = recovery_asset.key()`.
+- Sets `position.recovery_lockout_secs` from instruction arg.
+- If `lock_config` arg is true, requires `recovery_asset != Pubkey::default()` and sets `position.recovery_config_locked = true`.
 - Updates `position.last_admin_activity` (admin action).
-- For existing positions (pre-recovery feature): uses `realloc` to expand from 140 to 181 bytes.
+- For existing positions (pre-recovery): uses Anchor `realloc` to expand from 132 to 205 bytes. Payer covers additional rent.
 
 ### 2. `execute_recovery`
 
@@ -64,33 +87,46 @@ Add:
 
 **Purpose**: Claims admin control after the inactivity threshold has passed.
 
+**Accounts**:
+- `recovery_holder` (signer, mut) -- the recovery key holder's wallet
+- `recovery_key_asset` (unchecked) -- the recovery MPL-Core asset, validated directly
+- `position` (mut) -- the PositionNFT account
+- `old_admin_asset` (mut, unchecked) -- the old admin's MPL-Core asset (to burn)
+- `new_admin_asset` (signer) -- new MPL-Core asset to create for the new admin key
+- `config` -- ProtocolConfig PDA (for collection address + signing)
+- `collection` (mut, unchecked) -- MPL-Core collection
+- `mpl_core_program` -- MPL-Core program
+- `system_program` -- System program
+
 **Preconditions**:
-- Recovery key holder proves NFT ownership via `validate_key()` with `KeyRole::Recovery`.
+- Recovery key holder proves NFT ownership: `recovery_key_asset.owner == mpl_core::ID`, signer owns the asset, `recovery_key_asset.key() == position.recovery_asset`.
 - `Clock::get()?.unix_timestamp - position.last_admin_activity >= position.recovery_lockout_secs`
+- `position.recovery_asset != Pubkey::default()` (error: `RecoveryNotConfigured`)
 
 **Behavior** (atomic, single instruction):
-1. **Mint new admin NFT** to recovery key holder's wallet:
-   - Create a new mint account.
-   - Mint 1 token to recovery holder's ATA.
-   - Set mint authority to `None` (burned, consistent with existing pattern).
-   - Set freeze authority to the program PDA.
-2. **Authorize new admin**:
-   - Create a new `KeyAuthorization` PDA for the new admin NFT mint with `KeyRole::Admin`.
-3. **Invalidate old admin**:
-   - Close the old admin's `KeyAuthorization` PDA.
-   - Freeze the old admin's NFT ATA (program has freeze authority).
-4. **Invalidate recovery key**:
-   - Close the recovery key's `KeyAuthorization` PDA.
-   - Set `position.recovery_nft_mint = Pubkey::default()`.
-5. **Update position state**:
-   - Set `position.last_admin_activity = Clock::get()?.unix_timestamp`.
-   - Do NOT change `position.authority_seed` (preserves Mayflower PDA).
+1. **Create new admin NFT** via `CreateV2CpiBuilder`:
+   - Owner: `recovery_holder` wallet
+   - Attributes: `permissions = PRESET_ADMIN`, `position = position.authority_seed`
+   - Same plugin setup as `create_position` (PermanentBurnDelegate, PermanentTransferDelegate)
+2. **Burn old admin NFT** via `BurnV1CpiBuilder`:
+   - Uses config PDA as authority (PermanentBurnDelegate)
+   - Validates `old_admin_asset.key() == position.current_admin_asset`
+3. **Burn recovery key** via `BurnV1CpiBuilder`:
+   - Uses config PDA as authority (PermanentBurnDelegate)
+4. **Update position state**:
+   - `position.current_admin_asset = new_admin_asset.key()`
+   - `position.recovery_asset = Pubkey::default()` (no active recovery)
+   - `position.recovery_lockout_secs = 0`
+   - `position.recovery_config_locked = false` (new admin can configure fresh recovery)
+   - `position.last_admin_activity = Clock::get()?.unix_timestamp`
+   - Do NOT change `position.authority_seed` (preserves Mayflower PDA)
 
 **Post-recovery state**:
 - New admin NFT is active with full admin privileges.
-- Old admin NFT is frozen and unauthorized (effectively dead).
-- Recovery NFT is unauthorized (inert token, no `KeyAuthorization`).
+- Old admin NFT is burned (account closed by MPL-Core).
+- Recovery NFT is burned (account closed by MPL-Core).
 - No active recovery key -- new admin must call `configure_recovery` to set one up.
+- Existing delegated keys still work (their `position` attribute matches `authority_seed`).
 
 ### 3. `heartbeat`
 
@@ -98,55 +134,80 @@ Add:
 
 **Purpose**: No-op liveness proof. Updates `last_admin_activity` without performing any financial operation.
 
+**Accounts**:
+- `admin` (signer) -- the admin wallet
+- `admin_key_asset` (unchecked) -- admin's MPL-Core key NFT
+- `position` (mut) -- the PositionNFT account
+
 **Behavior**:
-- Validates admin key via `validate_key()` with `KeyRole::Admin`.
+- Validates admin key via `validate_key()` with `PERM_MANAGE_KEYS`.
 - Sets `position.last_admin_activity = Clock::get()?.unix_timestamp`.
 - No other state changes.
 
+## Rename: admin_asset -> authority_seed
+
+The field `admin_asset` in `PositionNFT` is renamed to `authority_seed` to reflect its true purpose: a permanent PDA seed, not a pointer to the current admin NFT. A new `current_admin_asset` field is added to track the current admin key.
+
+This rename is a **field rename only**. Borsh serialization is positional, not named. The on-chain byte layout is unchanged for existing fields. No data migration is needed for the rename itself (only realloc for the new fields).
+
+### Files affected by the rename
+
+**On-chain program:**
+- `state.rs` -- field definition, SIZE constant, add `current_admin_asset`
+- `create_position.rs` -- initialization (set both `authority_seed` and `current_admin_asset`)
+- `buy.rs`, `withdraw.rs`, `borrow.rs`, `repay.rs`, `reinvest.rs` -- signer seeds change from `position.admin_asset` to `position.authority_seed`, admin activity check changes from `key_asset == position.admin_asset` to `key_asset == position.current_admin_asset`
+- `authorize_key.rs` -- `position.admin_asset` references change to `position.authority_seed` (for `position` attribute binding) and `position.current_admin_asset` (for validate_key)
+- `revoke_key.rs` -- `CannotRevokeAdminKey` guard changes from `position.admin_asset` to `position.current_admin_asset`
+
+**Clients (TUI + web-lite):**
+- References to `admin_asset` in PositionNFT deserialization change to `authority_seed`
+- New `current_admin_asset` field for admin identity checks
+- Discovery logic: match both `authority_seed` and `current_admin_asset` where needed
+
 ## Authority PDA
 
-The authority PDA derivation is renamed but unchanged in behavior:
+The authority PDA derivation uses the permanent seed:
 
 ```
 seeds = [b"authority", position.authority_seed.as_ref()]
 ```
 
-`authority_seed` is set once at position creation (to the first admin NFT mint) and never changes. This ensures the Mayflower `PersonalPosition` remains accessible through any number of admin rotations.
+`authority_seed` is set once at position creation (to the first admin MPL-Core asset pubkey) and never changes. This ensures the Mayflower `PersonalPosition` remains accessible through any number of admin rotations.
 
-The rename from `admin_nft_mint` to `authority_seed` propagates across all CPI instructions that reconstruct signer seeds.
+Similarly, the PositionNFT PDA remains stable:
 
-## Rename: admin_nft_mint -> authority_seed
-
-The field `admin_nft_mint` in `PositionNFT` is renamed to `authority_seed` to reflect its true purpose: a permanent PDA seed, not a pointer to the current admin NFT. This rename affects:
-
-- `state.rs` -- field definition and SIZE constant
-- `create_position.rs` -- initialization
-- All CPI instructions (`buy.rs`, `withdraw.rs`, `borrow.rs`, `repay.rs`, `reinvest.rs`) -- signer seed reconstruction
-- `init_mayflower_position.rs` -- signer seed reconstruction
-- Tests and clients (TUI, web)
-
-After recovery, `authority_seed` still holds the original admin NFT mint pubkey. The current admin is determined by who holds a `KeyAuthorization` with `KeyRole::Admin` for this position, not by the `authority_seed` field.
+```
+seeds = [b"position", authority_seed.as_ref()]
+```
 
 ## Migration Path
 
-**Existing positions**: `configure_recovery` uses Anchor's `realloc` to expand PositionNFT from 140 to 181 bytes. The payer (admin) covers the additional rent (~0.0005 SOL).
+**Existing positions**: A dedicated `migrate_position` instruction uses Anchor's `realloc` to expand PositionNFT from 132 to 205 bytes. It copies `authority_seed` (formerly `admin_asset`) into `current_admin_asset`, and zero-initializes recovery fields. The payer (admin) covers the additional rent (~0.001 SOL).
 
-**New positions**: Initialized with the larger size. `recovery_nft_mint = Pubkey::default()`, `recovery_lockout_secs = 0`, `recovery_config_locked = false`.
+Alternatively, `configure_recovery` itself can perform the realloc if the account is undersized. This avoids a separate migration instruction but adds complexity to one handler.
 
-**The `authority_seed` rename**: This is a field rename only. The on-chain serialized bytes are identical -- Borsh serialization is positional, not named. No data migration is needed. Only the Rust code and clients need updating.
+**New positions**: Initialized with the larger size. `current_admin_asset = authority_seed`, `recovery_asset = Pubkey::default()`, `recovery_lockout_secs = 0`, `recovery_config_locked = false`.
 
 ## Security Properties
 
 | Property | How |
 |---|---|
-| Recovery key can only execute recovery | `KeyRole::Recovery` is not in any other instruction's allowed roles |
-| Inactivity timer resets on every admin action | Already implemented across all admin instructions |
-| Old admin NFT is dead after recovery | Frozen (program has freeze authority) + KeyAuthorization closed |
-| Recovery key is dead after recovery | KeyAuthorization closed, recovery_nft_mint reset to default |
+| Recovery key can only execute recovery | Permissions = 0, fails all `validate_key()` checks for financial ops |
+| Inactivity timer resets on every admin action | Already implemented: `last_admin_activity` updated in buy, sell, borrow, repay, reinvest |
+| Old admin NFT is dead after recovery | Burned via `BurnV1CpiBuilder` (MPL-Core PermanentBurnDelegate) |
+| Recovery key is dead after recovery | Burned via `BurnV1CpiBuilder`, `recovery_asset` reset to default |
 | One recovery key per position | Stored directly in PositionNFT (not a separate PDA) |
-| Config lock prevents attacker disabling recovery | Optional `recovery_config_locked` flag |
+| Config lock prevents attacker disabling recovery | `recovery_config_locked` flag, only settable when recovery IS configured |
+| Delegated keys survive recovery | Their `position` attribute matches `authority_seed` (permanent) |
+| No dual-admin window | Single atomic Solana instruction |
 
 ## Security Considerations
+
+### Recovery protects against lost keys, not stolen keys
+
+If an attacker steals the admin key, they can drain funds immediately (sell + borrow). The recovery mechanism only fires after the lockout period -- by then the funds may be gone. The `recovery_config_locked` flag helps only in the narrower scenario where an attacker steals the admin key and tries to *disable* recovery rather than drain immediately.
+
+Users must understand: recovery is insurance against *lost access*, not against *compromised keys*.
 
 ### Clock sysvar reliability
 
@@ -164,6 +225,14 @@ If an attacker steals the recovery NFT, they must wait for the full inactivity p
 
 If both the current admin NFT and current recovery NFT are lost simultaneously, funds are irrecoverable. This is an accepted property of self-custody and must be clearly communicated to users.
 
+### Compute budget
+
+`execute_recovery` performs two MPL-Core creates (new admin asset) and two burns (old admin + recovery key) in a single instruction. Estimated ~250k compute units. Clients must include a `SetComputeUnitLimit` instruction requesting 300k CU.
+
+### Config lock safety
+
+`recovery_config_locked` can only be set to `true` when `recovery_asset != Pubkey::default()`. Setting it without a recovery key configured would permanently lock out recovery configuration.
+
 ## App-Layer Responsibilities
 
 The on-chain program is passive. The app layer should:
@@ -172,7 +241,8 @@ The on-chain program is passive. The app layer should:
 - **Prompt heartbeat**: Remind the admin to prove liveness if approaching the threshold.
 - **Post-recovery flow**: After recovery executes, immediately guide the new admin to configure a fresh recovery key.
 - **Setup guidance**: Explain that the recovery NFT should be stored separately from the admin NFT (different wallet, hardware wallet, safe deposit box, trusted party).
-- **Clear communication**: Users must understand that losing both keys means permanent fund loss.
+- **Clear communication**: Users must understand that losing both keys means permanent fund loss. Recovery does NOT protect against stolen keys.
+- **Compute budget**: Always include `SetComputeUnitLimit(300_000)` when submitting `execute_recovery`.
 
 ## Research Sources
 
