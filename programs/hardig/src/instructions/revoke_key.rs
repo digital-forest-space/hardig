@@ -21,7 +21,8 @@ pub struct RevokeKey<'info> {
     /// CHECK: Validated in handler via validate_key (owner, position attribute, permissions).
     pub admin_key_asset: UncheckedAccount<'info>,
 
-    /// The position.
+    /// The position. Mutable to update last_admin_activity.
+    #[account(mut)]
     pub position: Account<'info, PositionNFT>,
 
     /// The target key asset to revoke and burn.
@@ -100,6 +101,9 @@ pub fn handler(ctx: Context<RevokeKey>) -> Result<()> {
         target_position.value == ctx.accounts.position.authority_seed.to_string(),
         HardigError::WrongPosition
     );
+
+    // Update last_admin_activity so key management resets the recovery lockout
+    ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
 
     // Burn the target asset via PermanentBurnDelegate.
     // The collection's update_authority (config PDA) is the PermanentBurnDelegate authority.

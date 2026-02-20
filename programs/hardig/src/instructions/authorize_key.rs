@@ -28,7 +28,8 @@ pub struct AuthorizeKey<'info> {
     /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
     pub admin_key_asset: UncheckedAccount<'info>,
 
-    /// The position to authorize a key for.
+    /// The position to authorize a key for. Mutable to update last_admin_activity.
+    #[account(mut)]
     pub position: Account<'info, PositionNFT>,
 
     /// The MPL-Core asset for the new key NFT. Created by MPL-Core CPI.
@@ -216,7 +217,11 @@ pub fn handler(
         ])
         .invoke_signed(&[config_seeds])?;
 
-    let current_slot = Clock::get()?.slot;
+    let clock = Clock::get()?;
+    let current_slot = clock.slot;
+
+    // Update last_admin_activity so key management resets the recovery lockout
+    ctx.accounts.position.last_admin_activity = clock.unix_timestamp;
 
     // Initialize the KeyState
     let key_state = &mut ctx.accounts.key_state;

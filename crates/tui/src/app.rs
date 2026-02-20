@@ -106,6 +106,7 @@ pub enum FormKind {
     Sell,
     Borrow,
     Repay,
+    ConfigureRecovery,
 }
 
 pub struct KeyEntry {
@@ -188,6 +189,8 @@ pub struct App {
     pub form_kind: Option<FormKind>,
     pub form_fields: Vec<(String, String)>,
     pub form_info: Option<String>,
+    pub form_readonly: bool,
+    pub form_locked: bool,
     pub input_field: usize,
     pub input_buf: String,
 
@@ -256,6 +259,8 @@ impl App {
             form_kind: None,
             form_fields: Vec::new(),
             form_info: None,
+            form_readonly: false,
+            form_locked: false,
             input_field: 0,
             input_buf: String::new(),
             perm_bits: PRESET_OPERATOR,
@@ -369,6 +374,8 @@ impl App {
             }
             KeyCode::Char('x') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_revoke_key(),
             KeyCode::Char('h') if self.has_perm(PERM_MANAGE_KEYS) => self.build_heartbeat(),
+            KeyCode::Char('c') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_configure_recovery(),
+            KeyCode::Char('e') => self.build_execute_recovery(),
             KeyCode::Char('s') if self.can_sell() => self.enter_sell(),
             KeyCode::Char('d') if self.can_borrow() => self.enter_borrow(),
 
@@ -423,6 +430,27 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_form(&mut self, key: KeyCode) {
+        // Readonly mode: only Esc (back) and Enter (unlock to edit, if not locked) work
+        if self.form_readonly {
+            match key {
+                KeyCode::Esc => {
+                    self.screen = Screen::Dashboard;
+                    self.form_fields.clear();
+                    self.form_readonly = false;
+                    self.form_locked = false;
+                }
+                KeyCode::Enter if !self.form_locked => {
+                    self.form_readonly = false;
+                    self.form_info = Some(
+                        "Editing recovery settings (will replace current)".into(),
+                    );
+                    self.input_buf = self.form_fields[self.input_field].1.clone();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         let is_perm_field =
             matches!(self.form_kind, Some(FormKind::AuthorizeKey)) && self.input_field == 1;
 
@@ -582,6 +610,8 @@ impl App {
     fn enter_create_position(&mut self) {
         self.screen = Screen::Form;
         self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
         self.form_kind = Some(FormKind::CreatePosition);
         self.form_fields = vec![("Label (optional)".into(), String::new())];
         self.input_field = 0;
@@ -593,6 +623,8 @@ impl App {
         self.perm_cursor = 0;
         self.screen = Screen::Form;
         self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
         self.form_kind = Some(FormKind::AuthorizeKey);
         let my_wallet = self.keypair.pubkey().to_string();
         self.form_fields = vec![
@@ -606,6 +638,8 @@ impl App {
 
     fn enter_revoke_key(&mut self) {
         self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
         let admin_asset_key = self.position.as_ref().map(|p| p.current_admin_asset);
         let revocable: Vec<(usize, &KeyEntry)> = self
             .keyring
@@ -639,6 +673,8 @@ impl App {
     fn enter_buy(&mut self) {
         self.screen = Screen::Form;
         self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
         self.form_kind = Some(FormKind::Buy);
         self.form_fields = vec![("Amount (SOL)".into(), "1".into())];
         self.input_field = 0;
@@ -648,6 +684,8 @@ impl App {
     fn enter_sell(&mut self) {
         let max = self.position.as_ref().map(|p| p.deposited_nav).unwrap_or(0);
         self.screen = Screen::Form;
+        self.form_readonly = false;
+        self.form_locked = false;
         self.form_kind = Some(FormKind::Sell);
         let nav = self.market_config.as_ref().map(|mc| nav_token_name(&mc.nav_mint)).unwrap_or("shares");
         self.form_info = Some(format!("Available: {} {}", lamports_to_sol(max), nav));
@@ -659,6 +697,8 @@ impl App {
     fn enter_borrow(&mut self) {
         self.screen = Screen::Form;
         self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
         self.form_kind = Some(FormKind::Borrow);
         self.form_fields = vec![("Amount (SOL)".into(), String::new())];
         self.input_field = 0;
@@ -669,6 +709,8 @@ impl App {
         let max = self.position.as_ref().map(|p| p.user_debt).unwrap_or(0);
         self.screen = Screen::Form;
         self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
         self.form_kind = Some(FormKind::Repay);
         self.form_fields = vec![("Amount (SOL)".into(), lamports_to_sol(max))];
         self.input_field = 0;
@@ -688,6 +730,7 @@ impl App {
             Some(FormKind::Sell) => self.build_sell(),
             Some(FormKind::Borrow) => self.build_borrow(),
             Some(FormKind::Repay) => self.build_repay(),
+            Some(FormKind::ConfigureRecovery) => self.build_configure_recovery(),
             None => {}
         }
     }
@@ -1562,6 +1605,229 @@ impl App {
         });
     }
 
+    fn enter_configure_recovery(&mut self) {
+        let pos = match &self.position {
+            Some(p) => p,
+            None => { self.push_log("No position loaded"); return; }
+        };
+        let has_recovery = pos.recovery_asset != Pubkey::default();
+        let is_locked = has_recovery && pos.recovery_config_locked;
+
+        self.screen = Screen::Form;
+        self.form_kind = Some(FormKind::ConfigureRecovery);
+
+        if has_recovery {
+            // Pre-fill from existing config
+            let secs = pos.recovery_lockout_secs;
+            let days = secs / 86400;
+            let hours = (secs % 86400) / 3600;
+            let mins = (secs % 3600) / 60;
+            let recovery_name = self.read_asset_name(&pos.recovery_asset).unwrap_or_default();
+            // Find who holds the recovery asset
+            let owner = self.read_asset_owner_pubkey(&pos.recovery_asset)
+                .map(|pk| pk.to_string())
+                .unwrap_or_default();
+            self.form_fields = vec![
+                ("Target Wallet (pubkey)".into(), owner),
+                ("Grace Period Days".into(), days.to_string()),
+                ("Grace Period Hours".into(), hours.to_string()),
+                ("Grace Period Minutes".into(), mins.to_string()),
+                ("Lock config? (true/false)".into(), is_locked.to_string()),
+                ("Label (optional)".into(), recovery_name),
+            ];
+            self.form_readonly = true;
+            self.form_locked = is_locked;
+            self.form_info = Some(if is_locked {
+                "Recovery settings are permanently locked.".into()
+            } else {
+                "Recovery is configured. Press Enter to edit.\n\
+                 Warning: editing will burn the current recovery key\n\
+                 and mint a new one to the target wallet."
+                    .into()
+            });
+        } else {
+            self.form_fields = vec![
+                ("Target Wallet (pubkey)".into(), String::new()),
+                ("Grace Period Days".into(), "7".into()),
+                ("Grace Period Hours".into(), "0".into()),
+                ("Grace Period Minutes".into(), "0".into()),
+                ("Lock config? (true/false)".into(), "false".into()),
+                ("Label (optional)".into(), String::new()),
+            ];
+            self.form_readonly = false;
+            self.form_info = None;
+        }
+
+        self.input_field = 0;
+        self.input_buf = if self.form_readonly {
+            String::new()
+        } else {
+            self.form_fields[0].1.clone()
+        };
+    }
+
+    pub fn build_configure_recovery(&mut self) {
+        let target_wallet: Pubkey = match self.form_fields[0].1.trim().parse() {
+            Ok(v) => v,
+            Err(_) => {
+                self.push_log("Invalid target wallet pubkey");
+                return;
+            }
+        };
+        let days: u64 = self.form_fields[1].1.trim().parse().unwrap_or(0);
+        let hours: u64 = self.form_fields[2].1.trim().parse().unwrap_or(0);
+        let minutes: u64 = self.form_fields[3].1.trim().parse().unwrap_or(0);
+        let grace_secs = (days * 86400 + hours * 3600 + minutes * 60) as i64;
+        if grace_secs <= 0 {
+            self.push_log("Grace period must be positive");
+            return;
+        }
+        let lock_config: bool = self.form_fields[4].1.trim().eq_ignore_ascii_case("true");
+        let name_field = self.form_fields[5].1.trim().to_string();
+        let name = if name_field.is_empty() { None } else { Some(name_field) };
+
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => {
+                self.push_log("No key asset");
+                return;
+            }
+        };
+        let collection = match self.collection {
+            Some(c) => c,
+            None => {
+                self.push_log("No collection");
+                return;
+            }
+        };
+
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
+        let recovery_asset_kp = Keypair::new();
+        let recovery_asset = recovery_asset_kp.pubkey();
+
+        // Serialize instruction data
+        let mut data = sighash("configure_recovery");
+        data.extend_from_slice(&grace_secs.to_le_bytes());
+        data.push(if lock_config { 1 } else { 0 });
+        match &name {
+            Some(n) => {
+                data.push(1); // Some
+                data.extend_from_slice(&(n.len() as u32).to_le_bytes());
+                data.extend_from_slice(n.as_bytes());
+            }
+            None => {
+                data.push(0); // None
+            }
+        }
+
+        // If an existing recovery key exists, pass it; otherwise pass program_id as sentinel
+        let pos = self.position.as_ref().unwrap();
+        let old_recovery = if pos.recovery_asset != Pubkey::default() {
+            pos.recovery_asset
+        } else {
+            hardig::ID
+        };
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),          // admin
+            AccountMeta::new_readonly(key_asset, false),             // admin_key_asset
+            AccountMeta::new(position_pda, false),                   // position
+            AccountMeta::new(recovery_asset, true),                  // recovery_asset (signer)
+            AccountMeta::new_readonly(target_wallet, false),         // target_wallet
+            AccountMeta::new(old_recovery, false),                   // old_recovery_asset
+            AccountMeta::new_readonly(config_pda, false),            // config
+            AccountMeta::new(collection, false),                     // collection
+            AccountMeta::new_readonly(mpl_core::ID, false),          // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ];
+
+        let grace_str = format_grace_period(days, hours, minutes);
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Configure Recovery".into(),
+                format!("Target wallet: {}", short_pubkey(&target_wallet)),
+                format!("Grace period: {}", grace_str),
+                format!("Lock config: {}", lock_config),
+                format!("Recovery key: {}", short_pubkey(&recovery_asset)),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![recovery_asset_kp],
+        });
+    }
+
+    pub fn build_execute_recovery(&mut self) {
+        let pos = match &self.position {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        if pos.recovery_asset == Pubkey::default() {
+            self.push_log("No recovery key configured for this position");
+            return;
+        }
+
+        let collection = match self.collection {
+            Some(c) => c,
+            None => {
+                self.push_log("No collection");
+                return;
+            }
+        };
+
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
+        let new_admin_kp = Keypair::new();
+        let new_admin_asset = new_admin_kp.pubkey();
+
+        let data = sighash("execute_recovery");
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),           // recovery_holder
+            AccountMeta::new(pos.recovery_asset, false),             // recovery_key_asset
+            AccountMeta::new(position_pda, false),                   // position
+            AccountMeta::new(pos.current_admin_asset, false),        // old_admin_asset
+            AccountMeta::new(new_admin_asset, true),                 // new_admin_asset (signer)
+            AccountMeta::new_readonly(config_pda, false),            // config
+            AccountMeta::new(collection, false),                     // collection
+            AccountMeta::new_readonly(mpl_core::ID, false),          // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Execute Recovery".into(),
+                format!("Position: {}", short_pubkey(&position_pda)),
+                format!("Burns old admin: {}", short_pubkey(&pos.current_admin_asset)),
+                format!("Burns recovery key: {}", short_pubkey(&pos.recovery_asset)),
+                format!("New admin key: {}", short_pubkey(&new_admin_asset)),
+                "You will become the new admin.".into(),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![new_admin_kp],
+        });
+    }
+
     pub fn build_transfer_admin(&mut self, new_admin: Pubkey) {
         let (config_pda, _) =
             Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
@@ -2042,6 +2308,23 @@ impl App {
             });
         }
 
+        // Add recovery key to keyring if configured
+        if let Some(ref pos) = self.position {
+            if pos.recovery_asset != Pubkey::default() {
+                let rec_held = self.check_asset_owner(&pos.recovery_asset, &signer);
+                let rec_name = self.read_asset_name(&pos.recovery_asset).unwrap_or_default();
+                self.keyring.push(KeyEntry {
+                    pda: pos_pda,
+                    asset: pos.recovery_asset,
+                    permissions: 0, // Special: recovery key (no KeyState permissions)
+                    held_by_signer: rec_held,
+                    name: rec_name,
+                    sell_bucket: None,
+                    borrow_bucket: None,
+                });
+            }
+        }
+
         let perms = self.my_permissions.unwrap_or(0);
         self.push_log(format!(
             "Selected position {} (permissions: {}{})",
@@ -2132,6 +2415,16 @@ impl App {
             }
         }
         false
+    }
+
+    /// Read the owner pubkey of an MPL-Core asset (bytes 1..33 of account data).
+    fn read_asset_owner_pubkey(&self, asset: &Pubkey) -> Option<Pubkey> {
+        let acc = self.rpc.get_account(asset).ok()?;
+        if acc.data.len() >= 33 {
+            Pubkey::try_from(&acc.data[1..33]).ok()
+        } else {
+            None
+        }
     }
 
     /// Read the permissions value from an MPL-Core asset's Attributes plugin.
@@ -2249,6 +2542,14 @@ pub fn permissions_name(permissions: u8) -> String {
     } else {
         names.join(", ")
     }
+}
+
+fn format_grace_period(days: u64, hours: u64, minutes: u64) -> String {
+    let mut parts = Vec::new();
+    if days > 0 { parts.push(format!("{}d", days)); }
+    if hours > 0 { parts.push(format!("{}h", hours)); }
+    if minutes > 0 { parts.push(format!("{}m", minutes)); }
+    if parts.is_empty() { "0".into() } else { parts.join(" ") }
 }
 
 pub fn short_pubkey(pubkey: &Pubkey) -> String {

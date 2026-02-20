@@ -4,13 +4,29 @@ use solana_sdk::signature::Signer;
 
 use crate::app::{self, App, FormKind, Screen};
 
+fn format_duration(secs: i64) -> String {
+    if secs < 0 { return "0s".into(); }
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let mins = (secs % 3600) / 60;
+    if days > 0 {
+        if hours > 0 { format!("{}d {}h", days, hours) } else { format!("{}d", days) }
+    } else if hours > 0 {
+        if mins > 0 { format!("{}h {}m", hours, mins) } else { format!("{}h", hours) }
+    } else if mins > 0 {
+        format!("{}m", mins)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // title bar
             Constraint::Min(10),   // main content
-            Constraint::Length(3),  // action bar
+            Constraint::Length(4),  // action bar (2 rows)
             Constraint::Length(6), // message log
         ])
         .split(frame.area());
@@ -158,7 +174,12 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     let has_recovery = app.position.as_ref()
         .map(|p| p.recovery_asset != solana_sdk::pubkey::Pubkey::default())
         .unwrap_or(false);
-    let panel_height = if has_recovery { 12 } else { 10 };
+    let has_activity = app.position.as_ref()
+        .map(|p| p.last_admin_activity > 0)
+        .unwrap_or(false);
+    let panel_height = 10
+        + if has_activity { 2 } else { 0 }
+        + if has_recovery { 2 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -253,20 +274,49 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
         ]),
     ];
 
-    // Recovery status line
+    // Last admin activity + recovery status
+    if pos.last_admin_activity > 0 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let ago = now - pos.last_admin_activity;
+        let ago_str = format_duration(ago);
+
+        let has_recovery = pos.recovery_asset != solana_sdk::pubkey::Pubkey::default();
+        let mut spans = vec![
+            Span::styled("  Last Activity: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{} ago", ago_str), Style::default().fg(Color::White)),
+        ];
+
+        if has_recovery {
+            let remaining = pos.recovery_lockout_secs - ago;
+            if remaining > 0 {
+                spans.push(Span::raw("    "));
+                spans.push(Span::styled("Recoverable in: ", Style::default().fg(Color::Gray)));
+                spans.push(Span::styled(
+                    format_duration(remaining),
+                    Style::default().fg(Color::Yellow),
+                ));
+            } else {
+                spans.push(Span::raw("    "));
+                spans.push(Span::styled(
+                    "RECOVERABLE NOW",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ));
+            }
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // Recovery config line
     if pos.recovery_asset != solana_sdk::pubkey::Pubkey::default() {
-        let lockout_days = pos.recovery_lockout_secs / 86400;
-        let lockout_str = if lockout_days > 0 {
-            format!("{} days", lockout_days)
-        } else {
-            let hours = pos.recovery_lockout_secs / 3600;
-            if hours > 0 { format!("{} hours", hours) } else { format!("{} secs", pos.recovery_lockout_secs) }
-        };
+        let grace_str = format_duration(pos.recovery_lockout_secs);
         let locked_str = if pos.recovery_config_locked { " (locked)" } else { "" };
         lines.push(Line::from(vec![
             Span::styled("  Recovery: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{} lockout{}", lockout_str, locked_str),
+                format!("{} grace{}", grace_str, locked_str),
                 Style::default().fg(Color::Green),
             ),
             Span::raw("    "),
@@ -298,18 +348,31 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
         .bottom_margin(0);
 
     let is_admin = |k: &app::KeyEntry| k.permissions == hardig::state::PRESET_ADMIN;
+    let is_recovery = |k: &app::KeyEntry| {
+        app.position.as_ref().map_or(false, |pos| {
+            pos.recovery_asset != solana_sdk::pubkey::Pubkey::default()
+                && k.asset == pos.recovery_asset
+        })
+    };
 
     let mut rows: Vec<Row> = Vec::new();
     for (i, k) in app.keyring.iter().enumerate() {
         let marker = if i == app.key_cursor { ">" } else { " " };
         let held = if k.held_by_signer { "YOU" } else { "" };
-        let display_name = if k.name.is_empty() {
-            if is_admin(k) { "Admin".to_string() } else { "Delegated".to_string() }
-        } else {
+        let recovery = is_recovery(k);
+        let display_name = if !k.name.is_empty() {
             k.name.clone()
+        } else if is_admin(k) {
+            "Admin".to_string()
+        } else if recovery {
+            "Recovery".to_string()
+        } else {
+            "Delegated".to_string()
         };
         let style = if k.held_by_signer {
             Style::default().fg(Color::Yellow)
+        } else if recovery {
+            Style::default().fg(Color::Green)
         } else {
             Style::default()
         };
@@ -322,8 +385,21 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
             ])
             .style(style),
         );
+        // Sub-rows for recovery keys: show grace period info
+        if recovery {
+            let sub_style = Style::default().fg(Color::DarkGray);
+            let sub_row = |text: String| {
+                Row::new(vec![String::new(), format!("  {}", text), String::new(), String::new()])
+                    .style(sub_style)
+            };
+            if let Some(ref pos) = app.position {
+                let grace = format_duration(pos.recovery_lockout_secs);
+                let locked = if pos.recovery_config_locked { " (locked)" } else { "" };
+                rows.push(sub_row(format!("Recovery \u{2014} {}{}",  grace, locked)));
+            }
+        }
         // Sub-rows for delegated keys: permissions, then rate limits
-        if !is_admin(k) {
+        else if !is_admin(k) {
             let sub_style = Style::default().fg(Color::DarkGray);
             let sub_row = |text: String| {
                 Row::new(vec![String::new(), format!("  {}", text), String::new(), String::new()])
@@ -386,6 +462,7 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         Some(FormKind::Sell) => format!(" Sell {} ", nav),
         Some(FormKind::Borrow) => " Borrow ".to_string(),
         Some(FormKind::Repay) => " Repay ".to_string(),
+        Some(FormKind::ConfigureRecovery) => " Configure Recovery ".to_string(),
         _ => " Form ".to_string(),
     };
 
@@ -399,10 +476,12 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     if let Some(info) = &app.form_info {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", info),
-            Style::default().fg(Color::Yellow),
-        )));
+        for info_line in info.lines() {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", info_line),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         lines.push(Line::from(""));
     }
 
@@ -415,6 +494,23 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(Color::Gray)
         };
+
+        // Inline section hints for ConfigureRecovery form
+        if matches!(app.form_kind, Some(FormKind::ConfigureRecovery)) {
+            let hint = match i {
+                0 => Some("Wallet that receives the recovery key NFT"),
+                1 => Some("How long admin must be idle before recovery"),
+                4 => Some("If true, settings become permanent"),
+                5 => Some("Optional name suffix for the recovery NFT"),
+                _ => None,
+            };
+            if let Some(h) = hint {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", h),
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                )));
+            }
+        }
 
         // Special rendering for permissions checkboxes in AuthorizeKey form
         if matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && i == 1 {
@@ -460,8 +556,8 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
             continue;
         }
 
-        let display_value = if is_active { &app.input_buf } else { value };
-        let cursor = if is_active { "_" } else { "" };
+        let display_value = if !app.form_readonly && is_active { &app.input_buf } else { value };
+        let cursor = if !app.form_readonly && is_active { "_" } else { "" };
 
         // Handle multiline values (for revoke key list)
         if value.contains('\n') && !is_active {
@@ -473,11 +569,36 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
                 lines.push(Line::from(format!("    {}", line)));
             }
         } else {
+            let value_style = if app.form_readonly {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default()
+            };
             let spans = vec![
                 Span::styled(format!("  {}: ", label), label_style),
-                Span::raw(format!("{}{}", display_value, cursor)),
+                Span::styled(format!("{}{}", display_value, cursor), value_style),
             ];
             lines.push(Line::from(spans));
+        }
+
+        // After "Grace Period Minutes" field, show computed total grace period
+        if label == "Grace Period Minutes" {
+            let days_s = live_field_value(app, "Grace Period Days");
+            let hours_s = live_field_value(app, "Grace Period Hours");
+            let mins_s = live_field_value(app, "Grace Period Minutes");
+            let days: u64 = days_s.as_deref().unwrap_or("0").trim().parse().unwrap_or(0);
+            let hours: u64 = hours_s.as_deref().unwrap_or("0").trim().parse().unwrap_or(0);
+            let mins: u64 = mins_s.as_deref().unwrap_or("0").trim().parse().unwrap_or(0);
+            let total_secs = (days * 86400 + hours * 3600 + mins * 60) as i64;
+            if total_secs > 0 {
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(
+                        format!("= {}", format_duration(total_secs)),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
         }
 
         // After a "Refill Minutes" field, show the computed total slots summary
@@ -504,7 +625,11 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
     let on_perm_field =
         matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && app.input_field == 1;
-    let hints = if on_perm_field {
+    let hints = if app.form_locked {
+        "  [Esc] Back"
+    } else if app.form_readonly {
+        "  [Enter] Edit  [Esc] Back"
+    } else if on_perm_field {
         "  [\u{2190}\u{2192}] Navigate  [Space/1-7] Toggle  [Enter] Submit  [Tab] Next  [Esc] Cancel"
     } else {
         "  [Enter] Submit  [Tab/Shift+Tab] Navigate fields  [Esc] Cancel"
@@ -665,45 +790,6 @@ fn draw_result(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let actions: String = match app.screen {
-        Screen::PositionList => "[Enter] Open  [n] New Position  [r] Refresh  [q] Quit".into(),
-        Screen::Form => "[Enter] Submit  [Tab] Next  [Esc] Cancel".into(),
-        Screen::Confirm => "[Y] Confirm  [N] Cancel".into(),
-        Screen::Result => "[any key] Continue".into(),
-        Screen::Dashboard => {
-            if !app.protocol_exists {
-                "[I] Init Protocol  [r] Refresh  [q] Quit".into()
-            } else if app.position_pda.is_none() {
-                "[n] New Position  [r] Refresh  [q] Quit".into()
-            } else {
-                let mut parts: Vec<&str> = Vec::new();
-
-                if app.discovered_positions.len() > 1 {
-                    parts.push("[Esc] Back");
-                }
-
-                // Financial actions (require CPI)
-                if app.can_buy() { parts.push("[b]uy"); }
-                if app.can_sell() { parts.push("[s]ell"); }
-                if app.can_borrow() { parts.push("[d]borrow"); }
-                if app.can_repay() { parts.push("[p]repay"); }
-                if app.can_reinvest() { parts.push("[i]reinvest"); }
-
-                // Admin key management (always available for admin)
-                if app.has_perm(hardig::state::PERM_MANAGE_KEYS) {
-                    parts.push("[a]uth");
-                    parts.push("[x]revoke");
-                    parts.push("[h]beat");
-                }
-
-                parts.push("[n]ew");
-                parts.push("[r]efresh");
-                parts.push("[q]uit");
-                parts.join(" ")
-            }
-        }
-    };
-
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Actions ")
@@ -711,11 +797,90 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let para = Paragraph::new(Span::styled(
-        format!(" {}", actions),
-        Style::default().fg(Color::White),
-    ));
+    let lines: Vec<Line> = match app.screen {
+        Screen::PositionList => vec![
+            Line::from(vec![
+                action_key("[Enter]"), action_label("Open  "),
+                action_key("[n]"), action_label("New  "),
+                action_key("[r]"), action_label("Refresh  "),
+                action_key("[q]"), action_label("Quit"),
+            ]),
+        ],
+        Screen::Form => vec![
+            Line::from(vec![
+                action_key("[Enter]"), action_label("Submit  "),
+                action_key("[Tab]"), action_label("Next  "),
+                action_key("[Esc]"), action_label("Cancel"),
+            ]),
+        ],
+        Screen::Confirm => vec![
+            Line::from(vec![
+                action_key("[Y]"), action_label("Confirm  "),
+                action_key("[N]"), action_label("Cancel"),
+            ]),
+        ],
+        Screen::Result => vec![
+            Line::from(vec![action_label("Press any key to continue")]),
+        ],
+        Screen::Dashboard => {
+            if !app.protocol_exists {
+                vec![Line::from(vec![
+                    action_key("[I]"), action_label("Init  "),
+                    action_key("[r]"), action_label("Refresh  "),
+                    action_key("[q]"), action_label("Quit"),
+                ])]
+            } else if app.position_pda.is_none() {
+                vec![Line::from(vec![
+                    action_key("[n]"), action_label("New  "),
+                    action_key("[r]"), action_label("Refresh  "),
+                    action_key("[q]"), action_label("Quit"),
+                ])]
+            } else {
+                // Row 1: Financial actions
+                let mut row1 = Vec::new();
+                if app.can_buy() { row1.extend([action_key("[b]"), action_label("uy  ")]); }
+                if app.can_sell() { row1.extend([action_key("[s]"), action_label("ell  ")]); }
+                if app.can_borrow() { row1.extend([action_key("[d]"), action_label("borrow  ")]); }
+                if app.can_repay() { row1.extend([action_key("[p]"), action_label("repay  ")]); }
+                if app.can_reinvest() { row1.extend([action_key("[i]"), action_label("reinvest  ")]); }
+                if row1.is_empty() {
+                    row1.push(Span::styled(" No actions available", Style::default().fg(Color::DarkGray)));
+                }
+
+                // Row 2: Admin + navigation
+                let mut row2 = Vec::new();
+                if app.has_perm(hardig::state::PERM_MANAGE_KEYS) {
+                    row2.extend([action_key("[a]"), action_label("uth  ")]);
+                    row2.extend([action_key("[x]"), action_label("revoke  ")]);
+                    row2.extend([action_key("[h]"), action_label("beat  ")]);
+                    row2.extend([action_key("[c]"), action_label("recovery  ")]);
+                }
+                // Execute recovery is available to anyone holding a recovery key
+                if app.position.as_ref().map(|p| p.recovery_asset != solana_sdk::pubkey::Pubkey::default()).unwrap_or(false) {
+                    row2.extend([action_key("[e]"), action_label("xecute  ")]);
+                }
+                row2.extend([action_key("[n]"), action_label("ew  ")]);
+                row2.extend([action_key("[r]"), action_label("efresh  ")]);
+                row2.extend([action_key("[q]"), action_label("uit")]);
+                if app.discovered_positions.len() > 1 {
+                    row2.extend([Span::raw("  "), action_key("[Esc]"), action_label("Back")]);
+                }
+
+                vec![Line::from(row1), Line::from(row2)]
+            }
+        }
+    };
+
+    let para = Paragraph::new(Text::from(lines));
     frame.render_widget(para, inner);
+}
+
+fn action_key(key: &str) -> Span<'_> {
+    Span::styled(key, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+}
+
+fn action_label(label: &str) -> Span<'_> {
+    Span::styled(label, Style::default().fg(Color::White))
 }
 
 fn draw_message_log(frame: &mut Frame, app: &App, area: Rect) {

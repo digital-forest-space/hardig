@@ -367,7 +367,7 @@ fn ix_authorize_key(
         vec![
             AccountMeta::new(*admin, true),                   // admin
             AccountMeta::new_readonly(*admin_asset, false),    // admin_key_asset
-            AccountMeta::new_readonly(pos_pda, false),         // position
+            AccountMeta::new(pos_pda, false),                  // position (mut for last_admin_activity)
             AccountMeta::new(*new_asset, true),                // new_key_asset (signer)
             AccountMeta::new_readonly(*target_wallet, false),  // target_wallet
             AccountMeta::new(key_state_pda, false),            // key_state (init)
@@ -396,7 +396,7 @@ fn ix_revoke_key(
         vec![
             AccountMeta::new(*admin, true),                   // admin
             AccountMeta::new_readonly(*admin_asset, false),    // admin_key_asset
-            AccountMeta::new_readonly(pos_pda, false),         // position
+            AccountMeta::new(pos_pda, false),                  // position (mut for last_admin_activity)
             AccountMeta::new(*target_asset, false),            // target_asset
             AccountMeta::new(*target_key_state, false),        // target_key_state
             AccountMeta::new_readonly(cfg_pda, false),         // config
@@ -3176,4 +3176,91 @@ fn test_replace_recovery_key() {
             || old_recovery.as_ref().unwrap().data.len() == 1,
         "old recovery asset should be burned when replaced"
     );
+}
+
+// ── authorize_key and revoke_key update last_admin_activity ──────────
+
+#[test]
+fn test_authorize_key_updates_last_admin_activity() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let pos_before = read_position(&svm, &h.position_pda);
+
+    // Advance clock so we can detect the timestamp change
+    advance_clock(&mut svm, 100);
+
+    // Authorize a new key
+    let new_asset = Keypair::new();
+    let target = Keypair::new();
+    let ix = ix_authorize_key(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &new_asset.pubkey(),
+        &target.pubkey(),
+        PRESET_DEPOSITOR, // Depositor
+        0, 0, 0, 0,
+        &h.collection,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).unwrap();
+
+    let pos_after = read_position(&svm, &h.position_pda);
+    assert!(
+        pos_after.last_admin_activity > pos_before.last_admin_activity,
+        "authorize_key should update last_admin_activity"
+    );
+}
+
+#[test]
+fn test_revoke_key_updates_last_admin_activity() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let pos_before = read_position(&svm, &h.position_pda);
+
+    // Advance clock so we can detect the timestamp change
+    advance_clock(&mut svm, 100);
+
+    // Revoke the operator key
+    let ix = ix_revoke_key(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.operator_asset,
+        &h.operator_key_state,
+        &h.collection,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
+
+    let pos_after = read_position(&svm, &h.position_pda);
+    assert!(
+        pos_after.last_admin_activity > pos_before.last_admin_activity,
+        "revoke_key should update last_admin_activity"
+    );
+}
+
+// ── configure_recovery lockout upper bound ──────────────────────────
+
+#[test]
+fn test_configure_recovery_lockout_too_large() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let recovery_wallet = Keypair::new();
+    let recovery_asset = Keypair::new();
+
+    // Attempt to configure with i64::MAX lockout (exceeds 10-year cap)
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        i64::MAX, // exceeds 10-year max
+        false,
+        Some("test"),
+    );
+    let result = send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]);
+    assert!(result.is_err(), "lockout exceeding 10 years should be rejected");
 }

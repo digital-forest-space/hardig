@@ -120,6 +120,29 @@ enum Action {
     },
     /// Send heartbeat to prove admin liveness (resets recovery timer)
     Heartbeat,
+    /// Configure a recovery key for the position (admin only)
+    ConfigureRecovery {
+        /// Target wallet to receive the recovery key NFT
+        #[arg(long)]
+        target_wallet: String,
+        /// Grace period days
+        #[arg(long, default_value = "0")]
+        days: u64,
+        /// Grace period hours
+        #[arg(long, default_value = "0")]
+        hours: u64,
+        /// Grace period minutes
+        #[arg(long, default_value = "0")]
+        minutes: u64,
+        /// Lock the recovery config so it can't be changed later
+        #[arg(long, default_value = "false")]
+        lock_config: bool,
+        /// Optional label for the recovery key NFT
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Execute recovery after lockout has expired (recovery key holder only)
+    ExecuteRecovery,
     /// Show compact position balances
     Balances,
     /// Transfer protocol admin to a new pubkey (current admin only)
@@ -225,6 +248,22 @@ struct PositionInfo {
     deposited_nav: String,
     debt: String,
     borrow_capacity: String,
+    last_admin_activity: i64,
+    last_admin_activity_ago: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery: Option<RecoveryInfo>,
+}
+
+#[derive(Serialize)]
+struct RecoveryInfo {
+    recovery_asset: String,
+    grace_period_secs: i64,
+    grace_period: String,
+    config_locked: bool,
+    secs_since_activity: i64,
+    recoverable: bool,
+    /// "3d 5h" until recoverable, or "0s" if already recoverable
+    recoverable_in: String,
 }
 
 #[derive(Serialize)]
@@ -453,6 +492,8 @@ fn action_to_name(action: &Action) -> String {
         Action::AuthorizeKey { .. } => "authorize-key".into(),
         Action::RevokeKey { .. } => "revoke-key".into(),
         Action::Heartbeat => "heartbeat".into(),
+        Action::ConfigureRecovery { .. } => "configure-recovery".into(),
+        Action::ExecuteRecovery => "execute-recovery".into(),
         Action::Balances => "balances".into(),
         Action::TransferAdmin { .. } => "transfer-admin".into(),
         Action::CreateMarketConfig { .. } => "create-market-config".into(),
@@ -530,6 +571,20 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
         }
         Action::Heartbeat => {
             app.build_heartbeat();
+        }
+        Action::ConfigureRecovery { target_wallet, days, hours, minutes, lock_config, name } => {
+            app.form_fields = vec![
+                ("Target Wallet (pubkey)".into(), target_wallet.clone()),
+                ("Grace Period Days".into(), days.to_string()),
+                ("Grace Period Hours".into(), hours.to_string()),
+                ("Grace Period Minutes".into(), minutes.to_string()),
+                ("Lock config? (true/false)".into(), lock_config.to_string()),
+                ("Label (optional)".into(), name.clone().unwrap_or_default()),
+            ];
+            app.build_configure_recovery();
+        }
+        Action::ExecuteRecovery => {
+            app.build_execute_recovery();
         }
         Action::AuthorizeKey { wallet, permissions, sell_capacity, sell_refill_slots, borrow_capacity, borrow_refill_slots, name } => {
             app.form_fields = vec![
@@ -695,6 +750,22 @@ fn print_state_diff(before: &app::PositionSnapshot, app: &app::App) {
     }
 }
 
+fn format_duration(secs: i64) -> String {
+    if secs <= 0 { return "0s".into(); }
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let mins = (secs % 3600) / 60;
+    if days > 0 {
+        if hours > 0 { format!("{}d {}h", days, hours) } else { format!("{}d", days) }
+    } else if hours > 0 {
+        if mins > 0 { format!("{}h {}m", hours, mins) } else { format!("{}h", hours) }
+    } else if mins > 0 {
+        format!("{}m", mins)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
 fn build_balances_output(app: &app::App) -> CliOutput {
     match &app.position {
         Some(pos) => {
@@ -726,6 +797,25 @@ fn build_status_output(app: &app::App) -> CliOutput {
         .collect();
 
     let position = app.position.as_ref().map(|pos| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let secs_since = now - pos.last_admin_activity;
+        let has_recovery = pos.recovery_asset != solana_sdk::pubkey::Pubkey::default();
+        let recovery = if has_recovery {
+            Some(RecoveryInfo {
+                recovery_asset: pos.recovery_asset.to_string(),
+                grace_period_secs: pos.recovery_lockout_secs,
+                grace_period: format_duration(pos.recovery_lockout_secs),
+                config_locked: pos.recovery_config_locked,
+                secs_since_activity: secs_since,
+                recoverable: secs_since >= pos.recovery_lockout_secs,
+                recoverable_in: format_duration((pos.recovery_lockout_secs - secs_since).max(0)),
+            })
+        } else {
+            None
+        };
         PositionInfo {
             pda: app
                 .position_pda
@@ -736,6 +826,9 @@ fn build_status_output(app: &app::App) -> CliOutput {
             deposited_nav: lamports_to_sol(pos.deposited_nav),
             debt: lamports_to_sol(pos.user_debt),
             borrow_capacity: lamports_to_sol(app.mf_borrow_capacity),
+            last_admin_activity: pos.last_admin_activity,
+            last_admin_activity_ago: format!("{} ago", format_duration(secs_since)),
+            recovery,
         }
     });
 

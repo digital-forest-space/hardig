@@ -82,8 +82,9 @@ pub fn handler(
         HardigError::RecoveryConfigLocked
     );
 
-    // Lockout must be positive
-    require!(lockout_secs > 0, HardigError::InvalidLockout);
+    // Lockout must be between 1 second and 10 years (prevents permanent lockout footgun)
+    const MAX_LOCKOUT_SECS: i64 = 315_360_000; // 10 years
+    require!(lockout_secs > 0 && lockout_secs <= MAX_LOCKOUT_SECS, HardigError::InvalidLockout);
 
     // If replacing an existing recovery key, require and burn the old one
     let position = &ctx.accounts.position;
@@ -117,6 +118,7 @@ pub fn handler(
     };
 
     // Build attributes: permissions=0, position binding, recovery marker
+    let authority_seed = ctx.accounts.position.authority_seed;
     let attrs = vec![
         Attribute {
             key: "permissions".to_string(),
@@ -124,13 +126,23 @@ pub fn handler(
         },
         Attribute {
             key: "position".to_string(),
-            value: ctx.accounts.position.authority_seed.to_string(),
+            value: authority_seed.to_string(),
         },
         Attribute {
             key: "recovery".to_string(),
             value: "true".to_string(),
         },
     ];
+
+    // Update position state BEFORE CPIs (checks-effects-interactions)
+    let position = &mut ctx.accounts.position;
+    position.recovery_asset = ctx.accounts.recovery_asset.key();
+    position.recovery_lockout_secs = lockout_secs;
+    position.last_admin_activity = Clock::get()?.unix_timestamp;
+
+    if lock_config {
+        position.recovery_config_locked = true;
+    }
 
     // Create recovery key NFT via MPL-Core
     let config = &ctx.accounts.config;
@@ -162,16 +174,6 @@ pub fn handler(
             },
         ])
         .invoke_signed(&[config_seeds])?;
-
-    // Update position state
-    let position = &mut ctx.accounts.position;
-    position.recovery_asset = ctx.accounts.recovery_asset.key();
-    position.recovery_lockout_secs = lockout_secs;
-    position.last_admin_activity = Clock::get()?.unix_timestamp;
-
-    if lock_config {
-        position.recovery_config_locked = true;
-    }
 
     Ok(())
 }
