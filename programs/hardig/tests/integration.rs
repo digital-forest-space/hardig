@@ -16,8 +16,8 @@ use hardig::mayflower::{
     MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, PP_DISCRIMINATOR,
 };
 use hardig::state::{
-    KeyState, MarketConfig, PositionNFT, ProtocolConfig,
-    PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST,
+    ClaimReceipt, KeyState, MarketConfig, PositionNFT, PromoConfig, ProtocolConfig,
+    PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
     PERM_LIMITED_SELL, PERM_LIMITED_BORROW,
     PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
 };
@@ -3263,4 +3263,694 @@ fn test_configure_recovery_lockout_too_large() {
     );
     let result = send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]);
     assert!(result.is_err(), "lockout exceeding 10 years should be rejected");
+}
+
+// ===========================================================================
+// Promo tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Promo instruction builders
+// ---------------------------------------------------------------------------
+
+fn promo_pda(authority_seed: &Pubkey, name_suffix: &str) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[PromoConfig::SEED, authority_seed.as_ref(), name_suffix.as_bytes()],
+        &program_id(),
+    )
+}
+
+fn claim_receipt_pda(promo: &Pubkey, claimer: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[ClaimReceipt::SEED, promo.as_ref(), claimer.as_ref()],
+        &program_id(),
+    )
+}
+
+fn read_promo_config(svm: &LiteSVM, pda: &Pubkey) -> PromoConfig {
+    let account = svm.get_account(pda).unwrap();
+    PromoConfig::try_deserialize(&mut account.data.as_slice()).unwrap()
+}
+
+fn read_claim_receipt(svm: &LiteSVM, pda: &Pubkey) -> ClaimReceipt {
+    let account = svm.get_account(pda).unwrap();
+    ClaimReceipt::try_deserialize(&mut account.data.as_slice()).unwrap()
+}
+
+fn ix_create_promo(
+    admin: &Pubkey,
+    admin_asset: &Pubkey,
+    name_suffix: &str,
+    permissions: u8,
+    borrow_capacity: u64,
+    borrow_refill_period: u64,
+    sell_capacity: u64,
+    sell_refill_period: u64,
+    min_deposit_lamports: u64,
+    max_claims: u32,
+    image_uri: &str,
+) -> Instruction {
+    let (pos_pda, _) = position_pda(admin_asset);
+    let position = read_position_seed(admin_asset);
+    let (promo, _) = promo_pda(&position, name_suffix);
+
+    // Anchor discriminator + Borsh-serialized args
+    // name_suffix is the first arg (#[instruction(name_suffix: String)])
+    let mut data = sighash("create_promo");
+    // String: 4-byte LE length + bytes
+    data.extend_from_slice(&(name_suffix.len() as u32).to_le_bytes());
+    data.extend_from_slice(name_suffix.as_bytes());
+    data.push(permissions);
+    data.extend_from_slice(&borrow_capacity.to_le_bytes());
+    data.extend_from_slice(&borrow_refill_period.to_le_bytes());
+    data.extend_from_slice(&sell_capacity.to_le_bytes());
+    data.extend_from_slice(&sell_refill_period.to_le_bytes());
+    data.extend_from_slice(&min_deposit_lamports.to_le_bytes());
+    data.extend_from_slice(&max_claims.to_le_bytes());
+    // image_uri: String
+    data.extend_from_slice(&(image_uri.len() as u32).to_le_bytes());
+    data.extend_from_slice(image_uri.as_bytes());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),                                    // admin
+            AccountMeta::new_readonly(*admin_asset, false),                    // admin_key_asset
+            AccountMeta::new_readonly(pos_pda, false),                         // position
+            AccountMeta::new(promo, false),                                    // promo (init)
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),  // system_program
+        ],
+    )
+}
+
+/// Helper: get the authority_seed from a position created with the given admin_asset.
+/// This is just the admin_asset pubkey (authority_seed = first admin asset pubkey).
+fn read_position_seed(admin_asset: &Pubkey) -> Pubkey {
+    // authority_seed is always the admin_asset pubkey from create_position
+    *admin_asset
+}
+
+fn ix_update_promo(
+    admin: &Pubkey,
+    admin_asset: &Pubkey,
+    promo_pda_key: &Pubkey,
+    active: Option<bool>,
+    max_claims: Option<u32>,
+) -> Instruction {
+    let (pos_pda, _) = position_pda(admin_asset);
+
+    let mut data = sighash("update_promo");
+    // Option<bool>
+    match active {
+        Some(v) => {
+            data.push(1); // Some
+            data.push(if v { 1 } else { 0 });
+        }
+        None => data.push(0), // None
+    }
+    // Option<u32>
+    match max_claims {
+        Some(v) => {
+            data.push(1); // Some
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        None => data.push(0), // None
+    }
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),                   // admin
+            AccountMeta::new_readonly(*admin_asset, false),    // admin_key_asset
+            AccountMeta::new_readonly(pos_pda, false),         // position
+            AccountMeta::new(*promo_pda_key, false),           // promo (mut)
+        ],
+    )
+}
+
+fn ix_claim_promo_key(
+    claimer: &Pubkey,
+    promo_pda_key: &Pubkey,
+    admin_asset: &Pubkey,
+    key_asset: &Pubkey,
+    collection: &Pubkey,
+) -> Instruction {
+    let (pos_pda, _) = position_pda(admin_asset);
+    let (claim_receipt, _) = claim_receipt_pda(promo_pda_key, claimer);
+    let (ks_pda, _) = key_state_pda(key_asset);
+    let (cfg_pda, _) = config_pda();
+
+    let data = sighash("claim_promo_key");
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*claimer, true),                                  // claimer
+            AccountMeta::new(*promo_pda_key, false),                           // promo (mut)
+            AccountMeta::new(claim_receipt, false),                            // claim_receipt (init)
+            AccountMeta::new_readonly(pos_pda, false),                         // position
+            AccountMeta::new(*key_asset, true),                                // key_asset (signer)
+            AccountMeta::new(ks_pda, false),                                   // key_state (init)
+            AccountMeta::new_readonly(cfg_pda, false),                         // config
+            AccountMeta::new(*collection, false),                              // collection
+            AccountMeta::new_readonly(MPL_CORE_ID, false),                     // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),  // system_program
+        ],
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Promo test helpers
+// ---------------------------------------------------------------------------
+
+/// Minimal setup: init protocol + collection + market config + position.
+/// Returns (admin, admin_asset keypair, position_pda, collection pubkey).
+fn promo_setup(svm: &mut LiteSVM) -> (Keypair, Keypair, Pubkey, Pubkey) {
+    let admin = Keypair::new();
+    svm.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+
+    // Init protocol
+    send_tx(svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Create collection
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+
+    // Create MarketConfig
+    send_tx(svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Create position
+    let admin_asset = Keypair::new();
+    plant_position_stubs(svm, &admin_asset.pubkey());
+    send_tx(
+        svm,
+        &[ix_create_position(
+            &admin.pubkey(),
+            &admin_asset.pubkey(),
+            500,
+            &collection,
+        )],
+        &[&admin, &admin_asset],
+    )
+    .unwrap();
+
+    let (pos_pda, _) = position_pda(&admin_asset.pubkey());
+
+    (admin, admin_asset, pos_pda, collection)
+}
+
+// ---------------------------------------------------------------------------
+// 1. test_create_promo — happy path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_promo() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
+
+    let name_suffix = "Test Promo";
+    let permissions: u8 = PERM_BUY | PERM_REPAY | PERM_LIMITED_BORROW;
+    let borrow_capacity: u64 = 20_000_000;
+    let borrow_refill_period: u64 = 1000;
+    let sell_capacity: u64 = 0;
+    let sell_refill_period: u64 = 0;
+    let min_deposit: u64 = 10_000_000;
+    let max_claims: u32 = 100;
+    let image_uri = "https://example.com/img.png";
+
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        permissions,
+        borrow_capacity,
+        borrow_refill_period,
+        sell_capacity,
+        sell_refill_period,
+        min_deposit,
+        max_claims,
+        image_uri,
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    // Verify the PromoConfig PDA
+    let authority_seed = admin_asset.pubkey();
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+    let promo = read_promo_config(&svm, &pda);
+
+    assert_eq!(promo.authority_seed, authority_seed);
+    assert_eq!(promo.permissions, permissions);
+    assert_eq!(promo.borrow_capacity, borrow_capacity);
+    assert_eq!(promo.borrow_refill_period, borrow_refill_period);
+    assert_eq!(promo.sell_capacity, sell_capacity);
+    assert_eq!(promo.sell_refill_period, sell_refill_period);
+    assert_eq!(promo.min_deposit_lamports, min_deposit);
+    assert_eq!(promo.max_claims, max_claims);
+    assert_eq!(promo.claims_count, 0);
+    assert!(promo.active);
+    assert_eq!(promo.name_suffix, name_suffix);
+    assert_eq!(promo.image_uri, image_uri);
+}
+
+// ---------------------------------------------------------------------------
+// 2. test_create_promo_non_admin_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_promo_non_admin_rejected() {
+    let (mut svm, _) = setup();
+    let (_admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
+
+    // A non-admin wallet tries to create a promo
+    let non_admin = Keypair::new();
+    svm.airdrop(&non_admin.pubkey(), 5_000_000_000).unwrap();
+
+    // Build the ix with non_admin as signer but still referencing the admin's position
+    let name_suffix = "Evil Promo";
+    let (pos_pda, _) = position_pda(&admin_asset.pubkey());
+    let authority_seed = admin_asset.pubkey();
+    let (promo, _) = promo_pda(&authority_seed, name_suffix);
+
+    let mut data = sighash("create_promo");
+    data.extend_from_slice(&(name_suffix.len() as u32).to_le_bytes());
+    data.extend_from_slice(name_suffix.as_bytes());
+    data.push(PERM_BUY);
+    data.extend_from_slice(&0u64.to_le_bytes()); // borrow_capacity
+    data.extend_from_slice(&0u64.to_le_bytes()); // borrow_refill_period
+    data.extend_from_slice(&0u64.to_le_bytes()); // sell_capacity
+    data.extend_from_slice(&0u64.to_le_bytes()); // sell_refill_period
+    data.extend_from_slice(&0u64.to_le_bytes()); // min_deposit_lamports
+    data.extend_from_slice(&10u32.to_le_bytes()); // max_claims
+    let uri = "";
+    data.extend_from_slice(&(uri.len() as u32).to_le_bytes());
+
+    let ix = Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(non_admin.pubkey(), true),                        // admin (non-admin signer)
+            AccountMeta::new_readonly(admin_asset.pubkey(), false),             // admin_key_asset
+            AccountMeta::new_readonly(pos_pda, false),                         // position
+            AccountMeta::new(promo, false),                                    // promo (init)
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ],
+    );
+
+    let result = send_tx(&mut svm, &[ix], &[&non_admin]);
+    assert!(result.is_err(), "non-admin should not be able to create promo");
+}
+
+// ---------------------------------------------------------------------------
+// 3. test_create_multiple_promos_per_position
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_multiple_promos_per_position() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+
+    // Create promo A
+    let ix_a = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        "Promo A",
+        PERM_BUY | PERM_REPAY,
+        0, 0, 0, 0, 5_000_000, 50, "",
+    );
+    send_tx(&mut svm, &[ix_a], &[&admin]).unwrap();
+
+    // Create promo B
+    let ix_b = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        "Promo B",
+        PERM_BUY | PERM_LIMITED_BORROW,
+        10_000_000, 500, 0, 0, 1_000_000, 200, "https://example.com/b.png",
+    );
+    send_tx(&mut svm, &[ix_b], &[&admin]).unwrap();
+
+    // Verify promo A
+    let (pda_a, _) = promo_pda(&authority_seed, "Promo A");
+    let promo_a = read_promo_config(&svm, &pda_a);
+    assert_eq!(promo_a.name_suffix, "Promo A");
+    assert_eq!(promo_a.permissions, PERM_BUY | PERM_REPAY);
+    assert_eq!(promo_a.max_claims, 50);
+    assert!(promo_a.active);
+
+    // Verify promo B
+    let (pda_b, _) = promo_pda(&authority_seed, "Promo B");
+    let promo_b = read_promo_config(&svm, &pda_b);
+    assert_eq!(promo_b.name_suffix, "Promo B");
+    assert_eq!(promo_b.permissions, PERM_BUY | PERM_LIMITED_BORROW);
+    assert_eq!(promo_b.borrow_capacity, 10_000_000);
+    assert_eq!(promo_b.max_claims, 200);
+    assert_eq!(promo_b.image_uri, "https://example.com/b.png");
+}
+
+// ---------------------------------------------------------------------------
+// 4. test_update_promo
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_update_promo() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Update Me";
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY | PERM_REPAY,
+        0, 0, 0, 0, 0, 100, "",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Update: set active=false
+    let ix_deactivate = ix_update_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        &pda,
+        Some(false),
+        None,
+    );
+    send_tx(&mut svm, &[ix_deactivate], &[&admin]).unwrap();
+    let promo = read_promo_config(&svm, &pda);
+    assert!(!promo.active, "promo should be inactive after update");
+
+    // Update: set max_claims=50
+    let ix_max = ix_update_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        &pda,
+        None,
+        Some(50),
+    );
+    send_tx(&mut svm, &[ix_max], &[&admin]).unwrap();
+    let promo = read_promo_config(&svm, &pda);
+    assert_eq!(promo.max_claims, 50);
+
+    // Re-activate
+    let ix_reactivate = ix_update_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        &pda,
+        Some(true),
+        None,
+    );
+    send_tx(&mut svm, &[ix_reactivate], &[&admin]).unwrap();
+    let promo = read_promo_config(&svm, &pda);
+    assert!(promo.active, "promo should be active after re-activation");
+}
+
+// ---------------------------------------------------------------------------
+// 5. test_update_promo_max_below_current_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_update_promo_max_below_current_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Max Test";
+
+    // Create promo with max_claims=0 (unlimited) to allow claiming
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY | PERM_REPAY,
+        0, 0, 0, 0, 0, 0, "",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Claim once to increment claims_count to 1
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+    );
+    send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
+
+    // Verify claims_count is now 1
+    let promo = read_promo_config(&svm, &pda);
+    assert_eq!(promo.claims_count, 1);
+
+    // Try to set max_claims=0 — this is unlimited, so it should succeed
+    // (0 means unlimited, which is >= any claims_count)
+    // Actually, looking at the code: require!(max_claims >= promo.claims_count)
+    // 0 < 1, so this should fail. 0 means "unlimited" semantically, but the check is numeric.
+    let ix_set_zero = ix_update_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        &pda,
+        None,
+        Some(0),
+    );
+    let result = send_tx(&mut svm, &[ix_set_zero], &[&admin]);
+    assert!(result.is_err(), "setting max_claims below claims_count should fail");
+}
+
+// ---------------------------------------------------------------------------
+// 6. test_claim_promo_key — happy path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_key() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Claim Me";
+    let permissions: u8 = PERM_BUY | PERM_REPAY | PERM_LIMITED_BORROW;
+    let borrow_capacity: u64 = 20_000_000;
+    let borrow_refill_period: u64 = 1000;
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        permissions,
+        borrow_capacity,
+        borrow_refill_period,
+        0, 0,
+        10_000_000,
+        100,
+        "https://example.com/img.png",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Claimer claims a key
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+    );
+    send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
+
+    // Verify ClaimReceipt PDA was created
+    let (receipt_pda, _) = claim_receipt_pda(&pda, &claimer.pubkey());
+    let receipt = read_claim_receipt(&svm, &receipt_pda);
+    assert_eq!(receipt.claimer, claimer.pubkey());
+    assert_eq!(receipt.promo, pda);
+
+    // Verify KeyState PDA was created with correct rate limits
+    let (ks_pda, _) = key_state_pda(&key_asset.pubkey());
+    let ks = read_key_state(&svm, &ks_pda);
+    assert_eq!(ks.asset, key_asset.pubkey());
+    assert_eq!(ks.borrow_bucket.capacity, borrow_capacity);
+    assert_eq!(ks.borrow_bucket.refill_period, borrow_refill_period);
+    assert_eq!(ks.borrow_bucket.level, borrow_capacity); // starts full
+    // No sell bucket configured
+    assert_eq!(ks.sell_bucket.capacity, 0);
+
+    // Verify claims_count incremented
+    let promo = read_promo_config(&svm, &pda);
+    assert_eq!(promo.claims_count, 1);
+
+    // Verify the key NFT exists (account should be owned by MPL-Core)
+    let key_account = svm.get_account(&key_asset.pubkey()).unwrap();
+    assert_eq!(key_account.owner, MPL_CORE_ID);
+}
+
+// ---------------------------------------------------------------------------
+// 7. test_claim_promo_key_duplicate_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_key_duplicate_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "No Dupes";
+
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY | PERM_REPAY,
+        0, 0, 0, 0, 0, 0, "",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // First claim succeeds
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset_1 = Keypair::new();
+    let ix_claim_1 = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset_1.pubkey(),
+        &collection,
+    );
+    send_tx(&mut svm, &[ix_claim_1], &[&claimer, &key_asset_1]).unwrap();
+
+    // Second claim from same wallet should fail (ClaimReceipt PDA collision)
+    let key_asset_2 = Keypair::new();
+    let ix_claim_2 = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset_2.pubkey(),
+        &collection,
+    );
+    let result = send_tx(&mut svm, &[ix_claim_2], &[&claimer, &key_asset_2]);
+    assert!(result.is_err(), "duplicate claim from same wallet should fail");
+}
+
+// ---------------------------------------------------------------------------
+// 8. test_claim_promo_key_inactive_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_key_inactive_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Paused";
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY,
+        0, 0, 0, 0, 0, 0, "",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Deactivate promo
+    let ix_deactivate = ix_update_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        &pda,
+        Some(false),
+        None,
+    );
+    send_tx(&mut svm, &[ix_deactivate], &[&admin]).unwrap();
+
+    // Try to claim — should fail with PromoInactive
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+    );
+    let result = send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]);
+    assert!(result.is_err(), "claiming from inactive promo should fail");
+}
+
+// ---------------------------------------------------------------------------
+// 9. test_claim_promo_key_max_claims_reached
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_key_max_claims_reached() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Max One";
+
+    // Create promo with max_claims=1
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY | PERM_REPAY,
+        0, 0, 0, 0, 0, 1, "",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Wallet A claims successfully
+    let claimer_a = Keypair::new();
+    svm.airdrop(&claimer_a.pubkey(), 5_000_000_000).unwrap();
+    let key_a = Keypair::new();
+    let ix_a = ix_claim_promo_key(
+        &claimer_a.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_a.pubkey(),
+        &collection,
+    );
+    send_tx(&mut svm, &[ix_a], &[&claimer_a, &key_a]).unwrap();
+
+    // Verify claims_count is 1
+    let promo = read_promo_config(&svm, &pda);
+    assert_eq!(promo.claims_count, 1);
+
+    // Wallet B tries to claim — should fail with PromoMaxClaimsReached
+    let claimer_b = Keypair::new();
+    svm.airdrop(&claimer_b.pubkey(), 5_000_000_000).unwrap();
+    let key_b = Keypair::new();
+    let ix_b = ix_claim_promo_key(
+        &claimer_b.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_b.pubkey(),
+        &collection,
+    );
+    let result = send_tx(&mut svm, &[ix_b], &[&claimer_b, &key_b]);
+    assert!(result.is_err(), "claim should fail when max_claims reached");
 }
