@@ -127,6 +127,7 @@ PromoConfig {
     claims_count: u32            // current count
     active: bool                 // admin can pause/resume
     name_suffix: String          // NFT name suffix (e.g. "Promo Borrow")
+    image_uri: String            // custom NFT image URL (max 128 bytes, e.g. Irys/Arweave link)
     bump: u8
 }
 ```
@@ -150,7 +151,10 @@ one-per-wallet guard. Rent (~0.001 SOL) is paid by the claimer.
 
 **`create_promo`** (admin only)
 Creates the PromoConfig PDA with all parameters. Admin specifies permissions,
-rate limits, max claims, name suffix, and the suggested deposit amount.
+rate limits, max claims, name suffix, custom image URI, and the suggested
+deposit amount. The image URI (max 128 bytes) points to an Irys or Arweave
+hosted image that will be used for all keys minted from this promo. If empty,
+the default Härdig key image is used.
 
 **`update_promo`** (admin only)
 Toggle `active` flag, adjust `max_claims`. Cannot change permissions or rate
@@ -177,7 +181,7 @@ Handler:
 1. Check `promo.active == true`
 2. Check `promo.claims_count < promo.max_claims` (or 0 = unlimited)
 3. `claim_receipt` init handles one-per-wallet (PDA collision = error)
-4. Mint key NFT to claimer via CreateV2CpiBuilder
+4. Mint key NFT to claimer via CreateV2CpiBuilder (uses `promo.image_uri` if non-empty, otherwise default key image)
 5. Init KeyState with rate limits from promo config
 6. Increment `promo.claims_count`
 
