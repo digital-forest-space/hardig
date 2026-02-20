@@ -22,6 +22,7 @@ import {
   marketConfig,
   discoveredPositions,
   activePositionIndex,
+  discoveredPromos,
   pushLog,
   resetPositionState,
 } from './state.js';
@@ -463,4 +464,125 @@ export async function selectActivePosition(index, connection, cache) {
     }
   }
   keyring.value = posKeys;
+
+  // Discover promos for this position
+  await discoverPromos(connection);
+}
+
+/**
+ * Discover all PromoConfig accounts for the currently active position.
+ * Uses getProgramAccounts with the PromoConfig discriminator and filters
+ * by authority_seed matching the current position.
+ */
+export async function discoverPromos(connection) {
+  discoveredPromos.value = [];
+
+  const pos = position.value;
+  if (!pos || !pos.authoritySeed) return;
+
+  const authoritySeed = pos.authoritySeed;
+
+  // PromoConfig account discriminator: sha256("account:PromoConfig")[..8] = "N1FrpUTeaxt" (base58)
+  const PROMO_DISC_B58 = 'N1FrpUTeaxt';
+
+  try {
+    const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+      filters: [
+        // Discriminator (first 8 bytes)
+        { memcmp: { offset: 0, bytes: PROMO_DISC_B58 } },
+        // authority_seed at offset 8 (32 bytes)
+        { memcmp: { offset: 8, bytes: authoritySeed.toBase58() } },
+      ],
+      commitment: 'confirmed',
+    });
+
+    const promos = [];
+    for (const { pubkey, account } of accounts) {
+      const data = account.data;
+      if (data.length < 82) continue; // Minimum reasonable size
+
+      const view = new DataView(data.buffer, data.byteOffset);
+
+      // Parse PromoConfig layout (after 8-byte discriminator):
+      // authority_seed: 32 bytes (Pubkey) [8..40]
+      // permissions: 1 byte (u8) [40]
+      // borrow_capacity: 8 bytes (u64 LE) [41..49]
+      // borrow_refill_period: 8 bytes (u64 LE) [49..57]
+      // sell_capacity: 8 bytes (u64 LE) [57..65]
+      // sell_refill_period: 8 bytes (u64 LE) [65..73]
+      // min_deposit_lamports: 8 bytes (u64 LE) [73..81]
+      // max_claims: 4 bytes (u32 LE) [81..85]
+      // claims_count: 4 bytes (u32 LE) [85..89]
+      // active: 1 byte (bool) [89]
+      // name_suffix: 4 bytes length + UTF-8 bytes [90..]
+      // image_uri: 4 bytes length + UTF-8 bytes [after name_suffix]
+      // bump: 1 byte (u8) [after image_uri]
+
+      const parsedAuthoritySeed = new PublicKey(data.slice(8, 40));
+      const permissions = data[40];
+      const borrowCapacity = Number(view.getBigUint64(41, true));
+      const borrowRefillPeriod = Number(view.getBigUint64(49, true));
+      const sellCapacity = Number(view.getBigUint64(57, true));
+      const sellRefillPeriod = Number(view.getBigUint64(65, true));
+      const minDepositLamports = Number(view.getBigUint64(73, true));
+      const maxClaims = view.getUint32(81, true);
+      const claimsCount = view.getUint32(85, true);
+      const active = data[89] !== 0;
+
+      // Parse name_suffix (Borsh String: u32 len + bytes)
+      let offset = 90;
+      let nameSuffix = '';
+      if (offset + 4 <= data.length) {
+        const nameLen = view.getUint32(offset, true);
+        offset += 4;
+        if (nameLen > 0 && nameLen <= 200 && offset + nameLen <= data.length) {
+          nameSuffix = new TextDecoder().decode(data.slice(offset, offset + nameLen));
+          offset += nameLen;
+        }
+      }
+
+      // Parse image_uri (Borsh String: u32 len + bytes)
+      let imageUri = '';
+      if (offset + 4 <= data.length) {
+        const uriLen = view.getUint32(offset, true);
+        offset += 4;
+        if (uriLen > 0 && uriLen <= 200 && offset + uriLen <= data.length) {
+          imageUri = new TextDecoder().decode(data.slice(offset, offset + uriLen));
+          offset += uriLen;
+        }
+      }
+
+      // bump
+      const bump = offset < data.length ? data[offset] : 0;
+
+      promos.push({
+        pda: pubkey,
+        config: {
+          authoritySeed: parsedAuthoritySeed,
+          permissions,
+          borrowCapacity,
+          borrowRefillPeriod,
+          sellCapacity,
+          sellRefillPeriod,
+          minDepositLamports,
+          maxClaims,
+          claimsCount,
+          active,
+          nameSuffix,
+          imageUri,
+          bump,
+        },
+      });
+    }
+
+    // Sort by name_suffix alphabetically
+    promos.sort((a, b) => a.config.nameSuffix.localeCompare(b.config.nameSuffix));
+    discoveredPromos.value = promos;
+
+    if (promos.length > 0) {
+      pushLog(`Found ${promos.length} promo(s) for this position.`);
+    }
+  } catch (e) {
+    pushLog('Failed to discover promos: ' + e.message, true);
+  }
 }

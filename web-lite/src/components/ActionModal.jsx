@@ -12,6 +12,7 @@ import {
   cluster,
   customUrl,
   marketConfig,
+  discoveredPromos,
 } from '../state.js';
 import {
   buildInitializeProtocol,
@@ -24,13 +25,15 @@ import {
   buildReinvest,
   buildAuthorizeKey,
   buildRevokeKey,
+  buildCreatePromo,
+  buildUpdatePromo,
 } from '../instructions/index.js';
 import { availableMarkets, marketEntryToPubkeys } from '../markets.js';
 import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, navTokenName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR } from '../utils.js';
 import { deriveMarketConfigPda } from '../constants.js';
 
 // Phase: form | building | confirm | result
-export function ActionModal({ action, onClose, onRefresh }) {
+export function ActionModal({ action, actionData, onClose, onRefresh }) {
   const { connection } = useConnection();
   const wallet = useWallet();
   const [phase, setPhase] = useState('form');
@@ -56,6 +59,22 @@ export function ActionModal({ action, onClose, onRefresh }) {
   const [positionName, setPositionName] = useState('');
   const [keyName, setKeyName] = useState('');
   const [selectedMarketIdx, setSelectedMarketIdx] = useState('0');
+
+  // Promo form fields
+  const [promoNameSuffix, setPromoNameSuffix] = useState('');
+  const [promoPermissions, setPromoPermissions] = useState(String(PERM_BUY | PERM_REPAY | PERM_LIMITED_BORROW));
+  const [promoBorrowCapacity, setPromoBorrowCapacity] = useState('');
+  const [promoBorrowDays, setPromoBorrowDays] = useState('');
+  const [promoBorrowHours, setPromoBorrowHours] = useState('');
+  const [promoBorrowMinutes, setPromoBorrowMinutes] = useState('');
+  const [promoSellCapacity, setPromoSellCapacity] = useState('');
+  const [promoSellDays, setPromoSellDays] = useState('');
+  const [promoSellHours, setPromoSellHours] = useState('');
+  const [promoSellMinutes, setPromoSellMinutes] = useState('');
+  const [promoMinDeposit, setPromoMinDeposit] = useState('');
+  const [promoMaxClaims, setPromoMaxClaims] = useState('0');
+  const [promoImageUri, setPromoImageUri] = useState('');
+  const [editMaxClaims, setEditMaxClaims] = useState('');
 
   const walletPk = wallet.publicKey;
 
@@ -158,6 +177,42 @@ export function ActionModal({ action, onClose, onRefresh }) {
           built = await buildRevokeKey(program, walletPk, revocable[idx]);
           break;
         }
+        case 'createPromo': {
+          const ns = promoNameSuffix.trim();
+          if (!ns) { setError('Name suffix is required'); setPhase('form'); return; }
+          if (ns.length > 64) { setError('Name suffix must be 64 characters or less'); setPhase('form'); return; }
+          const pp = parseInt(promoPermissions) || 0;
+          if (pp === 0) { setError('Permissions cannot be zero'); setPhase('form'); return; }
+          const toSlots = (d, h, m) => (parseInt(d) || 0) * 216000 + (parseInt(h) || 0) * 9000 + (parseInt(m) || 0) * 150;
+          const pbc = (pp & PERM_LIMITED_BORROW) ? (parseSolToLamports(promoBorrowCapacity) || 0) : 0;
+          const pbr = (pp & PERM_LIMITED_BORROW) ? toSlots(promoBorrowDays, promoBorrowHours, promoBorrowMinutes) : 0;
+          const psc = (pp & PERM_LIMITED_SELL) ? (parseSolToLamports(promoSellCapacity) || 0) : 0;
+          const psr = (pp & PERM_LIMITED_SELL) ? toSlots(promoSellDays, promoSellHours, promoSellMinutes) : 0;
+          if ((pp & PERM_LIMITED_SELL) && (psc === 0 || psr === 0)) { setError('Sell capacity and refill period must be nonzero'); setPhase('form'); return; }
+          if ((pp & PERM_LIMITED_BORROW) && (pbc === 0 || pbr === 0)) { setError('Borrow capacity and refill period must be nonzero'); setPhase('form'); return; }
+          const pmd = parseSolToLamports(promoMinDeposit) || 0;
+          const pmc = parseInt(promoMaxClaims) || 0;
+          const piu = promoImageUri.trim();
+          if (piu.length > 128) { setError('Image URI must be 128 characters or less'); setPhase('form'); return; }
+          built = await buildCreatePromo(program, walletPk, ns, pp, pbc, pbr, psc, psr, pmd, pmc, piu);
+          break;
+        }
+        case 'togglePromo': {
+          const pi = actionData?.promoIndex;
+          const promo = discoveredPromos.value[pi];
+          if (!promo) { setError('Promo not found'); setPhase('form'); return; }
+          built = await buildUpdatePromo(program, walletPk, promo.pda, !promo.config.active, null);
+          break;
+        }
+        case 'editPromoMaxClaims': {
+          const pi2 = actionData?.promoIndex;
+          const promo2 = discoveredPromos.value[pi2];
+          if (!promo2) { setError('Promo not found'); setPhase('form'); return; }
+          const newMax = parseInt(editMaxClaims);
+          if (isNaN(newMax) || newMax < 0) { setError('Invalid max claims value'); setPhase('form'); return; }
+          built = await buildUpdatePromo(program, walletPk, promo2.pda, null, newMax);
+          break;
+        }
         default:
           setError('Unknown action: ' + action);
           return;
@@ -173,7 +228,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
   }
 
   // Auto-submit for no-form actions (useEffect, not during render)
-  const noFormActions = ['initProtocol', 'reinvest'];
+  const noFormActions = ['initProtocol', 'reinvest', 'togglePromo'];
   useEffect(() => {
     if (noFormActions.includes(action) && !didAutoSubmit.current) {
       didAutoSubmit.current = true;
@@ -248,6 +303,9 @@ export function ActionModal({ action, onClose, onRefresh }) {
     reinvest: 'Reinvest',
     authorize: 'Authorize Key',
     revoke: 'Revoke Key',
+    createPromo: 'Create Promo',
+    togglePromo: 'Toggle Promo',
+    editPromoMaxClaims: 'Edit Max Claims',
   };
 
   return (
@@ -449,6 +507,154 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 </select>
               </div>
             )}
+
+            {action === 'createPromo' && (
+              <>
+                <div class="form-group">
+                  <label>Name Suffix</label>
+                  <input
+                    type="text"
+                    value={promoNameSuffix}
+                    onInput={(e) => setPromoNameSuffix(e.target.value)}
+                    placeholder="e.g. Promo Borrow"
+                    maxLength={64}
+                    autoFocus
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                    Used in the NFT name and as PDA seed. Max 64 characters.
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Permissions</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                    {[
+                      [PERM_BUY, 'Buy'],
+                      [PERM_SELL, 'Sell'],
+                      [PERM_BORROW, 'Borrow'],
+                      [PERM_REPAY, 'Repay'],
+                      [PERM_REINVEST, 'Reinvest'],
+                      [PERM_LIMITED_SELL, 'Limited Sell'],
+                      [PERM_LIMITED_BORROW, 'Limited Borrow'],
+                    ].map(([bit, name]) => {
+                      const p = parseInt(promoPermissions) || 0;
+                      return (
+                        <label key={bit} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
+                          <input
+                            type="checkbox"
+                            checked={(p & bit) !== 0}
+                            onChange={() => setPromoPermissions(String(p ^ bit))}
+                          />
+                          {name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {((parseInt(promoPermissions) || 0) & PERM_LIMITED_BORROW) !== 0 && (
+                    <div style={{ marginTop: '8px', marginLeft: '26px' }}>
+                      <div class="form-group" style={{ marginBottom: '4px' }}>
+                        <label style={{ fontSize: '11px' }}>Borrow Capacity (SOL)</label>
+                        <input type="text" value={promoBorrowCapacity} onInput={(e) => setPromoBorrowCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                      </div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Borrow Refill Period</label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Days</label>
+                          <input type="number" min="0" value={promoBorrowDays} onInput={(e) => setPromoBorrowDays(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Hours</label>
+                          <input type="number" min="0" max="23" value={promoBorrowHours} onInput={(e) => setPromoBorrowHours(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Min</label>
+                          <input type="number" min="0" max="59" value={promoBorrowMinutes} onInput={(e) => setPromoBorrowMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {((parseInt(promoPermissions) || 0) & PERM_LIMITED_SELL) !== 0 && (
+                    <div style={{ marginTop: '8px', marginLeft: '26px' }}>
+                      <div class="form-group" style={{ marginBottom: '4px' }}>
+                        <label style={{ fontSize: '11px' }}>Sell Capacity (navSOL)</label>
+                        <input type="text" value={promoSellCapacity} onInput={(e) => setPromoSellCapacity(e.target.value)} placeholder="e.g. 5.0" />
+                      </div>
+                      <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Sell Refill Period</label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Days</label>
+                          <input type="number" min="0" value={promoSellDays} onInput={(e) => setPromoSellDays(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Hours</label>
+                          <input type="number" min="0" max="23" value={promoSellHours} onInput={(e) => setPromoSellHours(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '10px' }}>Min</label>
+                          <input type="number" min="0" max="59" value={promoSellMinutes} onInput={(e) => setPromoSellMinutes(e.target.value)} placeholder="0" style={{ width: '60px' }} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '8px' }}>
+                    {permissionsName(parseInt(promoPermissions) || 0)} (0x{((parseInt(promoPermissions) || 0).toString(16)).toUpperCase().padStart(2, '0')})
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Min Deposit (SOL)</label>
+                  <input
+                    type="text"
+                    value={promoMinDeposit}
+                    onInput={(e) => setPromoMinDeposit(e.target.value)}
+                    placeholder="e.g. 0.1"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Max Claims (0 for unlimited)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={promoMaxClaims}
+                    onInput={(e) => setPromoMaxClaims(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Image URI (optional)</label>
+                  <input
+                    type="text"
+                    value={promoImageUri}
+                    onInput={(e) => setPromoImageUri(e.target.value)}
+                    placeholder="https://..."
+                    maxLength={128}
+                  />
+                </div>
+              </>
+            )}
+
+            {action === 'editPromoMaxClaims' && (() => {
+              const promoIdx = actionData?.promoIndex;
+              const promo = discoveredPromos.value[promoIdx];
+              return (
+                <>
+                  {promo && (
+                    <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '10px' }}>
+                      Promo: <strong>{promo.config.nameSuffix}</strong> (current: {promo.config.maxClaims === 0 ? 'unlimited' : promo.config.maxClaims}, claimed: {promo.config.claimsCount})
+                    </div>
+                  )}
+                  <div class="form-group">
+                    <label>New Max Claims (0 for unlimited)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editMaxClaims}
+                      onInput={(e) => setEditMaxClaims(e.target.value)}
+                      placeholder="0"
+                      autoFocus
+                    />
+                  </div>
+                </>
+              );
+            })()}
 
             <div class="btn-row">
               <button class="btn" onClick={onClose}>Cancel</button>

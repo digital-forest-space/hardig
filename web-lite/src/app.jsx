@@ -65,11 +65,11 @@ function AppInner() {
     }
   }, [cluster.value, customUrl.value]);
 
-  const handleAction = (action) => {
+  const handleAction = (action, data) => {
     if (action === 'refresh') {
       doRefresh();
     } else {
-      setActiveAction(action);
+      setActiveAction(data ? { type: action, ...data } : action);
     }
   };
 
@@ -99,7 +99,8 @@ function AppInner() {
 
       {activeAction && (
         <ActionModal
-          action={activeAction}
+          action={typeof activeAction === 'string' ? activeAction : activeAction.type}
+          actionData={typeof activeAction === 'object' ? activeAction : null}
           onClose={() => setActiveAction(null)}
           onRefresh={doRefresh}
         />
