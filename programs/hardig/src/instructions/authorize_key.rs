@@ -198,6 +198,7 @@ pub fn handler(
             borrow_limit_str.as_deref(),
             Some(&admin_market),
             Some(&admin_asset_name),
+            None,
         ))
         .plugins(vec![
             PluginAuthorityPair {

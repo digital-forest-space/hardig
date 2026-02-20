@@ -123,6 +123,35 @@ pub mod hardig {
         instructions::execute_recovery::handler(ctx)
     }
 
+    /// Create a PromoConfig PDA for a position (admin only).
+    pub fn create_promo(
+        ctx: Context<CreatePromo>,
+        name_suffix: String,
+        permissions: u8,
+        borrow_capacity: u64,
+        borrow_refill_period: u64,
+        sell_capacity: u64,
+        sell_refill_period: u64,
+        min_deposit_lamports: u64,
+        max_claims: u32,
+        image_uri: String,
+    ) -> Result<()> {
+        instructions::create_promo::handler(ctx, name_suffix, permissions, borrow_capacity, borrow_refill_period, sell_capacity, sell_refill_period, min_deposit_lamports, max_claims, image_uri)
+    }
+
+    pub fn update_promo(
+        ctx: Context<UpdatePromo>,
+        active: Option<bool>,
+        max_claims: Option<u32>,
+    ) -> Result<()> {
+        instructions::update_promo::handler(ctx, active, max_claims)
+    }
+
+    /// Claim a promo key NFT from a PromoConfig (permissionless — anyone can call).
+    pub fn claim_promo_key(ctx: Context<ClaimPromoKey>) -> Result<()> {
+        instructions::claim_promo_key::handler(ctx)
+    }
+
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
     pub fn create_market_config(
         ctx: Context<CreateMarketConfig>,

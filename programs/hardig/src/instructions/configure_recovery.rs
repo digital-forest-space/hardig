@@ -156,7 +156,7 @@ pub fn handler(
         .owner(Some(&ctx.accounts.target_wallet.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name(nft_name.clone())
-        .uri(metadata_uri(&nft_name, 0, None, None, None, None))
+        .uri(metadata_uri(&nft_name, 0, None, None, None, None, None))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

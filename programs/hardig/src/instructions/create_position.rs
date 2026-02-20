@@ -163,7 +163,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
         .owner(Some(&ctx.accounts.admin.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name(nft_name.clone())
-        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None, Some(&market_name), None))
+        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None, Some(&market_name), None, None))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

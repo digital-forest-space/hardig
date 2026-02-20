@@ -181,7 +181,7 @@ pub fn handler(ctx: Context<ExecuteRecovery>) -> Result<()> {
         .owner(Some(&ctx.accounts.recovery_holder.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name(old_name.clone())
-        .uri(metadata_uri(&old_name, PRESET_ADMIN, None, None, if old_market.is_empty() { None } else { Some(&old_market) }, None))
+        .uri(metadata_uri(&old_name, PRESET_ADMIN, None, None, if old_market.is_empty() { None } else { Some(&old_market) }, None, None))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

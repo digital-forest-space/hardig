@@ -11,6 +11,7 @@ pub mod execute_recovery;
 pub mod heartbeat;
 pub mod initialize_protocol;
 pub mod migrate_config;
+pub mod promo;
 pub mod reinvest;
 pub mod repay;
 pub mod revoke_key;
@@ -31,6 +32,7 @@ pub use execute_recovery::*;
 pub use heartbeat::*;
 pub use initialize_protocol::*;
 pub use migrate_config::*;
+pub use promo::*;
 pub use reinvest::*;
 pub use repay::*;
 pub use revoke_key::*;
@@ -91,6 +93,8 @@ const KEY_IMAGE: &str = "https://gateway.irys.xyz/GKa2AyPSRe2VnsPXBepTzhzohEBsLN
 /// `limited_sell` / `limited_borrow` are passed as pre-formatted strings (e.g. "5 SOL / 15 days").
 /// `market` is the market name (e.g. "navSOL", "navETH").
 /// `position_name` is the admin asset's on-chain name (for delegated keys).
+/// `image_override` optionally replaces the default `KEY_IMAGE` with a custom image URL
+/// (e.g. for promo keys).
 pub fn metadata_uri(
     name: &str,
     permissions: u8,
@@ -98,6 +102,7 @@ pub fn metadata_uri(
     limited_borrow: Option<&str>,
     market: Option<&str>,
     position_name: Option<&str>,
+    image_override: Option<&str>,
 ) -> String {
     let mut attrs = Vec::new();
     let bits: &[(u8, &str)] = &[
@@ -126,9 +131,11 @@ pub fn metadata_uri(
         attrs.push(format!("{{\"trait_type\":\"position_name\",\"value\":\"{}\"}}", v));
     }
 
+    let image = image_override.unwrap_or(KEY_IMAGE);
+
     format!(
         "data:application/json,{{\"name\":\"{}\",\"symbol\":\"HKEY\",\"description\":\"Permission key for managing a H\\u00e4rdig position.\",\"image\":\"{}\",\"attributes\":[{}]}}",
-        name, KEY_IMAGE, attrs.join(","),
+        name, image, attrs.join(","),
     )
 }
 

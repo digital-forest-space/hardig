@@ -142,7 +142,7 @@ goes offline. Users self-serve.
 
 #### New State: PromoConfig
 
-PDA seeds: `[b"promo", authority_seed]` (one per position).
+PDA seeds: `[b"promo", authority_seed, name_suffix]` (multiple per position, keyed by name).
 
 ```
 PromoConfig {

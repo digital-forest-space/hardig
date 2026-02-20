@@ -1,5 +1,8 @@
 use anchor_lang::prelude::*;
 
+pub mod promo;
+pub use promo::*;
+
 /// Global protocol configuration. Singleton PDA (seeds = [b"config"]).
 #[account]
 pub struct ProtocolConfig {

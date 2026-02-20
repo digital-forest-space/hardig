@@ -71,6 +71,8 @@ pub enum HardigError {
     // Name errors
     #[msg("Custom name suffix exceeds 32 characters")]
     NameTooLong,
+    #[msg("Image URI exceeds maximum allowed length")]
+    ImageUriTooLong,
 
     // Recovery errors
     #[msg("No recovery key is configured for this position")]
@@ -83,4 +85,12 @@ pub enum HardigError {
     InvalidLockout,
     #[msg("Must provide old_recovery_asset to replace an existing recovery key")]
     OldRecoveryAssetRequired,
+
+    // Promo errors
+    #[msg("Max claims cannot be less than current claims count")]
+    MaxClaimsBelowCurrent,
+    #[msg("Promo is not active")]
+    PromoInactive,
+    #[msg("Promo has reached maximum claims")]
+    PromoMaxClaimsReached,
 }
