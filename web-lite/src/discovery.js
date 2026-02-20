@@ -63,13 +63,25 @@ function parseMplCoreAsset(data) {
   // Bytes 33: UpdateAuthority tag (0 = None, 1 = Address, 2 = Collection)
   const uaTag = data[33];
   let updateAuthority = null;
+  let nameOffset = 34; // tag 0 (None): no pubkey follows
   if ((uaTag === 1 || uaTag === 2) && data.length >= 66) {
     updateAuthority = new PublicKey(data.slice(34, 66));
+    nameOffset = 66;
   } else if (uaTag !== 0) {
     return null; // unknown tag
   }
 
-  return { owner, updateAuthority };
+  // Name: borsh String (u32 length + utf8 bytes)
+  let name = null;
+  if (nameOffset + 4 <= data.length) {
+    const view = new DataView(data.buffer, data.byteOffset);
+    const nameLen = view.getUint32(nameOffset, true);
+    if (nameLen > 0 && nameLen <= 200 && nameOffset + 4 + nameLen <= data.length) {
+      name = new TextDecoder().decode(data.slice(nameOffset + 4, nameOffset + 4 + nameLen));
+    }
+  }
+
+  return { owner, updateAuthority, name };
 }
 
 /**
@@ -344,6 +356,7 @@ export async function discoverPosition(connection, wallet) {
         mint: posAdminAsset,
         permissions: PRESET_ADMIN,
         heldBySigner: !!held,
+        name: parsed?.name || null,
       });
     }
 
@@ -372,6 +385,7 @@ export async function discoverPosition(connection, wallet) {
         mint: ks.asset,
         permissions,
         heldBySigner: !!held,
+        name: parsed?.name || null,
         ...attachBuckets(ks.asset),
       });
     }

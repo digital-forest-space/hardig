@@ -72,7 +72,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
           break;
         case 'createPosition': {
           const pName = positionName.trim() || null;
-          if (pName && pName.length > 32) { setError('Position name must be 32 characters or less'); setPhase('form'); return; }
+          if (pName && pName.length > 32) { setError('Label must be 32 characters or less'); setPhase('form'); return; }
           built = await buildCreatePosition(program, walletPk, pName);
           break;
         }
@@ -116,7 +116,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
           if ((p & PERM_LIMITED_SELL) && (sc === 0 || sr === 0)) { setError('Sell capacity and refill period must be nonzero'); setPhase('form'); return; }
           if ((p & PERM_LIMITED_BORROW) && (bc === 0 || br === 0)) { setError('Borrow capacity and refill period must be nonzero'); setPhase('form'); return; }
           const kName = keyName.trim() || null;
-          if (kName && kName.length > 32) { setError('Key name must be 32 characters or less'); setPhase('form'); return; }
+          if (kName && kName.length > 32) { setError('Label must be 32 characters or less'); setPhase('form'); return; }
           built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p, sc, sr, bc, br, kName);
           break;
         }
@@ -267,15 +267,18 @@ export function ActionModal({ action, onClose, onRefresh }) {
 
             {action === 'createPosition' && (
               <div class="form-group">
-                <label>Position Name (optional)</label>
+                <label>Label (optional)</label>
                 <input
                   type="text"
                   value={positionName}
                   onInput={(e) => setPositionName(e.target.value)}
-                  placeholder="e.g. My Vault"
+                  placeholder="e.g. Savings"
                   maxLength={32}
                   autoFocus
                 />
+                <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                  Appended to base name: H&auml;rdig Admin Key - <em>{positionName.trim() || '...'}</em>
+                </div>
               </div>
             )}
 
@@ -292,14 +295,17 @@ export function ActionModal({ action, onClose, onRefresh }) {
                   />
                 </div>
                 <div class="form-group">
-                  <label>Key Name (optional)</label>
+                  <label>Label (optional)</label>
                   <input
                     type="text"
                     value={keyName}
                     onInput={(e) => setKeyName(e.target.value)}
-                    placeholder="e.g. Trading Bot"
+                    placeholder="e.g. Puppy"
                     maxLength={32}
                   />
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                    Appended to base name: H&auml;rdig Key - <em>{keyName.trim() || '...'}</em>
+                  </div>
                 </div>
                 <div class="form-group">
                   <label>Permissions</label>
