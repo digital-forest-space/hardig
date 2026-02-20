@@ -128,13 +128,14 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
         HardigError::InvalidPositionPda
     );
 
-    // --- Validate optional custom name ---
+    // --- Build NFT name from base + optional suffix ---
+    let base_name = "H\u{00e4}rdig Admin Key";
     let nft_name = match &name {
-        Some(n) => {
-            require!(n.len() <= 32, HardigError::NameTooLong);
-            n.clone()
+        Some(suffix) => {
+            require!(suffix.len() <= 32, HardigError::NameTooLong);
+            format!("{} - {}", base_name, suffix)
         }
-        None => "H\u{00e4}rdig Admin Key".to_string(),
+        None => base_name.to_string(),
     };
 
     // --- Create admin NFT via MPL-Core CPI ---

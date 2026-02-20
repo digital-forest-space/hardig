@@ -69,6 +69,6 @@ pub enum HardigError {
     PositionAlreadyExists,
 
     // Name errors
-    #[msg("Custom name exceeds 32 characters")]
+    #[msg("Custom name suffix exceeds 32 characters")]
     NameTooLong,
 }

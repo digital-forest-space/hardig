@@ -2315,9 +2315,9 @@ fn test_create_position_custom_name() {
     )
     .unwrap();
 
-    // Verify the MPL-Core asset has the custom name
+    // Verify the MPL-Core asset has the base name + suffix
     let asset_account = svm.get_account(&asset_kp.pubkey()).expect("asset should exist");
     assert_eq!(asset_account.owner, MPL_CORE_ID);
     let name = extract_asset_name(&asset_account.data);
-    assert_eq!(name, "My Vault");
+    assert_eq!(name, "H\u{00e4}rdig Admin Key - My Vault");
 }

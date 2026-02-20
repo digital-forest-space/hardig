@@ -136,13 +136,14 @@ pub fn handler(
         None
     };
 
-    // Validate optional custom name
+    // Build NFT name from base + optional suffix
+    let base_name = "H\u{00e4}rdig Key";
     let nft_name = match &name {
-        Some(n) => {
-            require!(n.len() <= 32, HardigError::NameTooLong);
-            n.clone()
+        Some(suffix) => {
+            require!(suffix.len() <= 32, HardigError::NameTooLong);
+            format!("{} - {}", base_name, suffix)
         }
-        None => "H\u{00e4}rdig Key".to_string(),
+        None => base_name.to_string(),
     };
 
     // Create the new key NFT via MPL-Core, adding it to the collection
