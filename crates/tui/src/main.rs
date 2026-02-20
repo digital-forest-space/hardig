@@ -465,7 +465,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 None => None,
             };
             app.form_fields = vec![
-                ("Name (optional)".into(), name.clone().unwrap_or_default()),
+                ("Label (optional)".into(), name.clone().unwrap_or_default()),
             ];
             app.build_create_position(parsed_mint);
         }
@@ -496,7 +496,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 ("Sell Refill Period (slots)".into(), sell_refill_slots.to_string()),
                 ("Borrow Capacity (SOL, 0=none)".into(), sol_amount_to_field(*borrow_capacity)),
                 ("Borrow Refill Period (slots)".into(), borrow_refill_slots.to_string()),
-                ("Name (optional)".into(), name.clone().unwrap_or_default()),
+                ("Label (optional)".into(), name.clone().unwrap_or_default()),
             ];
             app.build_authorize_key();
         }
