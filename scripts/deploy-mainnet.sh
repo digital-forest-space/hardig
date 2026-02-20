@@ -163,18 +163,40 @@ if [ ! -f "$IDL_JSON" ]; then
     echo "  Run 'anchor build' to generate it."
 else
     echo ""
-    read -rp "Upload IDL on-chain? [y/N] " IDL_CONFIRM
-    if [[ "$IDL_CONFIRM" =~ ^[Yy]$ ]]; then
-        # Detect whether an IDL account already exists
-        if anchor idl fetch "$PROGRAM_ID" --provider.cluster "$SOLANA_RPC_URL" &>/dev/null; then
-            echo "Existing IDL account found — upgrading..."
+
+    HAS_JQ=false
+    if command -v jq &>/dev/null; then
+        HAS_JQ=true
+    fi
+
+    ONCHAIN_IDL=$(anchor idl fetch "$PROGRAM_ID" --provider.cluster "$SOLANA_RPC_URL" 2>/dev/null || true)
+
+    # Determine if IDL changed: unknown (no jq), true, or false
+    IDL_CHANGED=unknown
+    if [ "$HAS_JQ" = true ]; then
+        LOCAL_HASH=$(jq -S -c . < "$IDL_JSON" | shasum -a 256 | awk '{print $1}')
+        if [ -n "$ONCHAIN_IDL" ]; then
+            ONCHAIN_HASH=$(echo "$ONCHAIN_IDL" | jq -S -c . | shasum -a 256 | awk '{print $1}')
+            if [ "$LOCAL_HASH" = "$ONCHAIN_HASH" ]; then
+                IDL_CHANGED=false
+            else
+                IDL_CHANGED=true
+            fi
+        else
+            IDL_CHANGED=true
+        fi
+    fi
+
+    upload_idl() {
+        if [ -n "$ONCHAIN_IDL" ]; then
+            echo "Upgrading IDL..."
             anchor idl upgrade "$PROGRAM_ID" \
                 --filepath "$IDL_JSON" \
                 --provider.cluster "$SOLANA_RPC_URL" \
                 --provider.wallet "$PAYER_KP" \
                 --priority-fee 50000
         else
-            echo "No existing IDL account — initializing..."
+            echo "Initializing IDL..."
             anchor idl init "$PROGRAM_ID" \
                 --filepath "$IDL_JSON" \
                 --provider.cluster "$SOLANA_RPC_URL" \
@@ -183,9 +205,30 @@ else
         fi
         echo ""
         echo "IDL uploaded successfully."
-    else
-        echo "Skipping IDL upload."
-    fi
+    }
+
+    case "$IDL_CHANGED" in
+        false)
+            echo "IDL unchanged — skipping upload."
+            ;;
+        true)
+            if [ -n "$ONCHAIN_IDL" ]; then
+                echo "IDL has changed — uploading..."
+            else
+                echo "No on-chain IDL found — uploading..."
+            fi
+            upload_idl
+            ;;
+        unknown)
+            echo "WARNING: jq not found — cannot compare IDLs."
+            read -rp "Upload IDL on-chain? [y/N] " IDL_CONFIRM
+            if [[ "$IDL_CONFIRM" =~ ^[Yy]$ ]]; then
+                upload_idl
+            else
+                echo "Skipping IDL upload."
+            fi
+            ;;
+    esac
 fi
 
 echo ""

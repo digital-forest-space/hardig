@@ -2,9 +2,9 @@
 
 *Swedish — hardy, resilient; able to endure difficult conditions.*
 
-Solana program implementing an NFT keyring model for delegated management of positions on the Nirvana protocol. Supports multiple nav-token markets (navSOL, navJUP, etc.) via on-chain MarketConfig PDAs.
+Solana program implementing an NFT keyring model for delegated management of positions on the Mayflower protocol. Supports multiple nav-token markets (navSOL, navJUP, etc.) via on-chain MarketConfig PDAs.
 
-Each position is controlled by a set of NFT keys with different permission levels (Admin, Operator, Depositor, Keeper). Keys are standard SPL tokens held in wallets — transfer the NFT and you transfer the permission. Mint authority is permanently disabled after minting each key NFT, guaranteeing a supply of exactly 1. Freeze authority is held by the program PDA, enabling account freezing for theft recovery.
+Each position is controlled by a set of NFT keys with different permission levels (Admin, Operator, Depositor, Keeper). Keys are MPL-Core assets under a program-controlled collection with PermanentBurnDelegate and PermanentTransferDelegate plugins. Permissions and rate-limit details are stored as on-chain attributes directly on the NFT. Transfer the asset and you transfer the permission.
 
 **Program ID:** `4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p`
 
@@ -18,7 +18,7 @@ Each position is controlled by a set of NFT keys with different permission level
 | Repay           | Y     | Y        | Y         |        |
 | Reinvest        | Y     | Y        |           | Y      |
 | Auth/Revoke     | Y     |          |           |        |
-| Transfer Admin  | Protocol admin only                   |||
+| Transfer Admin  | Protocol admin only (two-step: nominate then accept) |||
 
 ## Architecture
 
@@ -28,7 +28,7 @@ Each position is controlled by a set of NFT keys with different permission level
 
 **CPI safety:** All token accounts are validated as canonical ATAs derived from the program PDA and the relevant mints. Buy, sell (withdraw), and reinvest instructions enforce slippage protection via `min_out` parameters. Accounting tracks actual Mayflower deltas (before/after CPI reads) rather than input amounts.
 
-**Revoke with burn:** When revoking a key, if the admin holds the target NFT (e.g. after theft recovery), the NFT is burned and the ATA closed, returning rent. When the admin does not hold it, only the KeyAuthorization PDA is closed.
+**Revoke with burn:** The admin's `revoke_key` instruction burns the target NFT via the collection's PermanentBurnDelegate authority, closing the associated KeyState PDA and returning rent to the admin. Cross-position burns are prevented by verifying the target asset's `position` attribute matches the caller's position.
 
 ## Getting Started
 
@@ -85,7 +85,6 @@ hardig-tui <KEYPAIR_PATH> --cluster localnet
 | `r` | Refresh |
 | `I` | Init Protocol |
 | `n` | New Position |
-| `S` | Setup Mayflower |
 | `b` | Buy |
 | `s` | Sell |
 | `d` | Borrow |
@@ -104,14 +103,11 @@ hardig-tui <KEYPAIR_PATH> --cluster localnet status
 # Initialize protocol
 hardig-tui <KEYPAIR_PATH> --cluster localnet init-protocol
 
-# Create a position (500 bps max reinvest spread)
-hardig-tui <KEYPAIR_PATH> --cluster localnet create-position --spread-bps 500
+# Create a position (also initializes Mayflower PersonalPosition and ATAs)
+hardig-tui <KEYPAIR_PATH> --cluster localnet create-position
 
-# One-time Mayflower setup (init position + create ATAs)
-hardig-tui <KEYPAIR_PATH> --cluster localnet setup
-
-# Setup with a non-default nav token (MarketConfig must exist)
-hardig-tui <KEYPAIR_PATH> --cluster localnet setup --nav-mint <NAV_MINT_PUBKEY>
+# Create a position with a non-default nav token (MarketConfig must exist)
+hardig-tui <KEYPAIR_PATH> --cluster localnet create-position --nav-mint <NAV_MINT_PUBKEY>
 
 # Buy 1 SOL worth of navSOL
 hardig-tui <KEYPAIR_PATH> --cluster localnet buy --amount 1.0
@@ -128,8 +124,8 @@ hardig-tui <KEYPAIR_PATH> --cluster localnet repay --amount 0.1
 # Reinvest (borrow capacity -> more navSOL)
 hardig-tui <KEYPAIR_PATH> --cluster localnet reinvest
 
-# Authorize a new key
-hardig-tui <KEYPAIR_PATH> --cluster localnet authorize-key --wallet <PUBKEY> --role 1
+# Authorize a new key (permissions: 25=Operator, 9=Depositor, 16=Keeper, or custom bitmask)
+hardig-tui <KEYPAIR_PATH> --cluster localnet authorize-key --wallet <PUBKEY> --permissions 25
 
 # Revoke a key by index
 hardig-tui <KEYPAIR_PATH> --cluster localnet revoke-key --index 0
@@ -137,7 +133,7 @@ hardig-tui <KEYPAIR_PATH> --cluster localnet revoke-key --index 0
 # Compact balances
 hardig-tui <KEYPAIR_PATH> --cluster localnet balances
 
-# Transfer protocol admin
+# Nominate a new protocol admin (two-step: nominated key must call accept_admin)
 hardig-tui <KEYPAIR_PATH> --cluster localnet transfer-admin --new-admin <PUBKEY>
 
 # Create a MarketConfig for a new nav token (protocol admin only)
@@ -165,7 +161,7 @@ Opens at `http://localhost:5173`. Connect your wallet, select the cluster (local
 
 **Features:**
 
-- All 12 program instructions with form / confirm / result flow
+- All 13 program instructions with form / confirm / result flow
 - Position dashboard with deposited shares, debt, and borrow capacity
 - Mayflower state (ATAs, wSOL/navSOL balances)
 - Keyring table showing all keys, roles, and held status
@@ -187,10 +183,10 @@ npm run preview   # preview the production build
 programs/hardig/              # On-chain program
   src/lib.rs                  # Program entrypoint
   src/errors.rs               # HardigError enum
-  src/state.rs                # ProtocolConfig, PositionNFT, KeyAuthorization, KeyRole, MarketConfig
+  src/state.rs                # ProtocolConfig, PositionNFT, KeyState, RateBucket, MarketConfig
   src/instructions/           # One file per instruction + validate_key helper
   src/mayflower/              # Mayflower CPI builders, constants, floor price reader
-  tests/integration.rs        # LiteSVM unit tests (44 tests)
+  tests/integration.rs        # LiteSVM unit tests (61 tests)
   tests/mainnet_fork.rs       # Mainnet fork tests
 test-programs/mock-mayflower/ # Mock Mayflower program for LiteSVM tests
 crates/tui/                   # Terminal UI + CLI
@@ -205,15 +201,15 @@ Anchor.toml                   # Anchor configuration
 ## Typical Lifecycle
 
 1. **Init Protocol** — one-time, creates the global ProtocolConfig PDA
-2. **Create Market Config** — protocol admin registers a Mayflower market (navSOL, navJUP, etc.)
-3. **Create Position** — mints an admin key NFT to your wallet, creates the position PDA
-4. **Setup Mayflower** — initializes the Mayflower PersonalPosition and creates wSOL/nav-token ATAs (use `--nav-mint` for non-default markets)
+2. **Create Collection** — protocol admin creates the MPL-Core collection for key NFTs (one-time)
+3. **Create Market Config** — protocol admin registers a Mayflower market (navSOL, navJUP, etc.)
+4. **Create Position** — mints an admin key NFT, creates the position PDA, initializes the Mayflower PersonalPosition and ATAs in one transaction
 5. **Buy** — deposit SOL to buy nav tokens (wraps SOL → wSOL, CPI to Mayflower)
-6. **Reinvest** — borrows available capacity and buys more nav tokens in one transaction
-7. **Authorize Key** — mint a role key NFT to another wallet (Operator, Depositor, or Keeper)
+6. **Reinvest** — borrows available capacity and buys more nav tokens in one transaction (enforces max spread)
+7. **Authorize Key** — mint a role key NFT to another wallet (Operator, Depositor, Keeper, or custom bitmask)
 8. **Borrow / Repay / Sell** — manage debt and withdraw as needed
-9. **Revoke Key** — close authorization; burns the NFT if admin holds it
-10. **Transfer Admin** — hand off protocol admin rights to a new wallet
+9. **Revoke Key** — burns the target key NFT and closes the KeyState PDA
+10. **Transfer Admin** — two-step: current admin nominates a new key, nominated key calls **Accept Admin** to complete
 
 ## Reading Rate-Limited Key Allowances
 
