@@ -37,6 +37,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::PositionList => draw_position_list(frame, app, chunks[1]),
         Screen::Dashboard => draw_dashboard(frame, app, chunks[1]),
         Screen::MarketPicker => draw_market_picker(frame, app, chunks[1]),
+        Screen::PromoList => draw_promo_list(frame, app, chunks[1]),
         Screen::Form => draw_form(frame, app, chunks[1]),
         Screen::Confirm => draw_confirm(frame, app, chunks[1]),
         Screen::Result => draw_result(frame, app, chunks[1]),
@@ -218,6 +219,106 @@ fn draw_market_picker(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Min(16),
         Constraint::Length(14),
         Constraint::Length(12),
+    ];
+
+    let table = Table::new(rows, widths).header(header);
+    frame.render_widget(table, inner);
+}
+
+fn draw_promo_list(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Promos ({}) ", app.promos.len()))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.promos.is_empty() {
+        let text = Paragraph::new("  No promos found. Press [n] to create one.");
+        frame.render_widget(text, inner);
+        return;
+    }
+
+    let header = Row::new(vec!["", "Name", "Status", "Claims", "Permissions"])
+        .style(Style::default().add_modifier(Modifier::BOLD))
+        .bottom_margin(0);
+
+    let mut rows: Vec<Row> = Vec::new();
+    for (i, entry) in app.promos.iter().enumerate() {
+        let marker = if i == app.promo_cursor { ">" } else { " " };
+        let status = if entry.config.active { "Active" } else { "Paused" };
+        let claims = if entry.config.max_claims == 0 {
+            format!("{} / unlimited", entry.config.claims_count)
+        } else {
+            format!("{} / {}", entry.config.claims_count, entry.config.max_claims)
+        };
+        let perms = app::permissions_name(entry.config.permissions);
+        let style = if i == app.promo_cursor {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let status_style = if entry.config.active {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::Red)
+        };
+        rows.push(
+            Row::new(vec![
+                Cell::from(marker.to_string()).style(style),
+                Cell::from(entry.config.name_suffix.clone()).style(style),
+                Cell::from(status.to_string()).style(status_style),
+                Cell::from(claims).style(style),
+                Cell::from(perms).style(style),
+            ])
+        );
+        // Sub-row: borrow/sell capacity summary
+        let sub_style = if i == app.promo_cursor {
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let mut detail_parts: Vec<String> = Vec::new();
+        if entry.config.borrow_capacity > 0 {
+            detail_parts.push(format!(
+                "Borrow: {} SOL / {}",
+                app::lamports_to_sol(entry.config.borrow_capacity),
+                app::slots_to_human(entry.config.borrow_refill_period),
+            ));
+        }
+        if entry.config.sell_capacity > 0 {
+            detail_parts.push(format!(
+                "Sell: {} SOL / {}",
+                app::lamports_to_sol(entry.config.sell_capacity),
+                app::slots_to_human(entry.config.sell_refill_period),
+            ));
+        }
+        if entry.config.min_deposit_lamports > 0 {
+            detail_parts.push(format!(
+                "Min deposit: {} SOL",
+                app::lamports_to_sol(entry.config.min_deposit_lamports),
+            ));
+        }
+        if !detail_parts.is_empty() {
+            rows.push(
+                Row::new(vec![
+                    Cell::from(String::new()),
+                    Cell::from(format!("  {}", detail_parts.join("  |  "))),
+                    Cell::from(String::new()),
+                    Cell::from(String::new()),
+                    Cell::from(String::new()),
+                ])
+                .style(sub_style),
+            );
+        }
+    }
+
+    let widths = [
+        Constraint::Length(2),
+        Constraint::Min(20),
+        Constraint::Length(8),
+        Constraint::Length(16),
+        Constraint::Min(20),
     ];
 
     let table = Table::new(rows, widths).header(header);
@@ -517,6 +618,8 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         Some(FormKind::Borrow) => " Borrow ".to_string(),
         Some(FormKind::Repay) => " Repay ".to_string(),
         Some(FormKind::ConfigureRecovery) => " Configure Recovery ".to_string(),
+        Some(FormKind::CreatePromo) => " Create Promo ".to_string(),
+        Some(FormKind::UpdatePromo) => " View Promo ".to_string(),
         _ => " Form ".to_string(),
     };
 
@@ -566,8 +669,8 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
 
-        // Special rendering for permissions checkboxes in AuthorizeKey form
-        if matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && i == 1 {
+        // Special rendering for permissions checkboxes in AuthorizeKey and CreatePromo forms
+        if (matches!(app.form_kind, Some(FormKind::AuthorizeKey)) || matches!(app.form_kind, Some(FormKind::CreatePromo))) && i == 1 {
             lines.push(Line::from(Span::styled("  Permissions:", label_style)));
             let bits = app.perm_bits;
             let perms: [(u8, &str); 7] = [
@@ -678,9 +781,12 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
     let on_perm_field =
-        matches!(app.form_kind, Some(FormKind::AuthorizeKey)) && app.input_field == 1;
+        (matches!(app.form_kind, Some(FormKind::AuthorizeKey)) || matches!(app.form_kind, Some(FormKind::CreatePromo)))
+        && app.input_field == 1;
     let hints = if app.form_locked {
         "  [Esc] Back"
+    } else if app.form_readonly && matches!(app.form_kind, Some(FormKind::UpdatePromo)) {
+        "  [Enter] Toggle active/paused  [m] Change max claims  [Esc] Back"
     } else if app.form_readonly {
         "  [Enter] Edit  [Esc] Back"
     } else if on_perm_field {
@@ -867,6 +973,15 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 action_key("[q]"), action_label("Quit"),
             ]),
         ],
+        Screen::PromoList => vec![
+            Line::from(vec![
+                action_key("[Enter]"), action_label("View  "),
+                action_key("[n]"), action_label("New  "),
+                action_key("[r]"), action_label("Refresh  "),
+                action_key("[Esc]"), action_label("Back  "),
+                action_key("[q]"), action_label("Quit"),
+            ]),
+        ],
         Screen::Form => vec![
             Line::from(vec![
                 action_key("[Enter]"), action_label("Submit  "),
@@ -915,6 +1030,7 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                     row2.extend([action_key("[x]"), action_label("revoke  ")]);
                     row2.extend([action_key("[h]"), action_label("beat  ")]);
                     row2.extend([action_key("[c]"), action_label("recovery  ")]);
+                    row2.extend([action_key("[P]"), action_label("romo  ")]);
                 }
                 // Execute recovery is available to anyone holding a recovery key
                 if app.position.as_ref().map(|p| p.recovery_asset != solana_sdk::pubkey::Pubkey::default()).unwrap_or(false) {
