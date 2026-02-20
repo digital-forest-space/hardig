@@ -15,7 +15,7 @@ import {
 import { collection, marketConfig, marketConfigPda } from '../state.js';
 import { shortPubkey } from '../utils.js';
 
-export async function buildCreatePosition(program, wallet) {
+export async function buildCreatePosition(program, wallet, name = null) {
   const assetKp = Keypair.generate();
   const adminAsset = assetKp.publicKey;
   const [positionPda] = derivePositionPda(adminAsset);
@@ -33,7 +33,7 @@ export async function buildCreatePosition(program, wallet) {
   const [logPda] = deriveLogAccount();
 
   const ix = await program.methods
-    .createPosition(0, null)
+    .createPosition(0, name)
     .accounts({
       admin: wallet,
       adminAsset: adminAsset,
