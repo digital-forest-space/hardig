@@ -246,6 +246,7 @@ fn draw_form(frame: &mut Frame, app: &App, area: Rect) {
         .map(|mc| app::nav_token_name(&mc.nav_mint))
         .unwrap_or("shares");
     let title = match app.form_kind {
+        Some(FormKind::CreatePosition) => " Create Position ".to_string(),
         Some(FormKind::AuthorizeKey) => " Authorize Key ".to_string(),
         Some(FormKind::RevokeKey) => " Revoke Key ".to_string(),
         Some(FormKind::Buy) => format!(" Buy {} ", nav),
