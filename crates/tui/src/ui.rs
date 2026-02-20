@@ -18,6 +18,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_title_bar(frame, app, chunks[0]);
 
     match app.screen {
+        Screen::PositionList => draw_position_list(frame, app, chunks[1]),
         Screen::Dashboard => draw_dashboard(frame, app, chunks[1]),
         Screen::Form => draw_form(frame, app, chunks[1]),
         Screen::Confirm => draw_confirm(frame, app, chunks[1]),
@@ -46,15 +47,27 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
         ""
     };
 
+    let pos_count = app.discovered_positions.len();
+    let pos_indicator = if pos_count > 1 {
+        // Find which position is active (by matching position_pda)
+        let active_idx = app.position_pda
+            .and_then(|pda| app.discovered_positions.iter().position(|dp| dp.position_pda == pda))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        format!(" | Pos {}/{}", active_idx, pos_count)
+    } else {
+        String::new()
+    };
+
     let title = if mf_status.is_empty() {
         format!(
-            " Härdig | {} | Role: {} | Last refresh: {} ",
-            short_wallet, role_str, refresh_str,
+            " Härdig | {} | Role: {}{} | Last refresh: {} ",
+            short_wallet, role_str, pos_indicator, refresh_str,
         )
     } else {
         format!(
-            " Härdig | {} | Role: {} | Nirvana: {} | Last refresh: {} ",
-            short_wallet, role_str, mf_status, refresh_str,
+            " Härdig | {} | Role: {}{} | Mayflower: {} | Last refresh: {} ",
+            short_wallet, role_str, pos_indicator, mf_status, refresh_str,
         )
     };
 
@@ -63,6 +76,82 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
         .title(title)
         .border_style(Style::default().fg(Color::Cyan));
     frame.render_widget(block, area);
+}
+
+fn draw_position_list(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Positions ({}) ", app.discovered_positions.len()))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.discovered_positions.is_empty() {
+        let text = Paragraph::new("  No positions found. Press [n] to create one.");
+        frame.render_widget(text, inner);
+        return;
+    }
+
+    let header = Row::new(vec!["", "Name", "Role", "Deposited", "Debt"])
+        .style(Style::default().add_modifier(Modifier::BOLD))
+        .bottom_margin(0);
+
+    let mut rows: Vec<Row> = Vec::new();
+    for (i, dp) in app.discovered_positions.iter().enumerate() {
+        let marker = if i == app.position_list_cursor { ">" } else { " " };
+        let role = if dp.is_admin {
+            "Admin".to_string()
+        } else {
+            app::permissions_name(dp.permissions)
+        };
+        let display_name = if dp.name.is_empty() {
+            app::short_pubkey(&dp.admin_asset)
+        } else {
+            dp.name.clone()
+        };
+        let style = if i == app.position_list_cursor {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        rows.push(
+            Row::new(vec![
+                marker.to_string(),
+                display_name,
+                role,
+                format!("{} SOL", app::lamports_to_sol(dp.deposited_nav)),
+                format!("{} SOL", app::lamports_to_sol(dp.user_debt)),
+            ])
+            .style(style)
+        );
+        // Sub-row: full admin asset address
+        let sub_style = if i == app.position_list_cursor {
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        rows.push(
+            Row::new(vec![
+                String::new(),
+                format!("  {}", dp.admin_asset),
+                String::new(),
+                String::new(),
+                String::new(),
+            ])
+            .style(sub_style)
+        );
+    }
+
+    let widths = [
+        Constraint::Length(2),
+        Constraint::Min(28),
+        Constraint::Length(12),
+        Constraint::Length(16),
+        Constraint::Length(16),
+    ];
+
+    let table = Table::new(rows, widths).header(header);
+    frame.render_widget(table, inner);
 }
 
 fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
@@ -108,14 +197,28 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
         .position_pda
         .map(|p| app::short_pubkey(&p))
         .unwrap_or_default();
+    let admin_name = app
+        .discovered_positions
+        .get(app.position_list_cursor)
+        .map(|dp| dp.name.as_str())
+        .unwrap_or("");
+    let mut top_spans = vec![
+        Span::styled("  Position: ", Style::default().fg(Color::Gray)),
+        Span::raw(position_pda),
+        Span::raw("    "),
+        Span::styled("Admin Asset: ", Style::default().fg(Color::Gray)),
+        Span::raw(app::short_pubkey(&pos.admin_asset)),
+    ];
+    if !admin_name.is_empty() {
+        top_spans.push(Span::raw("    "));
+        top_spans.push(Span::styled("Name: ", Style::default().fg(Color::Gray)));
+        top_spans.push(Span::styled(
+            admin_name.to_string(),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
     let lines = vec![
-        Line::from(vec![
-            Span::styled("  Position: ", Style::default().fg(Color::Gray)),
-            Span::raw(position_pda),
-            Span::raw("    "),
-            Span::styled("Admin Asset: ", Style::default().fg(Color::Gray)),
-            Span::raw(app::short_pubkey(&pos.admin_asset)),
-        ]),
+        Line::from(top_spans),
         Line::from(""),
         Line::from(vec![
             Span::styled("  Deposited: ", Style::default().fg(Color::Gray)),
@@ -537,6 +640,7 @@ fn draw_result(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
     let actions: String = match app.screen {
+        Screen::PositionList => "[Enter] Open  [n] New Position  [r] Refresh  [q] Quit".into(),
         Screen::Form => "[Enter] Submit  [Tab] Next  [Esc] Cancel".into(),
         Screen::Confirm => "[Y] Confirm  [N] Cancel".into(),
         Screen::Result => "[any key] Continue".into(),
@@ -547,6 +651,10 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 "[n] New Position  [r] Refresh  [q] Quit".into()
             } else {
                 let mut parts: Vec<&str> = Vec::new();
+
+                if app.discovered_positions.len() > 1 {
+                    parts.push("[Esc] Back");
+                }
 
                 // Financial actions (require CPI)
                 if app.can_buy() { parts.push("[b]uy"); }
@@ -561,6 +669,7 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                     parts.push("[x]revoke");
                 }
 
+                parts.push("[n]ew");
                 parts.push("[r]efresh");
                 parts.push("[q]uit");
                 parts.join(" ")

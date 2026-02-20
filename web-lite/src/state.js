@@ -24,6 +24,10 @@ export const myKeyAsset = signal(null);
 export const myNftMint = signal(null);
 export const keyring = signal([]);
 
+// Multi-position discovery
+export const discoveredPositions = signal([]);
+export const activePositionIndex = signal(0);
+
 // Market config (loaded from position's market_config PDA)
 export const marketConfigPda = signal(null);
 export const marketConfig = signal(null);
@@ -89,7 +93,7 @@ export const canRevoke = computed(
 export const canInitProtocol = computed(() => !protocolExists.value);
 
 export const canCreatePosition = computed(
-  () => protocolExists.value && positionPda.value === null
+  () => protocolExists.value
 );
 
 // Logging helper
@@ -131,4 +135,6 @@ export function resetPositionState() {
   mfDebt.value = 0;
   mfFloorPrice.value = 0;
   mfBorrowCapacity.value = 0;
+  discoveredPositions.value = [];
+  activePositionIndex.value = 0;
 }

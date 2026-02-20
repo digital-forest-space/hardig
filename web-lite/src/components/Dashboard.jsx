@@ -1,17 +1,17 @@
 import { useWallet } from '@solana/wallet-adapter-react';
 import {
   protocolExists,
-  positionPda,
   myPermissions,
-  connected,
+  discoveredPositions,
 } from '../state.js';
 import { permissionsName, permissionsClass } from '../utils.js';
 import { PositionPanel } from './PositionPanel.jsx';
 import { KeyringTable } from './KeyringTable.jsx';
 import { ActionBar } from './ActionBar.jsx';
 import { LogPanel } from './LogPanel.jsx';
+import { PositionSelector } from './PositionSelector.jsx';
 
-export function Dashboard({ onAction }) {
+export function Dashboard({ onAction, onSwitchPosition }) {
   const wallet = useWallet();
 
   if (!wallet.connected) {
@@ -36,7 +36,7 @@ export function Dashboard({ onAction }) {
     );
   }
 
-  if (positionPda.value === null) {
+  if (discoveredPositions.value.length === 0) {
     return (
       <div>
         <div class="status-msg">
@@ -61,6 +61,7 @@ export function Dashboard({ onAction }) {
           </span>
         </div>
       </div>
+      <PositionSelector onSwitch={onSwitchPosition} />
       <ActionBar onAction={onAction} />
       <PositionPanel />
       <KeyringTable />

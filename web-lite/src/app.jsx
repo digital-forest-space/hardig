@@ -16,7 +16,7 @@ import {
   resetPositionState,
   protocolExists,
 } from './state.js';
-import { checkProtocol, discoverPosition } from './discovery.js';
+import { checkProtocol, discoverPosition, selectActivePosition } from './discovery.js';
 import { refreshMayflowerState } from './mayflower.js';
 import { WalletButton } from './components/WalletButton.jsx';
 import { ClusterSelector } from './components/ClusterSelector.jsx';
@@ -71,6 +71,18 @@ function AppInner() {
     }
   };
 
+  const handleSwitchPosition = useCallback(async (index) => {
+    refreshing.value = true;
+    try {
+      await selectActivePosition(index, connection);
+      await refreshMayflowerState(connection);
+      pushLog('Switched to position ' + (index + 1));
+    } catch (e) {
+      pushLog('Switch error: ' + e.message, true);
+    }
+    refreshing.value = false;
+  }, [connection]);
+
   return (
     <div>
       <div class="header">
@@ -81,7 +93,7 @@ function AppInner() {
         </div>
       </div>
 
-      <Dashboard onAction={handleAction} />
+      <Dashboard onAction={handleAction} onSwitchPosition={handleSwitchPosition} />
 
       {activeAction && (
         <ActionModal

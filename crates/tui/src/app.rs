@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io;
 use std::time::Instant;
 
@@ -76,10 +77,24 @@ fn sighash(name: &str) -> Vec<u8> {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
+    PositionList,
     Dashboard,
     Form,
     Confirm,
     Result,
+}
+
+pub struct DiscoveredPosition {
+    pub position_pda: Pubkey,
+    pub admin_asset: Pubkey,
+    pub permissions: u8,
+    pub key_asset: Pubkey,
+    pub key_state_pda: Option<Pubkey>,
+    pub deposited_nav: u64,
+    pub user_debt: u64,
+    pub is_admin: bool,
+    /// On-chain MPL-Core asset name (e.g. "Härdig Admin Key - Savings").
+    pub name: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -180,6 +195,10 @@ pub struct App {
     pub perm_bits: u8,
     pub perm_cursor: usize,
 
+    // Multi-position discovery
+    pub discovered_positions: Vec<DiscoveredPosition>,
+    pub position_list_cursor: usize,
+
     // Key cursor for keyring navigation
     pub key_cursor: usize,
 
@@ -189,6 +208,9 @@ pub struct App {
     // Result screen state
     pub pre_tx_snapshot: Option<PositionSnapshot>,
     pub last_tx_signature: Option<String>,
+
+    // After creating a position, auto-select this admin asset on next refresh
+    pending_select_asset: Option<Pubkey>,
 }
 
 impl App {
@@ -238,10 +260,13 @@ impl App {
             input_buf: String::new(),
             perm_bits: PRESET_OPERATOR,
             perm_cursor: 0,
+            discovered_positions: Vec::new(),
+            position_list_cursor: 0,
             key_cursor: 0,
             pending_action: None,
             pre_tx_snapshot: None,
             last_tx_signature: None,
+            pending_select_asset: None,
         };
         app.push_log("Welcome to Härdig TUI");
         app.push_log(format!("Wallet: {}", app.keypair.pubkey()));
@@ -278,6 +303,7 @@ impl App {
                     continue;
                 }
                 match self.screen {
+                    Screen::PositionList => self.handle_position_list(key.code),
                     Screen::Dashboard => self.handle_dashboard(key.code),
                     Screen::Form => self.handle_form(key.code),
                     Screen::Confirm => self.handle_confirm(key.code),
@@ -289,6 +315,37 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
+    // Position list handler
+    // -----------------------------------------------------------------------
+
+    fn handle_position_list(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('r') => self.refresh(),
+            KeyCode::Char('n') if self.protocol_exists => self.enter_create_position(),
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.position_list_cursor > 0 {
+                    self.position_list_cursor -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.discovered_positions.is_empty()
+                    && self.position_list_cursor < self.discovered_positions.len() - 1
+                {
+                    self.position_list_cursor += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if !self.discovered_positions.is_empty() {
+                    let idx = self.position_list_cursor;
+                    self.reselect_position(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Dashboard handler
     // -----------------------------------------------------------------------
 
@@ -296,10 +353,13 @@ impl App {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') => self.refresh(),
+            KeyCode::Esc if self.discovered_positions.len() > 1 => {
+                self.screen = Screen::PositionList;
+            }
 
             KeyCode::Char('I') if !self.protocol_exists => self.build_init_protocol(),
 
-            KeyCode::Char('n') if self.position_pda.is_none() && self.protocol_exists => {
+            KeyCode::Char('n') if self.protocol_exists => {
                 self.enter_create_position()
             }
 
@@ -500,6 +560,7 @@ impl App {
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 self.pending_action = None;
+                self.pending_select_asset = None;
                 self.screen = Screen::Dashboard;
                 self.push_log("Action cancelled.");
             }
@@ -868,6 +929,7 @@ impl App {
         description.push(format!("Admin Asset: {}", asset));
         description.push(format!("Position PDA: {}", position_pda));
 
+        self.pending_select_asset = Some(asset);
         self.goto_confirm(PendingAction {
             description,
             instructions,
@@ -1565,10 +1627,78 @@ impl App {
             self.current_slot = slot;
         }
         self.check_protocol();
+
+        // Remember which position was selected before refresh
+        let prev_admin_asset = self.position.as_ref().map(|p| p.admin_asset);
+        // Check if we should auto-select a newly created position
+        let select_asset = self.pending_select_asset.take();
+
         self.discover_position();
+
+        // Route to correct screen
+        let n = self.discovered_positions.len();
+        if n == 0 {
+            self.screen = Screen::Dashboard; // shows "No position found"
+        } else if let Some(target) = select_asset {
+            // Just created a position — select it
+            if let Some(idx) = self.discovered_positions.iter().position(|dp| dp.admin_asset == target) {
+                self.position_list_cursor = idx;
+                self.reselect_position(idx);
+            } else if n == 1 {
+                // Already auto-selected in discover_position
+            } else {
+                self.screen = Screen::PositionList;
+            }
+        } else if n == 1 {
+            // Already auto-selected in discover_position
+        } else if let Some(prev) = prev_admin_asset {
+            // Re-select the same position the user was viewing
+            if let Some(idx) = self.discovered_positions.iter().position(|dp| dp.admin_asset == prev) {
+                self.position_list_cursor = idx;
+                self.reselect_position(idx);
+            } else {
+                self.screen = Screen::PositionList;
+            }
+        } else {
+            self.screen = Screen::PositionList;
+        }
+
         self.refresh_mayflower_state();
         self.last_refresh = Some(Instant::now());
         self.push_log("Refresh complete.");
+    }
+
+    /// Re-select a position after refresh (re-fetches position/key_state data).
+    pub fn reselect_position(&mut self, index: usize) {
+        // We need the raw account data for select_active_position.
+        // Re-fetch PositionNFT and KeyState accounts.
+        let pos_config = RpcProgramAccountsConfig {
+            filters: Some(vec![RpcFilterType::DataSize(
+                PositionNFT::SIZE as u64,
+            )]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                commitment: Some(CommitmentConfig::confirmed()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let ks_config = RpcProgramAccountsConfig {
+            filters: Some(vec![RpcFilterType::DataSize(
+                KeyState::SIZE as u64,
+            )]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                commitment: Some(CommitmentConfig::confirmed()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let positions = self.rpc.get_program_accounts_with_config(&hardig::ID, pos_config)
+            .unwrap_or_default();
+        let key_states = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config)
+            .unwrap_or_default();
+        self.select_active_position(index, &positions, &key_states);
     }
 
     fn check_protocol(&mut self) {
@@ -1603,6 +1733,7 @@ impl App {
         self.keyring.clear();
         self.market_config_pda = None;
         self.market_config = None;
+        self.discovered_positions.clear();
 
         // Step 1: Get all PositionNFT accounts from the program
         let pos_config = RpcProgramAccountsConfig {
@@ -1625,11 +1756,27 @@ impl App {
             }
         };
 
-        // Step 2: For each position, check if signer owns the admin asset
-        let signer = self.keypair.pubkey();
-        let mut found_position: Option<Pubkey> = None;
-        let mut found_pos_data: Option<PositionNFT> = None;
+        // Step 2: Fetch ALL KeyState accounts (single RPC call, cached for reuse)
+        let ks_config = RpcProgramAccountsConfig {
+            filters: Some(vec![RpcFilterType::DataSize(
+                KeyState::SIZE as u64,
+            )]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                commitment: Some(CommitmentConfig::confirmed()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let all_key_states = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config)
+            .unwrap_or_default();
 
+        let signer = self.keypair.pubkey();
+        let mut discovered: Vec<DiscoveredPosition> = Vec::new();
+        // Track which position PDAs we've already found (to avoid duplicates from delegated keys)
+        let mut seen_positions = HashSet::new();
+
+        // Step 3: Check admin keys — for each position, check if signer owns the admin asset
         for (pos_pda, pos_acc) in &positions {
             let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
                 Ok(p) => p,
@@ -1637,244 +1784,235 @@ impl App {
             };
 
             if self.check_asset_owner(&pos.admin_asset, &signer) {
-                found_position = Some(*pos_pda);
-                found_pos_data = Some(pos);
-                break;
+                seen_positions.insert(*pos_pda);
+                let name = self.read_asset_name(&pos.admin_asset).unwrap_or_default();
+                discovered.push(DiscoveredPosition {
+                    position_pda: *pos_pda,
+                    admin_asset: pos.admin_asset,
+                    permissions: PRESET_ADMIN,
+                    key_asset: pos.admin_asset,
+                    key_state_pda: None,
+                    deposited_nav: pos.deposited_nav,
+                    user_debt: pos.user_debt,
+                    is_admin: true,
+                    name,
+                });
             }
         }
 
-        // Step 3: If not found via admin key, check delegated keys via KeyState accounts
-        if found_position.is_none() {
-            let ks_config = RpcProgramAccountsConfig {
-                filters: Some(vec![RpcFilterType::DataSize(
-                    KeyState::SIZE as u64,
-                )]),
-                account_config: RpcAccountInfoConfig {
-                    encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
-                    commitment: Some(CommitmentConfig::confirmed()),
-                    ..Default::default()
-                },
-                ..Default::default()
+        // Step 4: Check delegated keys — for each KeyState, check if signer owns the asset
+        for (ks_pda, ks_acc) in &all_key_states {
+            let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
+                Ok(k) => k,
+                Err(_) => continue,
             };
 
-            if let Ok(key_states) = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config) {
-                for (_ks_pda, ks_acc) in &key_states {
-                    let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
-                        Ok(k) => k,
-                        Err(_) => continue,
-                    };
+            if !self.check_asset_owner(&ks.asset, &signer) {
+                continue;
+            }
 
-                    if !self.check_asset_owner(&ks.asset, &signer) {
-                        continue;
-                    }
+            // Read the "position" attribute to find which position it belongs to
+            let bound_to = match self.read_asset_position_binding(&ks.asset) {
+                Some(p) => p,
+                None => continue,
+            };
 
-                    // Read the "position" attribute to find which position it belongs to
-                    let bound_to = match self.read_asset_position_binding(&ks.asset) {
-                        Some(p) => p,
-                        None => continue,
-                    };
-
-                    // Find the position whose admin_asset matches this key's binding
-                    for (pos_pda, pos_acc) in &positions {
-                        let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
-                            Ok(p) => p,
-                            Err(_) => continue,
-                        };
-                        if pos.admin_asset == bound_to {
-                            found_position = Some(*pos_pda);
-                            found_pos_data = Some(pos);
-                            break;
-                        }
-                    }
-                    if found_position.is_some() {
-                        break;
-                    }
+            // Find the position whose admin_asset matches this key's binding
+            for (pos_pda, pos_acc) in &positions {
+                if seen_positions.contains(pos_pda) {
+                    continue;
                 }
-            }
-        }
-
-        if let (Some(pos_pda), Some(pos)) = (found_position, found_pos_data) {
-            // Derive the program_pda for this position
-            let admin_asset = pos.admin_asset;
-            let (program_pda, _) = Pubkey::find_program_address(
-                &[b"authority", admin_asset.as_ref()],
-                &hardig::ID,
-            );
-
-            // Check if signer holds the admin asset
-            let signer_is_admin = self.check_asset_owner(&admin_asset, &signer);
-            if signer_is_admin {
-                self.my_permissions = Some(PRESET_ADMIN);
-                self.my_key_state_pda = None; // Admin has no KeyState PDA
-                self.my_asset = Some(admin_asset);
-            }
-
-            // If not admin, find the signer's delegated key
-            if !signer_is_admin {
-                // Scan KeyState accounts to find signer's key
-                let ks_config = RpcProgramAccountsConfig {
-                    filters: Some(vec![RpcFilterType::DataSize(
-                        KeyState::SIZE as u64,
-                    )]),
-                    account_config: RpcAccountInfoConfig {
-                        encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
-                        commitment: Some(CommitmentConfig::confirmed()),
-                        ..Default::default()
-                    },
-                    ..Default::default()
+                let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+                    Ok(p) => p,
+                    Err(_) => continue,
                 };
-                if let Ok(key_states) = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config) {
-                    for (ks_pda, ks_acc) in &key_states {
-                        let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
-                            Ok(k) => k,
-                            Err(_) => continue,
-                        };
-                        if !self.check_asset_owner(&ks.asset, &signer) {
-                            continue;
-                        }
-                        // Verify this key belongs to this position via "position" attribute
-                        if let Some(bound_to) = self.read_asset_position_binding(&ks.asset) {
-                            if bound_to == admin_asset {
-                                if let Some(perms) = self.read_asset_permissions(&ks.asset) {
-                                    self.my_permissions = Some(perms);
-                                    self.my_key_state_pda = Some(*ks_pda);
-                                    self.my_asset = Some(ks.asset);
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            self.position_pda = Some(pos_pda);
-            self.mayflower_initialized = pos.position_pda != Pubkey::default();
-
-            // Fetch market config: from position if set, otherwise try default
-            let mc_key = if pos.market_config != Pubkey::default() {
-                pos.market_config
-            } else {
-                Pubkey::find_program_address(
-                    &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
-                    &hardig::ID,
-                )
-                .0
-            };
-            if let Ok(mc_acc) = self.rpc.get_account(&mc_key) {
-                if let Ok(mc) =
-                    MarketConfig::try_deserialize(&mut mc_acc.data.as_slice())
-                {
-                    self.market_config_pda = Some(mc_key);
-                    self.market_config = Some(mc);
-                }
-            }
-
-            // Derive per-position Mayflower addresses from admin_asset
-            self.program_pda = program_pda;
-            let market_meta = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.market_meta)
-                .unwrap_or(DEFAULT_MARKET_META);
-            let (pp_pda, _) = derive_personal_position(&program_pda, &market_meta);
-            let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
-            self.pp_pda = pp_pda;
-            self.escrow_pda = escrow_pda;
-            let base_mint = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.base_mint)
-                .unwrap_or(DEFAULT_WSOL_MINT);
-            let nav_mint = self
-                .market_config
-                .as_ref()
-                .map(|mc| mc.nav_mint)
-                .unwrap_or(DEFAULT_NAV_SOL_MINT);
-            self.wsol_ata = get_ata(&program_pda, &base_mint);
-            self.nav_sol_ata = get_ata(&program_pda, &nav_mint);
-
-            self.position = Some(pos);
-
-            // Build keyring: admin key + all delegated keys (via KeyState scan)
-            let admin_name = self.read_asset_name(&admin_asset).unwrap_or_default();
-            self.keyring.push(KeyEntry {
-                pda: pos_pda,
-                asset: admin_asset,
-                permissions: PRESET_ADMIN,
-                held_by_signer: signer_is_admin,
-                name: admin_name,
-                sell_bucket: None,
-                borrow_bucket: None,
-            });
-
-            // Scan KeyState accounts for delegated keys belonging to this position
-            let ks_config = RpcProgramAccountsConfig {
-                filters: Some(vec![RpcFilterType::DataSize(
-                    KeyState::SIZE as u64,
-                )]),
-                account_config: RpcAccountInfoConfig {
-                    encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
-                    commitment: Some(CommitmentConfig::confirmed()),
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            if let Ok(key_states) = self.rpc.get_program_accounts_with_config(&hardig::ID, ks_config) {
-                for (ks_pda, ks_acc) in &key_states {
-                    let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
-                        Ok(k) => k,
-                        Err(_) => continue,
-                    };
-                    // Check if this key belongs to this position via "position" attribute
-                    let bound_to = match self.read_asset_position_binding(&ks.asset) {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    if bound_to != admin_asset {
-                        continue;
-                    }
+                if pos.admin_asset == bound_to {
                     let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
-                    let held = self.check_asset_owner(&ks.asset, &signer);
-                    let key_name = self.read_asset_name(&ks.asset).unwrap_or_default();
-                    let sell_bucket = if perms & PERM_LIMITED_SELL != 0 {
-                        Some(ks.sell_bucket.clone())
-                    } else {
-                        None
-                    };
-                    let borrow_bucket = if perms & PERM_LIMITED_BORROW != 0 {
-                        Some(ks.borrow_bucket.clone())
-                    } else {
-                        None
-                    };
-                    self.keyring.push(KeyEntry {
-                        pda: *ks_pda,
-                        asset: ks.asset,
+                    seen_positions.insert(*pos_pda);
+                    let name = self.read_asset_name(&pos.admin_asset).unwrap_or_default();
+                    discovered.push(DiscoveredPosition {
+                        position_pda: *pos_pda,
+                        admin_asset: pos.admin_asset,
                         permissions: perms,
-                        held_by_signer: held,
-                        name: key_name,
-                        sell_bucket,
-                        borrow_bucket,
+                        key_asset: ks.asset,
+                        key_state_pda: Some(*ks_pda),
+                        deposited_nav: pos.deposited_nav,
+                        user_debt: pos.user_debt,
+                        is_admin: false,
+                        name,
                     });
+                    break;
                 }
             }
+        }
 
-            let perms = self.my_permissions.unwrap_or(0);
-            self.push_log(format!(
-                "Found position {} (permissions: {}{})",
-                short_pubkey(&pos_pda),
-                permissions_name(perms),
-                if self.mayflower_initialized {
-                    ", Mayflower OK"
-                } else {
-                    ""
-                },
-            ));
-        } else {
+        // Sort: admin positions first, then by deposited_nav descending
+        discovered.sort_by(|a, b| {
+            b.is_admin.cmp(&a.is_admin)
+                .then(b.deposited_nav.cmp(&a.deposited_nav))
+        });
+
+        let count = discovered.len();
+        self.discovered_positions = discovered;
+
+        if count == 0 {
             self.push_log("No position found for this keypair.");
+        } else {
+            self.push_log(format!("Found {} position(s).", count));
+            if count == 1 {
+                self.select_active_position(0, &positions, &all_key_states);
+            }
         }
     }
 
-    fn refresh_mayflower_state(&mut self) {
+    /// Load all state for a specific discovered position and switch to Dashboard.
+    fn select_active_position(
+        &mut self,
+        index: usize,
+        positions: &[(Pubkey, solana_sdk::account::Account)],
+        all_key_states: &[(Pubkey, solana_sdk::account::Account)],
+    ) {
+        let dp = match self.discovered_positions.get(index) {
+            Some(d) => d,
+            None => return,
+        };
+
+        let pos_pda = dp.position_pda;
+        let admin_asset = dp.admin_asset;
+
+        // Find the full PositionNFT data
+        let pos = match positions.iter().find(|(pda, _)| *pda == pos_pda) {
+            Some((_, acc)) => match PositionNFT::try_deserialize(&mut acc.data.as_slice()) {
+                Ok(p) => p,
+                Err(_) => return,
+            },
+            None => return,
+        };
+
+        self.position_pda = Some(pos_pda);
+        self.my_permissions = Some(dp.permissions);
+        self.my_key_state_pda = dp.key_state_pda;
+        self.my_asset = Some(dp.key_asset);
+        self.mayflower_initialized = pos.position_pda != Pubkey::default();
+
+        // Fetch market config
+        let mc_key = if pos.market_config != Pubkey::default() {
+            pos.market_config
+        } else {
+            Pubkey::find_program_address(
+                &[MarketConfig::SEED, DEFAULT_NAV_SOL_MINT.as_ref()],
+                &hardig::ID,
+            )
+            .0
+        };
+        self.market_config_pda = None;
+        self.market_config = None;
+        if let Ok(mc_acc) = self.rpc.get_account(&mc_key) {
+            if let Ok(mc) = MarketConfig::try_deserialize(&mut mc_acc.data.as_slice()) {
+                self.market_config_pda = Some(mc_key);
+                self.market_config = Some(mc);
+            }
+        }
+
+        // Derive per-position Mayflower addresses from admin_asset
+        let (program_pda, _) = Pubkey::find_program_address(
+            &[b"authority", admin_asset.as_ref()],
+            &hardig::ID,
+        );
+        self.program_pda = program_pda;
+        let market_meta = self
+            .market_config
+            .as_ref()
+            .map(|mc| mc.market_meta)
+            .unwrap_or(DEFAULT_MARKET_META);
+        let (pp_pda, _) = derive_personal_position(&program_pda, &market_meta);
+        let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
+        self.pp_pda = pp_pda;
+        self.escrow_pda = escrow_pda;
+        let base_mint = self
+            .market_config
+            .as_ref()
+            .map(|mc| mc.base_mint)
+            .unwrap_or(DEFAULT_WSOL_MINT);
+        let nav_mint = self
+            .market_config
+            .as_ref()
+            .map(|mc| mc.nav_mint)
+            .unwrap_or(DEFAULT_NAV_SOL_MINT);
+        self.wsol_ata = get_ata(&program_pda, &base_mint);
+        self.nav_sol_ata = get_ata(&program_pda, &nav_mint);
+
+        self.position = Some(pos);
+
+        // Build keyring: admin key + all delegated keys
+        self.keyring.clear();
+        self.key_cursor = 0;
+        let signer = self.keypair.pubkey();
+        let signer_is_admin = self.check_asset_owner(&admin_asset, &signer);
+        let admin_name = self.read_asset_name(&admin_asset).unwrap_or_default();
+        self.keyring.push(KeyEntry {
+            pda: pos_pda,
+            asset: admin_asset,
+            permissions: PRESET_ADMIN,
+            held_by_signer: signer_is_admin,
+            name: admin_name,
+            sell_bucket: None,
+            borrow_bucket: None,
+        });
+
+        // Add delegated keys from cached key_states
+        for (ks_pda, ks_acc) in all_key_states {
+            let ks = match KeyState::try_deserialize(&mut ks_acc.data.as_slice()) {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+            let bound_to = match self.read_asset_position_binding(&ks.asset) {
+                Some(p) => p,
+                None => continue,
+            };
+            if bound_to != admin_asset {
+                continue;
+            }
+            let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
+            let held = self.check_asset_owner(&ks.asset, &signer);
+            let key_name = self.read_asset_name(&ks.asset).unwrap_or_default();
+            let sell_bucket = if perms & PERM_LIMITED_SELL != 0 {
+                Some(ks.sell_bucket.clone())
+            } else {
+                None
+            };
+            let borrow_bucket = if perms & PERM_LIMITED_BORROW != 0 {
+                Some(ks.borrow_bucket.clone())
+            } else {
+                None
+            };
+            self.keyring.push(KeyEntry {
+                pda: *ks_pda,
+                asset: ks.asset,
+                permissions: perms,
+                held_by_signer: held,
+                name: key_name,
+                sell_bucket,
+                borrow_bucket,
+            });
+        }
+
+        let perms = self.my_permissions.unwrap_or(0);
+        self.push_log(format!(
+            "Selected position {} (permissions: {}{})",
+            short_pubkey(&pos_pda),
+            permissions_name(perms),
+            if self.mayflower_initialized {
+                ", Mayflower OK"
+            } else {
+                ""
+            },
+        ));
+
+        self.screen = Screen::Dashboard;
+    }
+
+    pub fn refresh_mayflower_state(&mut self) {
         self.wsol_balance = 0;
         self.nav_sol_balance = 0;
         self.atas_exist = false;

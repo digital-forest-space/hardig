@@ -30,6 +30,10 @@ struct Cli {
     #[arg(long, global = true)]
     verbose: bool,
 
+    /// Target a specific position by admin asset pubkey (for multi-position wallets)
+    #[arg(long, global = true)]
+    position: Option<String>,
+
     #[command(subcommand)]
     action: Option<Action>,
 }
@@ -191,9 +195,19 @@ struct BalancesCompact {
 }
 
 #[derive(Serialize)]
+struct DiscoveredPositionInfo {
+    admin_asset: String,
+    role: String,
+    deposited_nav: String,
+    debt: String,
+}
+
+#[derive(Serialize)]
 struct PositionStatus {
     wallet: String,
     protocol_exists: bool,
+    positions_found: usize,
+    all_positions: Vec<DiscoveredPositionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     position: Option<PositionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -322,7 +336,7 @@ fn main() -> io::Result<()> {
 
     match cli.action {
         Some(action) => {
-            run_oneshot(rpc_url, keypair, cli.verbose, action);
+            run_oneshot(rpc_url, keypair, cli.verbose, cli.position, action);
             Ok(())
         }
         None => run_interactive(rpc_url, keypair),
@@ -357,9 +371,38 @@ fn run_oneshot(
     rpc_url: &str,
     keypair: solana_sdk::signature::Keypair,
     verbose: bool,
+    position_filter: Option<String>,
     action: Action,
 ) {
     let mut app = app::App::new(rpc_url, keypair, verbose);
+
+    // If --position specified, select that specific position
+    if let Some(ref pos_str) = position_filter {
+        use std::str::FromStr;
+        match solana_sdk::pubkey::Pubkey::from_str(pos_str) {
+            Ok(target_asset) => {
+                if let Some(idx) = app.discovered_positions.iter().position(|dp| dp.admin_asset == target_asset) {
+                    app.reselect_position(idx);
+                    app.refresh_mayflower_state();
+                } else {
+                    let output = CliOutput::Error {
+                        action: action_to_name(&action),
+                        error: format!("Position with admin asset {} not found", pos_str),
+                    };
+                    println!("{}", serde_json::to_string(&output).unwrap());
+                    std::process::exit(1);
+                }
+            }
+            Err(_) => {
+                let output = CliOutput::Error {
+                    action: action_to_name(&action),
+                    error: format!("Invalid --position pubkey: {}", pos_str),
+                };
+                println!("{}", serde_json::to_string(&output).unwrap());
+                std::process::exit(1);
+            }
+        }
+    }
 
     let action_name = action_to_name(&action);
 
@@ -443,12 +486,6 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             app.build_create_collection(uri.clone());
         }
         Action::CreatePosition { ref nav_mint, ref name } => {
-            if app.position_pda.is_some() {
-                return Some(CliOutput::Noop {
-                    action: "create-position".into(),
-                    message: "Position already exists for this keypair".into(),
-                });
-            }
             let parsed_mint = match nav_mint {
                 Some(s) => {
                     use std::str::FromStr;
@@ -671,6 +708,17 @@ fn build_balances_output(app: &app::App) -> CliOutput {
 }
 
 fn build_status_output(app: &app::App) -> CliOutput {
+    let all_positions: Vec<DiscoveredPositionInfo> = app
+        .discovered_positions
+        .iter()
+        .map(|dp| DiscoveredPositionInfo {
+            admin_asset: dp.admin_asset.to_string(),
+            role: if dp.is_admin { "Admin".into() } else { permissions_name(dp.permissions) },
+            deposited_nav: lamports_to_sol(dp.deposited_nav),
+            debt: lamports_to_sol(dp.user_debt),
+        })
+        .collect();
+
     let position = app.position.as_ref().map(|pos| {
         PositionInfo {
             pda: app
@@ -710,6 +758,8 @@ fn build_status_output(app: &app::App) -> CliOutput {
     CliOutput::Status(PositionStatus {
         wallet: app.keypair.pubkey().to_string(),
         protocol_exists: app.protocol_exists,
+        positions_found: app.discovered_positions.len(),
+        all_positions,
         position,
         mayflower,
         keyring,
