@@ -259,6 +259,17 @@ fn ix_create_position(
     spread_bps: u16,
     collection: &Pubkey,
 ) -> Instruction {
+    ix_create_position_with_market(admin, asset, spread_bps, collection, None, "navSOL")
+}
+
+fn ix_create_position_with_market(
+    admin: &Pubkey,
+    asset: &Pubkey,
+    spread_bps: u16,
+    collection: &Pubkey,
+    name: Option<&str>,
+    market_name: &str,
+) -> Instruction {
     let (position_pda, _) =
         Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
     let (program_pda, _) =
@@ -271,8 +282,20 @@ fn ix_create_position(
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
-    // name: Option<String> = None (serialized as single 0 byte)
-    data.push(0);
+    // name: Option<String>
+    match name {
+        Some(n) => {
+            data.push(1); // Some
+            data.extend_from_slice(&(n.len() as u32).to_le_bytes());
+            data.extend_from_slice(n.as_bytes());
+        }
+        None => {
+            data.push(0); // None
+        }
+    }
+    // market_name: String
+    data.extend_from_slice(&(market_name.len() as u32).to_le_bytes());
+    data.extend_from_slice(market_name.as_bytes());
 
     Instruction::new_with_bytes(
         program_id(),
@@ -306,45 +329,7 @@ fn ix_create_position_named(
     collection: &Pubkey,
     name: &str,
 ) -> Instruction {
-    let (position_pda, _) =
-        Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
-    let (program_pda, _) =
-        Pubkey::find_program_address(&[b"authority", asset.as_ref()], &program_id());
-    let (config_pda, _) = config_pda();
-    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
-    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
-    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
-    let (log_pda, _) = mayflower::derive_log_account();
-
-    let mut data = sighash("create_position");
-    data.extend_from_slice(&spread_bps.to_le_bytes());
-    // name: Option<String> = Some(name)
-    data.push(1); // Some
-    data.extend_from_slice(&(name.len() as u32).to_le_bytes());
-    data.extend_from_slice(name.as_bytes());
-
-    Instruction::new_with_bytes(
-        program_id(),
-        &data,
-        vec![
-            AccountMeta::new(*admin, true),
-            AccountMeta::new(*asset, true),
-            AccountMeta::new(position_pda, false),
-            AccountMeta::new_readonly(program_pda, false),
-            AccountMeta::new_readonly(config_pda, false),
-            AccountMeta::new(*collection, false),
-            AccountMeta::new_readonly(mc_pda, false),
-            AccountMeta::new_readonly(MPL_CORE_ID, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
-            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
-            AccountMeta::new(pp_pda, false),
-            AccountMeta::new(escrow_pda, false),
-            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
-            AccountMeta::new_readonly(DEFAULT_NAV_SOL_MINT, false),
-            AccountMeta::new(log_pda, false),
-            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
-        ],
-    )
+    ix_create_position_with_market(admin, asset, spread_bps, collection, Some(name), "navSOL")
 }
 
 fn ix_authorize_key(
@@ -2320,4 +2305,190 @@ fn test_create_position_custom_name() {
     assert_eq!(asset_account.owner, MPL_CORE_ID);
     let name = extract_asset_name(&asset_account.data);
     assert_eq!(name, "H\u{00e4}rdig Admin Key - My Vault");
+}
+
+/// Extract attribute values from an MPL-Core asset account using fetch_plugin.
+/// Returns the list of (key, value) pairs.
+fn extract_asset_attributes(account: &Account) -> Vec<(String, String)> {
+    use mpl_core::{accounts::BaseAssetV1, fetch_plugin, types::{Attributes, PluginType}};
+    let key = Pubkey::new_unique(); // dummy key, not used in fetch_plugin
+    let mut lamports = account.lamports;
+    let mut data = account.data.clone();
+    let account_info = solana_sdk::account_info::AccountInfo::new(
+        &key,
+        false,
+        false,
+        &mut lamports,
+        &mut data,
+        &account.owner,
+        false,
+        0,
+    );
+    let (_, attributes, _) = fetch_plugin::<BaseAssetV1, Attributes>(
+        &account_info,
+        PluginType::Attributes,
+    )
+    .expect("failed to fetch Attributes plugin");
+    attributes
+        .attribute_list
+        .into_iter()
+        .map(|a| (a.key, a.value))
+        .collect()
+}
+
+/// Find a specific attribute value by key from the attribute list.
+fn find_attribute<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
+#[test]
+fn test_admin_key_has_market_attribute() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    let asset_kp = Keypair::new();
+    plant_position_stubs(&mut svm, &asset_kp.pubkey());
+    send_tx(
+        &mut svm,
+        &[ix_create_position_with_market(
+            &admin.pubkey(),
+            &asset_kp.pubkey(),
+            500,
+            &collection,
+            Some("My Vault"),
+            "navSOL",
+        )],
+        &[&admin, &asset_kp],
+    )
+    .unwrap();
+
+    // Read admin asset's attributes
+    let asset_account = svm.get_account(&asset_kp.pubkey()).expect("asset should exist");
+    let attrs = extract_asset_attributes(&asset_account);
+
+    // Verify "market" attribute is set
+    assert_eq!(
+        find_attribute(&attrs, "market"),
+        Some("navSOL"),
+        "admin key should have market=navSOL attribute"
+    );
+
+    // Verify "position" attribute points to itself (admin asset)
+    assert_eq!(
+        find_attribute(&attrs, "position"),
+        Some(asset_kp.pubkey().to_string().as_str()),
+        "admin key position attribute should be its own pubkey"
+    );
+}
+
+#[test]
+fn test_admin_key_market_attribute_custom_value() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    let asset_kp = Keypair::new();
+    plant_position_stubs(&mut svm, &asset_kp.pubkey());
+    send_tx(
+        &mut svm,
+        &[ix_create_position_with_market(
+            &admin.pubkey(),
+            &asset_kp.pubkey(),
+            500,
+            &collection,
+            None,
+            "navETH",
+        )],
+        &[&admin, &asset_kp],
+    )
+    .unwrap();
+
+    let asset_account = svm.get_account(&asset_kp.pubkey()).expect("asset should exist");
+    let attrs = extract_asset_attributes(&asset_account);
+    assert_eq!(
+        find_attribute(&attrs, "market"),
+        Some("navETH"),
+        "admin key should have market=navETH attribute"
+    );
+}
+
+#[test]
+fn test_delegated_key_has_market_and_position_attributes() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Create position with market_name = "navSOL" and custom name
+    let admin_asset = Keypair::new();
+    plant_position_stubs(&mut svm, &admin_asset.pubkey());
+    send_tx(
+        &mut svm,
+        &[ix_create_position_with_market(
+            &admin.pubkey(),
+            &admin_asset.pubkey(),
+            500,
+            &collection,
+            Some("My Vault"),
+            "navSOL",
+        )],
+        &[&admin, &admin_asset],
+    )
+    .unwrap();
+
+    let (pos_pda, _) = position_pda(&admin_asset.pubkey());
+
+    // Authorize an operator key
+    let operator = Keypair::new();
+    svm.airdrop(&operator.pubkey(), 5_000_000_000).unwrap();
+    let op_asset = Keypair::new();
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &admin.pubkey(),
+            &admin_asset.pubkey(),
+            &pos_pda,
+            &op_asset.pubkey(),
+            &operator.pubkey(),
+            PRESET_OPERATOR,
+            0, 0, 0, 0,
+            &collection,
+        )],
+        &[&admin, &op_asset],
+    )
+    .unwrap();
+
+    // Read the delegated key's attributes
+    let op_account = svm.get_account(&op_asset.pubkey()).expect("operator asset should exist");
+    let attrs = extract_asset_attributes(&op_account);
+
+    // Verify "market" attribute is inherited from admin key
+    assert_eq!(
+        find_attribute(&attrs, "market"),
+        Some("navSOL"),
+        "delegated key should have market=navSOL attribute from admin"
+    );
+
+    // Verify "position_name" attribute matches admin asset's name
+    assert_eq!(
+        find_attribute(&attrs, "position_name"),
+        Some("H\u{00e4}rdig Admin Key - My Vault"),
+        "delegated key should have position_name matching admin asset name"
+    );
+
+    // Verify "position" attribute still points to admin asset pubkey
+    assert_eq!(
+        find_attribute(&attrs, "position"),
+        Some(admin_asset.pubkey().to_string().as_str()),
+        "delegated key position attribute should point to admin asset"
+    );
 }

@@ -83,11 +83,15 @@ const KEY_IMAGE: &str = "https://gateway.irys.xyz/GKa2AyPSRe2VnsPXBepTzhzohEBsLN
 /// read MPL-Core Attributes (e.g. Phantom) can still display name/image/description.
 /// Only includes permission attributes that are actually set, to keep the URI compact.
 /// `limited_sell` / `limited_borrow` are passed as pre-formatted strings (e.g. "5 SOL / 15 days").
+/// `market` is the market name (e.g. "navSOL", "navETH").
+/// `position_name` is the admin asset's on-chain name (for delegated keys).
 pub fn metadata_uri(
     name: &str,
     permissions: u8,
     limited_sell: Option<&str>,
     limited_borrow: Option<&str>,
+    market: Option<&str>,
+    position_name: Option<&str>,
 ) -> String {
     let mut attrs = Vec::new();
     let bits: &[(u8, &str)] = &[
@@ -108,6 +112,12 @@ pub fn metadata_uri(
     }
     if let Some(v) = limited_borrow {
         attrs.push(format!("{{\"trait_type\":\"limited_borrow\",\"value\":\"{}\"}}", v));
+    }
+    if let Some(v) = market {
+        attrs.push(format!("{{\"trait_type\":\"market\",\"value\":\"{}\"}}", v));
+    }
+    if let Some(v) = position_name {
+        attrs.push(format!("{{\"trait_type\":\"position\",\"value\":\"{}\"}}", v));
     }
 
     format!(

@@ -98,7 +98,7 @@ pub struct CreatePosition<'info> {
     pub mayflower_program: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name: Option<String>) -> Result<()> {
+pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name: Option<String>, market_name: String) -> Result<()> {
     let mc = &ctx.accounts.market_config;
 
     // --- Validate Mayflower account addresses against MarketConfig ---
@@ -142,10 +142,17 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
     let config = &ctx.accounts.config;
     let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
 
+    // Validate market_name length
+    require!(market_name.len() <= 32, HardigError::NameTooLong);
+
     let mut attrs = permission_attributes(PRESET_ADMIN);
     attrs.push(Attribute {
         key: "position".to_string(),
         value: ctx.accounts.admin_asset.key().to_string(),
+    });
+    attrs.push(Attribute {
+        key: "market".to_string(),
+        value: market_name.clone(),
     });
 
     CreateV2CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
@@ -156,7 +163,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
         .owner(Some(&ctx.accounts.admin.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name(nft_name.clone())
-        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None))
+        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None, Some(&market_name), None))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
 use mpl_core::{
     ID as MPL_CORE_ID,
+    accounts::BaseAssetV1,
+    fetch_plugin,
     instructions::CreateV2CpiBuilder,
     types::{
         Attribute, Attributes, PermanentBurnDelegate, PermanentTransferDelegate,
-        Plugin, PluginAuthority, PluginAuthorityPair,
+        Plugin, PluginAuthority, PluginAuthorityPair, PluginType,
     },
 };
 
@@ -115,11 +117,41 @@ pub fn handler(
         );
     }
 
+    // --- Read admin asset's name and market attribute ---
+    // Deserialize the admin key's MPL-Core BaseAssetV1 to get the position name
+    let admin_asset_info = &ctx.accounts.admin_key_asset.to_account_info();
+    let admin_data = admin_asset_info.try_borrow_data()?;
+    let admin_base = BaseAssetV1::from_bytes(&admin_data)
+        .map_err(|_| error!(HardigError::InvalidKey))?;
+    let admin_asset_name = admin_base.name.clone();
+    drop(admin_data);
+
+    // Read the admin asset's "market" attribute from its Attributes plugin
+    let (_, admin_attributes, _) = fetch_plugin::<BaseAssetV1, Attributes>(
+        admin_asset_info,
+        PluginType::Attributes,
+    )
+    .map_err(|_| error!(HardigError::InvalidKey))?;
+    let admin_market = admin_attributes
+        .attribute_list
+        .iter()
+        .find(|a| a.key == "market")
+        .map(|a| a.value.clone())
+        .unwrap_or_default();
+
     // Build attribute list with human-readable permissions + position binding
     let mut attrs = permission_attributes(permissions);
     attrs.push(Attribute {
         key: "position".to_string(),
         value: ctx.accounts.position.admin_asset.to_string(),
+    });
+    attrs.push(Attribute {
+        key: "position_name".to_string(),
+        value: admin_asset_name.clone(),
+    });
+    attrs.push(Attribute {
+        key: "market".to_string(),
+        value: admin_market.clone(),
     });
     let sell_limit_str = if permissions & PERM_LIMITED_SELL != 0 {
         let v = format!("{} navSOL / {}", format_sol_amount(sell_bucket_capacity), slots_to_duration(sell_refill_period_slots));
@@ -163,6 +195,8 @@ pub fn handler(
             permissions,
             sell_limit_str.as_deref(),
             borrow_limit_str.as_deref(),
+            Some(&admin_market),
+            Some(&admin_asset_name),
         ))
         .plugins(vec![
             PluginAuthorityPair {
