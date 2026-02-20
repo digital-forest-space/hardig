@@ -50,6 +50,8 @@ export function ActionModal({ action, onClose, onRefresh }) {
   const [borrowDays, setBorrowDays] = useState('');
   const [borrowHours, setBorrowHours] = useState('');
   const [borrowMinutes, setBorrowMinutes] = useState('');
+  const [positionName, setPositionName] = useState('');
+  const [keyName, setKeyName] = useState('');
 
   const walletPk = wallet.publicKey;
 
@@ -68,9 +70,12 @@ export function ActionModal({ action, onClose, onRefresh }) {
         case 'initProtocol':
           built = await buildInitializeProtocol(program, walletPk);
           break;
-        case 'createPosition':
-          built = await buildCreatePosition(program, walletPk);
+        case 'createPosition': {
+          const pName = positionName.trim() || null;
+          if (pName && pName.length > 32) { setError('Position name must be 32 characters or less'); setPhase('form'); return; }
+          built = await buildCreatePosition(program, walletPk, pName);
           break;
+        }
         case 'buy': {
           const lam = parseSolToLamports(amount);
           if (!lam) { setError('Invalid SOL amount'); setPhase('form'); return; }
@@ -110,7 +115,9 @@ export function ActionModal({ action, onClose, onRefresh }) {
           const br = (p & PERM_LIMITED_BORROW) ? toSlots(borrowDays, borrowHours, borrowMinutes) : 0;
           if ((p & PERM_LIMITED_SELL) && (sc === 0 || sr === 0)) { setError('Sell capacity and refill period must be nonzero'); setPhase('form'); return; }
           if ((p & PERM_LIMITED_BORROW) && (bc === 0 || br === 0)) { setError('Borrow capacity and refill period must be nonzero'); setPhase('form'); return; }
-          built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p, sc, sr, bc, br);
+          const kName = keyName.trim() || null;
+          if (kName && kName.length > 32) { setError('Key name must be 32 characters or less'); setPhase('form'); return; }
+          built = await buildAuthorizeKey(program, walletPk, targetWallet.trim(), p, sc, sr, bc, br, kName);
           break;
         }
         case 'revoke': {
@@ -136,7 +143,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
   }
 
   // Auto-submit for no-form actions (useEffect, not during render)
-  const noFormActions = ['initProtocol', 'createPosition', 'reinvest'];
+  const noFormActions = ['initProtocol', 'reinvest'];
   useEffect(() => {
     if (noFormActions.includes(action) && !didAutoSubmit.current) {
       didAutoSubmit.current = true;
@@ -258,6 +265,19 @@ export function ActionModal({ action, onClose, onRefresh }) {
               </div>
             )}
 
+            {action === 'createPosition' && (
+              <div class="form-group">
+                <label>Position Name (optional)</label>
+                <input
+                  type="text"
+                  value={positionName}
+                  onInput={(e) => setPositionName(e.target.value)}
+                  placeholder="e.g. My Vault"
+                  maxLength={32}
+                  autoFocus
+                />
+              </div>
+            )}
 
             {action === 'authorize' && (
               <>
@@ -269,6 +289,16 @@ export function ActionModal({ action, onClose, onRefresh }) {
                     onInput={(e) => setTargetWallet(e.target.value)}
                     placeholder="Enter wallet address..."
                     autoFocus
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Key Name (optional)</label>
+                  <input
+                    type="text"
+                    value={keyName}
+                    onInput={(e) => setKeyName(e.target.value)}
+                    placeholder="e.g. Trading Bot"
+                    maxLength={32}
                   />
                 </div>
                 <div class="form-group">
