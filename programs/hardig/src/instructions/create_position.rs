@@ -98,7 +98,7 @@ pub struct CreatePosition<'info> {
     pub mayflower_program: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name: Option<String>) -> Result<()> {
+pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name: Option<String>, market_name: String) -> Result<()> {
     let mc = &ctx.accounts.market_config;
 
     // --- Validate Mayflower account addresses against MarketConfig ---
@@ -146,6 +146,10 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
     attrs.push(Attribute {
         key: "position".to_string(),
         value: ctx.accounts.admin_asset.key().to_string(),
+    });
+    attrs.push(Attribute {
+        key: "market".to_string(),
+        value: market_name,
     });
 
     CreateV2CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
