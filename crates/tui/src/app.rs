@@ -17,8 +17,8 @@ use solana_sdk::{
 };
 
 use hardig::state::{
-    KeyState, MarketConfig, PositionNFT, ProtocolConfig, RateBucket, PERM_BORROW, PERM_BUY,
-    PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
+    KeyState, MarketConfig, PositionNFT, PromoConfig, ProtocolConfig, RateBucket, PERM_BORROW,
+    PERM_BUY, PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
     PERM_SELL, PRESET_ADMIN, PRESET_OPERATOR,
 };
 
@@ -80,6 +80,7 @@ pub enum Screen {
     PositionList,
     Dashboard,
     MarketPicker,
+    PromoList,
     Form,
     Confirm,
     Result,
@@ -109,6 +110,8 @@ pub enum FormKind {
     Borrow,
     Repay,
     ConfigureRecovery,
+    CreatePromo,
+    UpdatePromo,
 }
 
 pub struct KeyEntry {
@@ -122,6 +125,11 @@ pub struct KeyEntry {
     pub sell_bucket: Option<RateBucket>,
     /// Rate-limit bucket for borrow (populated for keys with PERM_LIMITED_BORROW).
     pub borrow_bucket: Option<RateBucket>,
+}
+
+pub struct PromoEntry {
+    pub pda: Pubkey,
+    pub config: PromoConfig,
 }
 
 pub struct PendingAction {
@@ -207,6 +215,10 @@ pub struct App {
     // Key cursor for keyring navigation
     pub key_cursor: usize,
 
+    // Promo state
+    pub promos: Vec<PromoEntry>,
+    pub promo_cursor: usize,
+
     // Confirm state
     pub pending_action: Option<PendingAction>,
 
@@ -276,6 +288,8 @@ impl App {
             discovered_positions: Vec::new(),
             position_list_cursor: 0,
             key_cursor: 0,
+            promos: Vec::new(),
+            promo_cursor: 0,
             pending_action: None,
             pre_tx_snapshot: None,
             last_tx_signature: None,
@@ -323,6 +337,7 @@ impl App {
                     Screen::PositionList => self.handle_position_list(key.code),
                     Screen::Dashboard => self.handle_dashboard(key.code),
                     Screen::MarketPicker => self.handle_market_picker(key.code),
+                    Screen::PromoList => self.handle_promo_list(key.code),
                     Screen::Form => self.handle_form(key.code),
                     Screen::Confirm => self.handle_confirm(key.code),
                     Screen::Result => self.handle_result(key.code),
@@ -437,6 +452,7 @@ impl App {
             KeyCode::Char('x') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_revoke_key(),
             KeyCode::Char('h') if self.has_perm(PERM_MANAGE_KEYS) => self.build_heartbeat(),
             KeyCode::Char('c') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_configure_recovery(),
+            KeyCode::Char('P') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_promo_list(),
             KeyCode::Char('e') => self.build_execute_recovery(),
             KeyCode::Char('s') if self.can_sell() => self.enter_sell(),
             KeyCode::Char('d') if self.can_borrow() => self.enter_borrow(),
@@ -494,6 +510,33 @@ impl App {
     fn handle_form(&mut self, key: KeyCode) {
         // Readonly mode: only Esc (back) and Enter (unlock to edit, if not locked) work
         if self.form_readonly {
+            // UpdatePromo has special key handlers
+            if matches!(self.form_kind, Some(FormKind::UpdatePromo)) {
+                match key {
+                    KeyCode::Esc => {
+                        self.screen = Screen::PromoList;
+                        self.form_fields.clear();
+                        self.form_readonly = false;
+                        self.form_locked = false;
+                    }
+                    KeyCode::Enter => {
+                        // Toggle active/paused
+                        self.build_update_promo_toggle_active();
+                    }
+                    KeyCode::Char('m') => {
+                        // Switch to editable mode for max_claims only
+                        self.form_readonly = false;
+                        self.form_info = Some("Enter new max claims value (0 = unlimited)".into());
+                        // Find the "Max Claims" field and focus it
+                        if let Some(idx) = self.form_fields.iter().position(|(l, _)| l.starts_with("Max Claims")) {
+                            self.input_field = idx;
+                            self.input_buf = self.form_fields[idx].1.clone();
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             match key {
                 KeyCode::Esc => {
                     self.screen = Screen::Dashboard;
@@ -514,11 +557,16 @@ impl App {
         }
 
         let is_perm_field =
-            matches!(self.form_kind, Some(FormKind::AuthorizeKey)) && self.input_field == 1;
+            (matches!(self.form_kind, Some(FormKind::AuthorizeKey)) && self.input_field == 1)
+            || (matches!(self.form_kind, Some(FormKind::CreatePromo)) && self.input_field == 1);
 
         match key {
             KeyCode::Esc => {
-                self.screen = Screen::Dashboard;
+                let back_screen = match self.form_kind {
+                    Some(FormKind::CreatePromo) | Some(FormKind::UpdatePromo) => Screen::PromoList,
+                    _ => Screen::Dashboard,
+                };
+                self.screen = back_screen;
                 self.form_fields.clear();
             }
             KeyCode::Tab => {
@@ -583,6 +631,11 @@ impl App {
         self.form_fields[1].1 = val.clone();
         if self.input_field == 1 {
             self.input_buf = val;
+        }
+
+        // For CreatePromo, fields after index 1 are fixed — no dynamic rebuild needed
+        if matches!(self.form_kind, Some(FormKind::CreatePromo)) {
+            return;
         }
 
         // Preserve existing rate-limit field values by label prefix
@@ -807,6 +860,164 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
+    // Promo list handler
+    // -----------------------------------------------------------------------
+
+    fn handle_promo_list(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Esc => {
+                self.screen = Screen::Dashboard;
+            }
+            KeyCode::Char('n') => self.enter_create_promo(),
+            KeyCode::Char('r') => {
+                self.discover_promos();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.promo_cursor > 0 {
+                    self.promo_cursor -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.promos.is_empty() && self.promo_cursor < self.promos.len() - 1 {
+                    self.promo_cursor += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if !self.promos.is_empty() {
+                    self.enter_view_promo();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Promo entry points
+    // -----------------------------------------------------------------------
+
+    fn enter_promo_list(&mut self) {
+        self.discover_promos();
+        self.promo_cursor = 0;
+        self.screen = Screen::PromoList;
+    }
+
+    fn discover_promos(&mut self) {
+        self.promos.clear();
+
+        let pos = match &self.position {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+
+        let authority_seed = pos.authority_seed;
+
+        // Anchor discriminator for PromoConfig
+        let disc = solana_sdk::hash::hash(b"account:PromoConfig").to_bytes();
+        let disc_bytes = disc[..8].to_vec();
+
+        // Filter: discriminator match + authority_seed at offset 8 (after 8-byte discriminator)
+        use solana_client::rpc_filter::{Memcmp, RpcFilterType as F};
+        let config = RpcProgramAccountsConfig {
+            filters: Some(vec![
+                F::Memcmp(Memcmp::new_raw_bytes(0, disc_bytes)),
+                F::Memcmp(Memcmp::new_raw_bytes(8, authority_seed.to_bytes().to_vec())),
+            ]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+                commitment: Some(CommitmentConfig::confirmed()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match self.rpc.get_program_accounts_with_config(&hardig::ID, config) {
+            Ok(accounts) => {
+                for (pda, acc) in accounts {
+                    if let Ok(promo) = PromoConfig::try_deserialize(&mut acc.data.as_slice()) {
+                        self.promos.push(PromoEntry { pda, config: promo });
+                    }
+                }
+                self.push_log(format!("Found {} promo(s)", self.promos.len()));
+            }
+            Err(e) => {
+                self.push_log(format!("Promo scan failed: {}", e));
+            }
+        }
+    }
+
+    fn enter_create_promo(&mut self) {
+        self.perm_bits = PRESET_OPERATOR;
+        self.perm_cursor = 0;
+        self.screen = Screen::Form;
+        self.form_info = None;
+        self.form_readonly = false;
+        self.form_locked = false;
+        self.form_kind = Some(FormKind::CreatePromo);
+        self.form_fields = vec![
+            ("Name Suffix".into(), String::new()),
+            ("Permissions".into(), PRESET_OPERATOR.to_string()),
+            ("Borrow Capacity (SOL)".into(), "0".into()),
+            ("Borrow Refill Days".into(), "0".into()),
+            ("Borrow Refill Hours".into(), "0".into()),
+            ("Borrow Refill Minutes".into(), "0".into()),
+            ("Sell Capacity (SOL)".into(), "0".into()),
+            ("Sell Refill Days".into(), "0".into()),
+            ("Sell Refill Hours".into(), "0".into()),
+            ("Sell Refill Minutes".into(), "0".into()),
+            ("Min Deposit (SOL)".into(), "0".into()),
+            ("Max Claims (0=unlimited)".into(), "0".into()),
+            ("Image URI (optional)".into(), String::new()),
+        ];
+        self.input_field = 0;
+        self.input_buf.clear();
+    }
+
+    fn enter_view_promo(&mut self) {
+        let idx = self.promo_cursor;
+        let entry = match self.promos.get(idx) {
+            Some(e) => e,
+            None => return,
+        };
+        let promo = &entry.config;
+
+        let status = if promo.active { "Active" } else { "Paused" };
+        let max_str = if promo.max_claims == 0 {
+            "unlimited".to_string()
+        } else {
+            promo.max_claims.to_string()
+        };
+
+        self.screen = Screen::Form;
+        self.form_kind = Some(FormKind::UpdatePromo);
+        self.form_readonly = true;
+        self.form_locked = false;
+        self.form_info = Some(format!(
+            "Promo: {}  |  Status: {}\n\
+             [Enter] Toggle active/paused  [m] Change max claims  [Esc] Back",
+            promo.name_suffix, status,
+        ));
+        self.form_fields = vec![
+            ("Name Suffix".into(), promo.name_suffix.clone()),
+            ("Permissions".into(), format!("{} (0x{:02X})", permissions_name(promo.permissions), promo.permissions)),
+            ("Borrow Capacity".into(), format!("{} SOL", lamports_to_sol(promo.borrow_capacity))),
+            ("Borrow Refill Period".into(), format!("{} slots ({})", promo.borrow_refill_period, slots_to_human(promo.borrow_refill_period))),
+            ("Sell Capacity".into(), format!("{} SOL", lamports_to_sol(promo.sell_capacity))),
+            ("Sell Refill Period".into(), format!("{} slots ({})", promo.sell_refill_period, slots_to_human(promo.sell_refill_period))),
+            ("Min Deposit".into(), format!("{} SOL", lamports_to_sol(promo.min_deposit_lamports))),
+            ("Max Claims".into(), max_str),
+            ("Claims Count".into(), promo.claims_count.to_string()),
+            ("Image URI".into(), promo.image_uri.clone()),
+            ("PDA".into(), entry.pda.to_string()),
+        ];
+        self.input_field = 0;
+        self.input_buf.clear();
+    }
+
+    // -----------------------------------------------------------------------
     // Form submission
     // -----------------------------------------------------------------------
 
@@ -823,6 +1034,8 @@ impl App {
             Some(FormKind::Borrow) => self.build_borrow(),
             Some(FormKind::Repay) => self.build_repay(),
             Some(FormKind::ConfigureRecovery) => self.build_configure_recovery(),
+            Some(FormKind::CreatePromo) => self.build_create_promo(),
+            Some(FormKind::UpdatePromo) => self.build_update_promo_max_claims(),
             None => {}
         }
     }
@@ -1924,6 +2137,233 @@ impl App {
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![new_admin_kp],
+        });
+    }
+
+    pub fn build_create_promo(&mut self) {
+        // Parse form fields
+        let name_suffix = self.form_fields[0].1.trim().to_string();
+        if name_suffix.is_empty() {
+            self.push_log("Name suffix is required");
+            return;
+        }
+        if name_suffix.len() > 64 {
+            self.push_log(format!("Name suffix too long ({} chars, max 64)", name_suffix.len()));
+            return;
+        }
+
+        let permissions = self.perm_bits;
+        if permissions == 0 {
+            self.push_log("Permissions cannot be zero");
+            return;
+        }
+
+        let borrow_capacity = self.find_field_value("Borrow Capacity")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let borrow_refill = time_fields_to_slots(
+            &self.find_field_value("Borrow Refill Days"),
+            &self.find_field_value("Borrow Refill Hours"),
+            &self.find_field_value("Borrow Refill Minutes"),
+        );
+        let sell_capacity = self.find_field_value("Sell Capacity")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let sell_refill = time_fields_to_slots(
+            &self.find_field_value("Sell Refill Days"),
+            &self.find_field_value("Sell Refill Hours"),
+            &self.find_field_value("Sell Refill Minutes"),
+        );
+        let min_deposit = self.find_field_value("Min Deposit")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let max_claims: u32 = self.find_field_value("Max Claims")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        let image_uri = self.find_field_value("Image URI")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+
+        if image_uri.len() > PromoConfig::MAX_IMAGE_URI_LEN {
+            self.push_log(format!("Image URI too long ({} chars, max {})", image_uri.len(), PromoConfig::MAX_IMAGE_URI_LEN));
+            return;
+        }
+
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => { self.push_log("No position loaded"); return; }
+        };
+        let admin_key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset"); return; }
+        };
+        let authority_seed = match &self.position {
+            Some(p) => p.authority_seed,
+            None => { self.push_log("No position loaded"); return; }
+        };
+
+        // Derive promo PDA
+        let (promo_pda, _) = Pubkey::find_program_address(
+            &[PromoConfig::SEED, authority_seed.as_ref(), name_suffix.as_bytes()],
+            &hardig::ID,
+        );
+
+        // Serialize instruction data (Borsh format)
+        let mut data = sighash("create_promo");
+        // name_suffix: String (4-byte len + utf8)
+        let name_bytes = name_suffix.as_bytes();
+        data.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(name_bytes);
+        // permissions: u8
+        data.push(permissions);
+        // borrow_capacity: u64
+        data.extend_from_slice(&borrow_capacity.to_le_bytes());
+        // borrow_refill_period: u64
+        data.extend_from_slice(&borrow_refill.to_le_bytes());
+        // sell_capacity: u64
+        data.extend_from_slice(&sell_capacity.to_le_bytes());
+        // sell_refill_period: u64
+        data.extend_from_slice(&sell_refill.to_le_bytes());
+        // min_deposit_lamports: u64
+        data.extend_from_slice(&min_deposit.to_le_bytes());
+        // max_claims: u32
+        data.extend_from_slice(&max_claims.to_le_bytes());
+        // image_uri: String (4-byte len + utf8)
+        let uri_bytes = image_uri.as_bytes();
+        data.extend_from_slice(&(uri_bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(uri_bytes);
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),    // admin
+            AccountMeta::new_readonly(admin_key_asset, false), // admin_key_asset
+            AccountMeta::new_readonly(position_pda, false),    // position
+            AccountMeta::new(promo_pda, false),                // promo
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
+        ];
+
+        let mut desc = vec![
+            "Create Promo".into(),
+            format!("Name: {}", name_suffix),
+            format!("Permissions: {} (0x{:02X})", permissions_name(permissions), permissions),
+        ];
+        if borrow_capacity > 0 {
+            desc.push(format!("Borrow: {} SOL / {}", lamports_to_sol(borrow_capacity), slots_to_human(borrow_refill)));
+        }
+        if sell_capacity > 0 {
+            desc.push(format!("Sell: {} SOL / {}", lamports_to_sol(sell_capacity), slots_to_human(sell_refill)));
+        }
+        if min_deposit > 0 {
+            desc.push(format!("Min deposit: {} SOL", lamports_to_sol(min_deposit)));
+        }
+        if max_claims > 0 {
+            desc.push(format!("Max claims: {}", max_claims));
+        } else {
+            desc.push("Max claims: unlimited".into());
+        }
+        desc.push(format!("Promo PDA: {}", short_pubkey(&promo_pda)));
+
+        self.goto_confirm(PendingAction {
+            description: desc,
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
+    fn build_update_promo_toggle_active(&mut self) {
+        let idx = self.promo_cursor;
+        let entry = match self.promos.get(idx) {
+            Some(e) => e,
+            None => { self.push_log("No promo selected"); return; }
+        };
+        let new_active = !entry.config.active;
+
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => { self.push_log("No position loaded"); return; }
+        };
+        let admin_key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset"); return; }
+        };
+
+        // Serialize update_promo instruction data
+        let mut data = sighash("update_promo");
+        // active: Option<bool> — Some(new_active)
+        data.push(0x01); // Some
+        data.push(if new_active { 1 } else { 0 });
+        // max_claims: Option<u32> — None
+        data.push(0x00); // None
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),    // admin
+            AccountMeta::new_readonly(admin_key_asset, false), // admin_key_asset
+            AccountMeta::new_readonly(position_pda, false),    // position
+            AccountMeta::new(entry.pda, false),                // promo
+        ];
+
+        let status_str = if new_active { "Active" } else { "Paused" };
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Update Promo".into(),
+                format!("Promo: {}", entry.config.name_suffix),
+                format!("Set status: {}", status_str),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
+    fn build_update_promo_max_claims(&mut self) {
+        let idx = self.promo_cursor;
+        let entry = match self.promos.get(idx) {
+            Some(e) => e,
+            None => { self.push_log("No promo selected"); return; }
+        };
+
+        let new_max: u32 = match self.find_field_value("Max Claims")
+            .and_then(|v| v.trim().parse().ok())
+        {
+            Some(v) => v,
+            None => {
+                self.push_log("Invalid max claims value");
+                return;
+            }
+        };
+
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => { self.push_log("No position loaded"); return; }
+        };
+        let admin_key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset"); return; }
+        };
+
+        // Serialize update_promo instruction data
+        let mut data = sighash("update_promo");
+        // active: Option<bool> — None
+        data.push(0x00);
+        // max_claims: Option<u32> — Some(new_max)
+        data.push(0x01); // Some
+        data.extend_from_slice(&new_max.to_le_bytes());
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),    // admin
+            AccountMeta::new_readonly(admin_key_asset, false), // admin_key_asset
+            AccountMeta::new_readonly(position_pda, false),    // position
+            AccountMeta::new(entry.pda, false),                // promo
+        ];
+
+        let max_str = if new_max == 0 { "unlimited".to_string() } else { new_max.to_string() };
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Update Promo".into(),
+                format!("Promo: {}", entry.config.name_suffix),
+                format!("Set max claims: {}", max_str),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
         });
     }
 
