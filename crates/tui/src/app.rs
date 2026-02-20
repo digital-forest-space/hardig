@@ -84,6 +84,7 @@ pub enum Screen {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FormKind {
+    CreatePosition,
     AuthorizeKey,
     RevokeKey,
     Buy,
@@ -297,7 +298,7 @@ impl App {
             KeyCode::Char('I') if !self.protocol_exists => self.build_init_protocol(),
 
             KeyCode::Char('n') if self.position_pda.is_none() && self.protocol_exists => {
-                self.build_create_position(None)
+                self.enter_create_position()
             }
 
             // Admin actions
@@ -440,6 +441,7 @@ impl App {
         let borrow_days = self.find_field_value("Borrow Refill Days");
         let borrow_hours = self.find_field_value("Borrow Refill Hours");
         let borrow_mins = self.find_field_value("Borrow Refill Minutes");
+        let name_val = self.find_field_value("Name (optional)");
 
         // Rebuild fields after index 1
         self.form_fields.truncate(2);
@@ -455,6 +457,7 @@ impl App {
             self.form_fields.push(("Borrow Refill Hours".into(), borrow_hours.unwrap_or("0".into())));
             self.form_fields.push(("Borrow Refill Minutes".into(), borrow_mins.unwrap_or("0".into())));
         }
+        self.form_fields.push(("Name (optional)".into(), name_val.unwrap_or_default()));
 
         // Clamp cursor if fields were removed
         if self.input_field >= self.form_fields.len() {
@@ -512,6 +515,15 @@ impl App {
     // Form entry points
     // -----------------------------------------------------------------------
 
+    fn enter_create_position(&mut self) {
+        self.screen = Screen::Form;
+        self.form_info = None;
+        self.form_kind = Some(FormKind::CreatePosition);
+        self.form_fields = vec![("Name (optional)".into(), String::new())];
+        self.input_field = 0;
+        self.input_buf.clear();
+    }
+
     fn enter_authorize_key(&mut self) {
         self.perm_bits = PRESET_OPERATOR;
         self.perm_cursor = 0;
@@ -522,6 +534,7 @@ impl App {
         self.form_fields = vec![
             ("Target Wallet (pubkey)".into(), my_wallet.clone()),
             ("Permissions".into(), PRESET_OPERATOR.to_string()),
+            ("Name (optional)".into(), String::new()),
         ];
         self.input_field = 0;
         self.input_buf = my_wallet;
@@ -604,6 +617,7 @@ impl App {
 
     fn submit_form(&mut self) {
         match self.form_kind {
+            Some(FormKind::CreatePosition) => self.build_create_position(None),
             Some(FormKind::AuthorizeKey) => self.build_authorize_key(),
             Some(FormKind::RevokeKey) => self.build_revoke_key(),
             Some(FormKind::Buy) => self.build_buy(),
@@ -697,6 +711,25 @@ impl App {
         });
     }
 
+    /// Serialize an optional name field for instruction data.
+    /// Empty string => None (0x00). Non-empty => Some (0x01 + 4-byte LE length + UTF-8 bytes).
+    /// Returns Err with message if name exceeds 32 characters.
+    fn serialize_optional_name(name: &str) -> Result<Vec<u8>, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            Ok(vec![0x00])
+        } else {
+            if trimmed.len() > 32 {
+                return Err(format!("Name too long ({} chars, max 32)", trimmed.len()));
+            }
+            let bytes = trimmed.as_bytes();
+            let mut out = vec![0x01];
+            out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            out.extend_from_slice(bytes);
+            Ok(out)
+        }
+    }
+
     pub fn build_create_position(&mut self, nav_mint: Option<Pubkey>) {
         let collection = match self.collection {
             Some(c) => c,
@@ -785,9 +818,19 @@ impl App {
         let (escrow_pda, _) = derive_personal_position_escrow(&pp_pda);
         let (log_pda, _) = derive_log_account();
 
+        // Read optional name from form field (index 0 when using TUI form)
+        let name_str = self.find_field_value("Name (optional)").unwrap_or_default();
+        let name_bytes = match Self::serialize_optional_name(&name_str) {
+            Ok(b) => b,
+            Err(msg) => {
+                self.push_log(msg);
+                return;
+            }
+        };
+
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
-        data.push(0); // name: Option<String> = None
+        data.extend_from_slice(&name_bytes);
 
         let accounts = vec![
             AccountMeta::new(admin, true),                              // admin
@@ -814,6 +857,10 @@ impl App {
         instructions.push(Instruction::new_with_bytes(hardig::ID, &data, accounts));
 
         description.insert(0, "Create Position".into());
+        let name_trimmed = name_str.trim();
+        if !name_trimmed.is_empty() {
+            description.push(format!("Name: {}", name_trimmed));
+        }
         description.push(format!("Admin Asset: {}", asset));
         description.push(format!("Position PDA: {}", position_pda));
 
@@ -916,13 +963,23 @@ impl App {
         };
         let (config_pda, _) = Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
 
+        // Read optional name from form field
+        let name_str = self.find_field_value("Name (optional)").unwrap_or_default();
+        let name_bytes = match Self::serialize_optional_name(&name_str) {
+            Ok(b) => b,
+            Err(msg) => {
+                self.push_log(msg);
+                return;
+            }
+        };
+
         let mut data = sighash("authorize_key");
         data.push(permissions_u8);
         data.extend_from_slice(&sell_cap.to_le_bytes());
         data.extend_from_slice(&sell_refill.to_le_bytes());
         data.extend_from_slice(&borrow_cap.to_le_bytes());
         data.extend_from_slice(&borrow_refill.to_le_bytes());
-        data.push(0); // name: Option<String> = None
+        data.extend_from_slice(&name_bytes);
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),
@@ -937,13 +994,19 @@ impl App {
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
         ];
 
+        let mut desc = vec![
+            "Authorize Key".into(),
+            format!("Target: {}", target_wallet),
+            format!("Permissions: {} (0x{:02X})", permissions_name(permissions_u8), permissions_u8),
+        ];
+        let name_trimmed = name_str.trim();
+        if !name_trimmed.is_empty() {
+            desc.push(format!("Name: {}", name_trimmed));
+        }
+        desc.push(format!("Key Asset: {}", new_asset));
+
         self.goto_confirm(PendingAction {
-            description: vec![
-                "Authorize Key".into(),
-                format!("Target: {}", target_wallet),
-                format!("Permissions: {} (0x{:02X})", permissions_name(permissions_u8), permissions_u8),
-                format!("Key Asset: {}", new_asset),
-            ],
+            description: desc,
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![asset_kp],
         });

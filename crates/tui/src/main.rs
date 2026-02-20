@@ -54,6 +54,9 @@ enum Action {
         /// When specified, the MarketConfig for this mint must already exist on-chain.
         #[arg(long)]
         nav_mint: Option<String>,
+        /// Optional name for the position NFT (max 32 characters)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Buy navSOL with SOL
     Buy {
@@ -101,6 +104,9 @@ enum Action {
         /// Borrow rate-limit refill period in slots
         #[arg(long, default_value = "0")]
         borrow_refill_slots: u64,
+        /// Optional name for the key NFT (max 32 characters)
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Revoke a non-admin key by index
     RevokeKey {
@@ -436,7 +442,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             }
             app.build_create_collection(uri.clone());
         }
-        Action::CreatePosition { ref nav_mint } => {
+        Action::CreatePosition { ref nav_mint, ref name } => {
             if app.position_pda.is_some() {
                 return Some(CliOutput::Noop {
                     action: "create-position".into(),
@@ -458,6 +464,9 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 }
                 None => None,
             };
+            app.form_fields = vec![
+                ("Name (optional)".into(), name.clone().unwrap_or_default()),
+            ];
             app.build_create_position(parsed_mint);
         }
         Action::Buy { amount } => {
@@ -479,7 +488,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
         Action::Reinvest => {
             app.build_reinvest();
         }
-        Action::AuthorizeKey { wallet, permissions, sell_capacity, sell_refill_slots, borrow_capacity, borrow_refill_slots } => {
+        Action::AuthorizeKey { wallet, permissions, sell_capacity, sell_refill_slots, borrow_capacity, borrow_refill_slots, name } => {
             app.form_fields = vec![
                 ("Target Wallet (pubkey)".into(), wallet.clone()),
                 ("Permissions".into(), permissions.to_string()),
@@ -487,6 +496,7 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
                 ("Sell Refill Period (slots)".into(), sell_refill_slots.to_string()),
                 ("Borrow Capacity (SOL, 0=none)".into(), sol_amount_to_field(*borrow_capacity)),
                 ("Borrow Refill Period (slots)".into(), borrow_refill_slots.to_string()),
+                ("Name (optional)".into(), name.clone().unwrap_or_default()),
             ];
             app.build_authorize_key();
         }
