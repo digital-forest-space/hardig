@@ -13,7 +13,7 @@ import {
   DEFAULT_MARKET_META,
 } from '../constants.js';
 import { collection, marketConfig, marketConfigPda } from '../state.js';
-import { shortPubkey } from '../utils.js';
+import { shortPubkey, navTokenName } from '../utils.js';
 
 export async function buildCreatePosition(program, wallet, name = null) {
   const assetKp = Keypair.generate();
@@ -32,8 +32,10 @@ export async function buildCreatePosition(program, wallet, name = null) {
   const [escrowPda] = derivePersonalPositionEscrow(ppPda);
   const [logPda] = deriveLogAccount();
 
+  const marketName = navTokenName(navMint);
+
   const ix = await program.methods
-    .createPosition(0, name)
+    .createPosition(0, name, marketName)
     .accounts({
       admin: wallet,
       adminAsset: adminAsset,
