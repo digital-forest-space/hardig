@@ -891,9 +891,16 @@ impl App {
             }
         };
 
+        // Resolve market name from nav_mint for the on-chain attribute
+        let market_name = nav_token_name(&mc.nav_mint);
+
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());
         data.extend_from_slice(&name_bytes);
+        // Borsh String: 4-byte LE length prefix + UTF-8 bytes
+        let market_name_bytes = market_name.as_bytes();
+        data.extend_from_slice(&(market_name_bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(market_name_bytes);
 
         let accounts = vec![
             AccountMeta::new(admin, true),                              // admin
@@ -926,6 +933,7 @@ impl App {
         } else {
             description.push(format!("Name: H\u{00e4}rdig Admin Key - {}", name_trimmed));
         }
+        description.push(format!("Market: {}", market_name));
         description.push(format!("Admin Asset: {}", asset));
         description.push(format!("Position PDA: {}", position_pda));
 
