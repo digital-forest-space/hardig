@@ -117,11 +117,11 @@ pub fn metadata_uri(
         attrs.push(format!("{{\"trait_type\":\"market\",\"value\":\"{}\"}}", v));
     }
     if let Some(v) = position_name {
-        attrs.push(format!("{{\"trait_type\":\"position\",\"value\":\"{}\"}}", v));
+        attrs.push(format!("{{\"trait_type\":\"position_name\",\"value\":\"{}\"}}", v));
     }
 
     format!(
-        "data:application/json,{{\"name\":\"{}\",\"symbol\":\"HKEY\",\"description\":\"Permission key for managing a H\\u00e4rdig navSOL position.\",\"image\":\"{}\",\"attributes\":[{}]}}",
+        "data:application/json,{{\"name\":\"{}\",\"symbol\":\"HKEY\",\"description\":\"Permission key for managing a H\\u00e4rdig position.\",\"image\":\"{}\",\"attributes\":[{}]}}",
         name, KEY_IMAGE, attrs.join(","),
     )
 }
