@@ -37,7 +37,7 @@ pub struct Buy<'info> {
     /// CHECK: PDA derived from this program.
     #[account(
         mut,
-        seeds = [b"authority", position.admin_asset.as_ref()],
+        seeds = [b"authority", position.authority_seed.as_ref()],
         bump,
     )]
     pub program_pda: UncheckedAccount<'info>,
@@ -155,7 +155,7 @@ pub fn handler(ctx: Context<Buy>, amount: u64, min_out: u64) -> Result<()> {
     validate_key(
         &ctx.accounts.signer,
         &ctx.accounts.key_asset.to_account_info(),
-        &ctx.accounts.position.admin_asset,
+        &ctx.accounts.position.authority_seed,
         PERM_BUY,
     )?;
 
@@ -181,7 +181,7 @@ pub fn handler(ctx: Context<Buy>, amount: u64, min_out: u64) -> Result<()> {
         HardigError::InvalidMayflowerAccount
     );
 
-    if ctx.accounts.key_asset.key() == ctx.accounts.position.admin_asset {
+    if ctx.accounts.key_asset.key() == ctx.accounts.position.current_admin_asset {
         ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
     }
 
@@ -209,7 +209,7 @@ pub fn handler(ctx: Context<Buy>, amount: u64, min_out: u64) -> Result<()> {
     );
 
     let bump = ctx.bumps.program_pda;
-    let admin_asset_key = ctx.accounts.position.admin_asset;
+    let admin_asset_key = ctx.accounts.position.authority_seed;
     let signer_seeds: &[&[&[u8]]] = &[&[b"authority", admin_asset_key.as_ref(), &[bump]]];
 
     // Read deposited shares BEFORE the buy CPI

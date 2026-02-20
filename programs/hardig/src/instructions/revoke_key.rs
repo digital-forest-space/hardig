@@ -66,13 +66,13 @@ pub fn handler(ctx: Context<RevokeKey>) -> Result<()> {
     validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.admin_key_asset.to_account_info(),
-        &ctx.accounts.position.admin_asset,
+        &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
     )?;
 
     // Prevent revoking the admin key
     require!(
-        ctx.accounts.target_asset.key() != ctx.accounts.position.admin_asset,
+        ctx.accounts.target_asset.key() != ctx.accounts.position.current_admin_asset,
         HardigError::CannotRevokeAdminKey
     );
 
@@ -97,7 +97,7 @@ pub fn handler(ctx: Context<RevokeKey>) -> Result<()> {
         .find(|a| a.key == "position")
         .ok_or(error!(HardigError::WrongPosition))?;
     require!(
-        target_position.value == ctx.accounts.position.admin_asset.to_string(),
+        target_position.value == ctx.accounts.position.authority_seed.to_string(),
         HardigError::WrongPosition
     );
 

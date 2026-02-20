@@ -71,4 +71,12 @@ pub enum HardigError {
     // Name errors
     #[msg("Custom name suffix exceeds 32 characters")]
     NameTooLong,
+
+    // Recovery errors
+    #[msg("No recovery key is configured for this position")]
+    RecoveryNotConfigured,
+    #[msg("Admin has been active within the lockout period")]
+    RecoveryLockoutNotExpired,
+    #[msg("Recovery configuration is locked and cannot be changed")]
+    RecoveryConfigLocked,
 }

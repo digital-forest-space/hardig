@@ -20,11 +20,11 @@ impl ProtocolConfig {
 }
 
 /// A navSOL position controlled by an NFT keyring.
-/// PDA seeds = [b"position", admin_asset].
+/// PDA seeds = [b"position", authority_seed].
 #[account]
 pub struct PositionNFT {
-    /// The admin key NFT (MPL-Core asset pubkey, master key, only one per position).
-    pub admin_asset: Pubkey,
+    /// Permanent PDA seed (first admin asset pubkey). Never changes after creation.
+    pub authority_seed: Pubkey,
     /// The Mayflower PersonalPosition PDA owned by this program.
     pub position_pda: Pubkey,
     /// The MarketConfig PDA this position is bound to (set during create_position).
@@ -40,16 +40,26 @@ pub struct PositionNFT {
     pub last_admin_activity: i64,
     /// Bump seed for the position PDA.
     pub bump: u8,
-    /// Bump seed for the per-position authority PDA (seeds = [b"authority", admin_asset]).
+    /// Bump seed for the per-position authority PDA (seeds = [b"authority", authority_seed]).
     pub authority_bump: u8,
+    /// The current admin key NFT (MPL-Core asset). Updated on recovery.
+    pub current_admin_asset: Pubkey,
+    /// The recovery key NFT (MPL-Core asset). Pubkey::default() = no recovery configured.
+    pub recovery_asset: Pubkey,
+    /// Inactivity threshold in seconds before recovery can execute.
+    pub recovery_lockout_secs: i64,
+    /// If true, recovery config cannot be changed.
+    pub recovery_config_locked: bool,
 }
 
 impl PositionNFT {
     pub const SEED: &'static [u8] = b"position";
-    // discriminator(8) + admin_asset(32) + position_pda(32) + market_config(32)
+    // discriminator(8) + authority_seed(32) + position_pda(32) + market_config(32)
     // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
     // + last_admin_activity(8) + bump(1) + authority_bump(1)
-    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1;
+    // + current_admin_asset(32) + recovery_asset(32) + recovery_lockout_secs(8)
+    // + recovery_config_locked(1)
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1 + 32 + 32 + 8 + 1;
 }
 
 /// On-chain configuration for a Mayflower market.

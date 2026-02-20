@@ -225,7 +225,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
 
     // --- Initialize position with all fields set ---
     let position = &mut ctx.accounts.position;
-    position.admin_asset = ctx.accounts.admin_asset.key();
+    position.authority_seed = ctx.accounts.admin_asset.key();
     position.position_pda = expected_pp;
     position.market_config = ctx.accounts.market_config.key();
     position.deposited_nav = 0;
@@ -234,6 +234,10 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
     position.last_admin_activity = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;
     position.authority_bump = ctx.bumps.program_pda;
+    position.current_admin_asset = ctx.accounts.admin_asset.key();
+    position.recovery_asset = Pubkey::default();
+    position.recovery_lockout_secs = 0;
+    position.recovery_config_locked = false;
 
     Ok(())
 }

@@ -85,7 +85,7 @@ pub fn handler(
     validate_key(
         &ctx.accounts.admin,
         &ctx.accounts.admin_key_asset.to_account_info(),
-        &ctx.accounts.position.admin_asset,
+        &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
     )?;
 
@@ -143,7 +143,7 @@ pub fn handler(
     let mut attrs = permission_attributes(permissions);
     attrs.push(Attribute {
         key: "position".to_string(),
-        value: ctx.accounts.position.admin_asset.to_string(),
+        value: ctx.accounts.position.authority_seed.to_string(),
     });
     attrs.push(Attribute {
         key: "position_name".to_string(),
