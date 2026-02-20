@@ -103,6 +103,16 @@ pub mod hardig {
         instructions::accept_admin::handler(ctx)
     }
 
+    /// Configure a recovery key for dead-man's switch protection (admin only).
+    pub fn configure_recovery(
+        ctx: Context<ConfigureRecovery>,
+        lockout_secs: i64,
+        lock_config: bool,
+        name: Option<String>,
+    ) -> Result<()> {
+        instructions::configure_recovery::handler(ctx, lockout_secs, lock_config, name)
+    }
+
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
     pub fn create_market_config(
         ctx: Context<CreateMarketConfig>,
