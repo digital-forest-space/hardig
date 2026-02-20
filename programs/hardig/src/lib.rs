@@ -118,6 +118,11 @@ pub mod hardig {
         instructions::configure_recovery::handler(ctx, lockout_secs, lock_config, name)
     }
 
+    /// Execute recovery after lockout period has expired (recovery key holder only).
+    pub fn execute_recovery(ctx: Context<ExecuteRecovery>) -> Result<()> {
+        instructions::execute_recovery::handler(ctx)
+    }
+
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
     pub fn create_market_config(
         ctx: Context<CreateMarketConfig>,
