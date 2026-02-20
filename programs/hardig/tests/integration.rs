@@ -2782,6 +2782,55 @@ fn test_configure_recovery_locked_denied() {
 }
 
 #[test]
+fn test_configure_recovery_replace_requires_old_asset() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_wallet = Keypair::new();
+    svm.airdrop(&recovery_wallet.pubkey(), 5_000_000_000).unwrap();
+
+    // First: configure a recovery key
+    let recovery_asset1 = Keypair::new();
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset1.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        86400,
+        false,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset1]).unwrap();
+
+    // Second: try to replace WITHOUT providing old_recovery_asset — should fail
+    let recovery_asset2 = Keypair::new();
+    let ix2 = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset2.pubkey(),
+        &recovery_wallet.pubkey(),
+        None, // omitting old_recovery_asset
+        &h.collection,
+        172800,
+        false,
+        None,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix2], &[&h.admin, &recovery_asset2]).is_err(),
+        "should not be able to replace recovery key without providing old_recovery_asset"
+    );
+
+    // Verify original config unchanged
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.recovery_asset, recovery_asset1.pubkey());
+    assert_eq!(pos.recovery_lockout_secs, 86400);
+}
+
+#[test]
 fn test_configure_recovery_operator_denied() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);

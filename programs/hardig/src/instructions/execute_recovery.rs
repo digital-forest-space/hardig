@@ -106,9 +106,13 @@ pub fn handler(ctx: Context<ExecuteRecovery>) -> Result<()> {
         HardigError::RecoveryLockoutNotExpired
     );
 
-    // 6. Verify old admin asset matches
+    // 6. Verify old admin asset matches and is an MPL-Core account
     require!(
         ctx.accounts.old_admin_asset.key() == position.current_admin_asset,
+        HardigError::InvalidKey
+    );
+    require!(
+        *ctx.accounts.old_admin_asset.owner == MPL_CORE_ID,
         HardigError::InvalidKey
     );
 
@@ -138,12 +142,25 @@ pub fn handler(ctx: Context<ExecuteRecovery>) -> Result<()> {
             .unwrap_or_default()
     };
 
+    // 8. Capture values needed from position, then update state BEFORE CPIs
+    //    (checks-effects-interactions pattern to prevent partial-state corruption
+    //    if a CPI fails after earlier CPIs succeed).
+    let authority_seed = position.authority_seed;
+
+    // Note: recovery_config_locked is intentionally reset to false after recovery.
+    // The new admin must be able to configure fresh recovery. Anyone using lock_config
+    // should understand that successful recovery itself resets the lock.
+    let position = &mut ctx.accounts.position;
+    position.current_admin_asset = ctx.accounts.new_admin_asset.key();
+    position.recovery_asset = Pubkey::default();
+    position.recovery_lockout_secs = 0;
+    position.recovery_config_locked = false;
+    position.last_admin_activity = now;
+
     let config = &ctx.accounts.config;
     let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
 
-    // 8. Create new admin key NFT
-    let authority_seed = position.authority_seed;
-
+    // 9. Create new admin key NFT
     let mut attrs = permission_attributes(PRESET_ADMIN);
     attrs.push(Attribute {
         key: "position".to_string(),
@@ -183,7 +200,7 @@ pub fn handler(ctx: Context<ExecuteRecovery>) -> Result<()> {
         ])
         .invoke_signed(&[config_seeds])?;
 
-    // 9. Burn old admin asset
+    // 10. Burn old admin asset
     BurnV1CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
         .asset(&ctx.accounts.old_admin_asset.to_account_info())
         .collection(Some(&ctx.accounts.collection.to_account_info()))
@@ -192,7 +209,7 @@ pub fn handler(ctx: Context<ExecuteRecovery>) -> Result<()> {
         .system_program(Some(&ctx.accounts.system_program.to_account_info()))
         .invoke_signed(&[config_seeds])?;
 
-    // 10. Burn recovery key
+    // 11. Burn recovery key
     BurnV1CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
         .asset(&ctx.accounts.recovery_key_asset.to_account_info())
         .collection(Some(&ctx.accounts.collection.to_account_info()))
@@ -200,14 +217,6 @@ pub fn handler(ctx: Context<ExecuteRecovery>) -> Result<()> {
         .payer(&ctx.accounts.recovery_holder.to_account_info())
         .system_program(Some(&ctx.accounts.system_program.to_account_info()))
         .invoke_signed(&[config_seeds])?;
-
-    // 11. Update position state
-    let position = &mut ctx.accounts.position;
-    position.current_admin_asset = ctx.accounts.new_admin_asset.key();
-    position.recovery_asset = Pubkey::default();
-    position.recovery_lockout_secs = 0;
-    position.recovery_config_locked = false;
-    position.last_admin_activity = now;
 
     Ok(())
 }

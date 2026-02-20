@@ -83,27 +83,27 @@ pub fn handler(
     );
 
     // Lockout must be positive
-    require!(lockout_secs > 0, HardigError::RecoveryNotConfigured);
+    require!(lockout_secs > 0, HardigError::InvalidLockout);
 
-    // If replacing an existing recovery key, burn it
+    // If replacing an existing recovery key, require and burn the old one
     let position = &ctx.accounts.position;
     if position.recovery_asset != Pubkey::default() {
-        if let Some(ref old_asset) = ctx.accounts.old_recovery_asset {
-            require!(
-                old_asset.key() == position.recovery_asset,
-                HardigError::InvalidKey
-            );
-            let config = &ctx.accounts.config;
-            let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
+        let old_asset = ctx.accounts.old_recovery_asset.as_ref()
+            .ok_or(error!(HardigError::OldRecoveryAssetRequired))?;
+        require!(
+            old_asset.key() == position.recovery_asset,
+            HardigError::InvalidKey
+        );
+        let config = &ctx.accounts.config;
+        let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
 
-            BurnV1CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
-                .asset(&old_asset.to_account_info())
-                .collection(Some(&ctx.accounts.collection.to_account_info()))
-                .authority(Some(&ctx.accounts.config.to_account_info()))
-                .payer(&ctx.accounts.admin.to_account_info())
-                .system_program(Some(&ctx.accounts.system_program.to_account_info()))
-                .invoke_signed(&[config_seeds])?;
-        }
+        BurnV1CpiBuilder::new(&ctx.accounts.mpl_core_program.to_account_info())
+            .asset(&old_asset.to_account_info())
+            .collection(Some(&ctx.accounts.collection.to_account_info()))
+            .authority(Some(&ctx.accounts.config.to_account_info()))
+            .payer(&ctx.accounts.admin.to_account_info())
+            .system_program(Some(&ctx.accounts.system_program.to_account_info()))
+            .invoke_signed(&[config_seeds])?;
     }
 
     // Build NFT name

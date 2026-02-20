@@ -79,4 +79,8 @@ pub enum HardigError {
     RecoveryLockoutNotExpired,
     #[msg("Recovery configuration is locked and cannot be changed")]
     RecoveryConfigLocked,
+    #[msg("Lockout period must be greater than zero")]
+    InvalidLockout,
+    #[msg("Must provide old_recovery_asset to replace an existing recovery key")]
+    OldRecoveryAssetRequired,
 }
