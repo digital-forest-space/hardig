@@ -28,6 +28,9 @@ export const keyring = signal([]);
 export const discoveredPositions = signal([]);
 export const activePositionIndex = signal(0);
 
+// Promos discovered for the active position
+export const discoveredPromos = signal([]);  // [{pda, config: {authority_seed, permissions, ...}}]
+
 // Market config (loaded from position's market_config PDA)
 export const marketConfigPda = signal(null);
 export const marketConfig = signal(null);
@@ -90,6 +93,10 @@ export const canRevoke = computed(
   () => hasPerm(PERM_MANAGE_KEYS) && keyring.value.length > 1
 );
 
+export const canManagePromos = computed(
+  () => hasPerm(PERM_MANAGE_KEYS) && positionPda.value !== null
+);
+
 export const canInitProtocol = computed(() => !protocolExists.value);
 
 export const canCreatePosition = computed(
@@ -137,4 +144,5 @@ export function resetPositionState() {
   mfBorrowCapacity.value = 0;
   discoveredPositions.value = [];
   activePositionIndex.value = 0;
+  discoveredPromos.value = [];
 }

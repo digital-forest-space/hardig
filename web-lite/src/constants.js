@@ -74,6 +74,14 @@ export function deriveMarketConfigPda(navMint) {
   );
 }
 
+// Derive PromoConfig PDA (seeds = [b"promo", authority_seed, name_suffix_bytes])
+export function derivePromoPda(authoritySeed, nameSuffix) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('promo'), authoritySeed.toBuffer(), Buffer.from(nameSuffix)],
+    PROGRAM_ID
+  );
+}
+
 // Derive Mayflower PersonalPosition PDA
 export function derivePersonalPosition(programPda, marketMeta = DEFAULT_MARKET_META) {
   return PublicKey.findProgramAddressSync(

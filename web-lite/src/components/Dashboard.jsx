@@ -7,6 +7,7 @@ import {
 import { permissionsName, permissionsClass } from '../utils.js';
 import { PositionPanel } from './PositionPanel.jsx';
 import { KeyringTable } from './KeyringTable.jsx';
+import { PromoPanel } from './PromoPanel.jsx';
 import { ActionBar } from './ActionBar.jsx';
 import { LogPanel } from './LogPanel.jsx';
 import { PositionSelector } from './PositionSelector.jsx';
@@ -65,6 +66,7 @@ export function Dashboard({ onAction, onSwitchPosition }) {
       <ActionBar onAction={onAction} />
       <PositionPanel />
       <KeyringTable />
+      <PromoPanel onAction={onAction} />
       <LogPanel />
     </div>
   );

@@ -8,3 +8,5 @@ export { buildReinvest } from './reinvest.js';
 export { buildAuthorizeKey } from './authorizeKey.js';
 export { buildRevokeKey } from './revokeKey.js';
 export { buildCreateMarketConfig } from './createMarketConfig.js';
+export { buildCreatePromo } from './createPromo.js';
+export { buildUpdatePromo } from './updatePromo.js';
