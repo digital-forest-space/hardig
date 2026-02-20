@@ -11,6 +11,7 @@ export function KeyringTable() {
       <table class="keyring-table">
         <thead>
           <tr>
+            <th>Role</th>
             <th>Name</th>
             <th>Asset</th>
             <th>Status</th>
@@ -25,6 +26,9 @@ export function KeyringTable() {
                   <span class={`badge ${isAdmin ? 'badge-admin' : ''}`}>
                     {isAdmin ? 'Admin' : 'Delegated'}
                   </span>
+                </td>
+                <td style={{ fontSize: '13px' }}>
+                  {k.name || <span style={{ color: 'var(--text-dim)' }}>--</span>}
                 </td>
                 <td>{shortPubkey(k.mint)}</td>
                 <td>
@@ -46,7 +50,7 @@ export function KeyringTable() {
               }
               rows.push(
                 <tr key={`${i}-detail`} class="sub-row">
-                  <td colspan="3" style={{ color: 'var(--text-dim)', fontSize: '12px', paddingLeft: '24px' }}>
+                  <td colspan="4" style={{ color: 'var(--text-dim)', fontSize: '12px', paddingLeft: '24px' }}>
                     {details.map((d, j) => <div key={j}>{d}</div>)}
                   </td>
                 </tr>
