@@ -152,7 +152,7 @@ export async function discoverPosition(connection, wallet) {
   // (small account set), then load specific MPL-Core assets by pubkey.
   // This avoids getProgramAccounts on MPL Core which most RPC providers reject.
 
-  const POSITION_SIZE = 132; // PositionNFT account size
+  const POSITION_SIZE = 205; // PositionNFT account size (with recovery fields)
 
   const [positionAccounts, keyStateAccounts] = await Promise.all([
     connection.getProgramAccounts(PROGRAM_ID, {
@@ -175,13 +175,14 @@ export async function discoverPosition(connection, wallet) {
     keyStates.push({ pubkey, asset, buckets });
   }
 
-  // Parse all PositionNFT accounts to get admin_asset pubkeys
-  const positions = []; // { posPda, adminAsset }
+  // Parse all PositionNFT accounts to get authority_seed and current_admin_asset
+  const positions = []; // { posPda, authoritySeed, currentAdminAsset }
   for (const { pubkey, account } of positionAccounts) {
     const data = account.data;
     if (data.length < POSITION_SIZE) continue;
-    const adminAsset = new PublicKey(data.slice(8, 40));
-    positions.push({ posPda: pubkey, adminAsset });
+    const authoritySeed = new PublicKey(data.slice(8, 40));
+    const currentAdminAsset = new PublicKey(data.slice(132, 164));
+    positions.push({ posPda: pubkey, authoritySeed, currentAdminAsset });
   }
 
   if (positions.length === 0 && keyStates.length === 0) {
@@ -189,15 +190,15 @@ export async function discoverPosition(connection, wallet) {
     return;
   }
 
-  // Build lookup: admin_asset string -> posPda
+  // Build lookup: authority_seed string -> posPda (delegated keys bind to authority_seed)
   const adminAssetToPos = new Map();
   for (const p of positions) {
-    adminAssetToPos.set(p.adminAsset.toString(), p.posPda);
+    adminAssetToPos.set(p.authoritySeed.toString(), p.posPda);
   }
 
-  // Step 1: Check admin keys — load each position's admin_asset and check owner
-  const adminAssetPubkeys = positions.map((p) => p.adminAsset);
-  const adminAssetInfos = await connection.getMultipleAccountsInfo(adminAssetPubkeys);
+  // Step 1: Check admin keys — load each position's current_admin_asset and check owner
+  const currentAdminPubkeys = positions.map((p) => p.currentAdminAsset);
+  const adminAssetInfos = await connection.getMultipleAccountsInfo(currentAdminPubkeys);
 
   // Step 2: Also load ALL delegated asset infos for multi-position discovery
   const delegatedPubkeys = keyStates.map((ks) => ks.asset);
@@ -234,9 +235,9 @@ export async function discoverPosition(connection, wallet) {
 
     discovered.push({
       posPda,
-      adminAsset: adminAssetPubkeys[i],
+      adminAsset: positions[i].authoritySeed,
       permissions,
-      keyAsset: adminAssetPubkeys[i],
+      keyAsset: currentAdminPubkeys[i],
       keyStatePda: null,
       depositedNav,
       userDebt,
@@ -273,7 +274,7 @@ export async function discoverPosition(connection, wallet) {
 
     discovered.push({
       posPda,
-      adminAsset: new PublicKey(positionBinding),
+      adminAsset: new PublicKey(positionBinding), // authority_seed (from key's position attribute)
       permissions,
       keyAsset: delegatedPubkeys[i],
       keyStatePda: keyStates[i].pubkey,
@@ -298,7 +299,7 @@ export async function discoverPosition(connection, wallet) {
 
   // Store cache for position switching without re-discovery
   _lastDiscoveryCache = {
-    positions, keyStates, adminAssetPubkeys, adminAssetInfos, delegatedPubkeys, delegatedInfos,
+    positions, keyStates, currentAdminPubkeys, adminAssetInfos, delegatedPubkeys, delegatedInfos,
   };
 
   // Auto-select the first position
@@ -330,7 +331,7 @@ export async function selectActivePosition(index, connection, cache) {
   myKeyAsset.value = dp.keyAsset;
   myNftMint.value = dp.keyAsset;
 
-  const { positions, keyStates, adminAssetPubkeys, adminAssetInfos, delegatedPubkeys, delegatedInfos } = effectiveCache;
+  const { positions, keyStates, currentAdminPubkeys, adminAssetInfos, delegatedPubkeys, delegatedInfos } = effectiveCache;
 
   // Load position account data
   try {
@@ -338,22 +339,31 @@ export async function selectActivePosition(index, connection, cache) {
     if (posInfo) {
       const data = posInfo.data;
       const view = new DataView(data.buffer, data.byteOffset);
-      const adminAsset = new PublicKey(data.slice(8, 40));
+      const authoritySeed = new PublicKey(data.slice(8, 40));
       const mfPositionPda = new PublicKey(data.slice(40, 72));
       const mcPda = new PublicKey(data.slice(72, 104));
       const depositedNav = Number(view.getBigUint64(104, true));
       const userDebt = Number(view.getBigUint64(112, true));
       const lastAdminActivity = Number(view.getBigInt64(122, true));
       const bump = data[130];
+      const currentAdminAsset = new PublicKey(data.slice(132, 164));
+      const recoveryAsset = new PublicKey(data.slice(164, 196));
+      const recoveryLockoutSecs = Number(view.getBigInt64(196, true));
+      const recoveryConfigLocked = data[204] !== 0;
 
       const posData = {
-        adminAsset,
+        authoritySeed,
+        adminAsset: authoritySeed, // backward compat alias
         positionPda: mfPositionPda,
         marketConfig: mcPda,
         depositedNav,
         userDebt,
         lastAdminActivity,
         bump,
+        currentAdminAsset,
+        recoveryAsset,
+        recoveryLockoutSecs,
+        recoveryConfigLocked,
       };
 
       position.value = posData;
@@ -390,9 +400,10 @@ export async function selectActivePosition(index, connection, cache) {
 
   // Build keyring: admin key + all delegated keys for this position
   const posKeys = [];
-  const posAdminAsset = position.value?.adminAsset;
-  if (posAdminAsset) {
-    const adminAssetStr = posAdminAsset.toString();
+  const posAuthoritySeed = position.value?.authoritySeed;
+  const posCurrentAdmin = position.value?.currentAdminAsset;
+  if (posAuthoritySeed) {
+    const authorityStr = posAuthoritySeed.toString();
 
     // Build a map of asset pubkey -> KeyState data for bucket info
     const keyStateMap = new Map();
@@ -410,13 +421,13 @@ export async function selectActivePosition(index, connection, cache) {
       };
     }
 
-    // Admin key
-    const adminIdx = adminAssetPubkeys.findIndex((pk) => pk.equals(posAdminAsset));
+    // Admin key (use current_admin_asset, which may differ from authority_seed after recovery)
+    const adminIdx = currentAdminPubkeys.findIndex((pk) => posCurrentAdmin && pk.equals(posCurrentAdmin));
     if (adminIdx >= 0 && adminAssetInfos[adminIdx]) {
       const parsed = parseMplCoreAsset(adminAssetInfos[adminIdx].data);
       posKeys.push({
         pda: null,
-        mint: posAdminAsset,
+        mint: posCurrentAdmin,
         permissions: PRESET_ADMIN,
         heldBySigner: dp.isAdmin,
         name: parsed?.name || null,
@@ -435,7 +446,7 @@ export async function selectActivePosition(index, connection, cache) {
       const permissions = readPermissionsFromAssetData(info.data);
       if (permissions === null) continue;
       const binding = readPositionBindingFromAssetData(info.data);
-      if (binding !== adminAssetStr) continue;
+      if (binding !== authorityStr) continue;
 
       const parsed = parseMplCoreAsset(info.data);
       // Check if this delegated key's asset is the one we discovered for this position

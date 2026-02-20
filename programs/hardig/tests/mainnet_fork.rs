@@ -533,7 +533,7 @@ fn test_mainnet_fork_init_protocol_and_position() {
     let harness = full_fork_setup(&client);
 
     let pos = get_position(&client, &harness.position_pda);
-    assert_eq!(pos.admin_asset, harness.admin_asset.pubkey());
+    assert_eq!(pos.authority_seed, harness.admin_asset.pubkey());
     assert_eq!(pos.max_reinvest_spread_bps, 500);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);

@@ -155,11 +155,15 @@ fn draw_position_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_dashboard(frame: &mut Frame, app: &App, area: Rect) {
+    let has_recovery = app.position.as_ref()
+        .map(|p| p.recovery_asset != solana_sdk::pubkey::Pubkey::default())
+        .unwrap_or(false);
+    let panel_height = if has_recovery { 12 } else { 10 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10), // position panel
-            Constraint::Min(5),    // keyring panel
+            Constraint::Length(panel_height), // position panel
+            Constraint::Min(5),              // keyring panel
         ])
         .split(area);
 
@@ -207,7 +211,7 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(position_pda),
         Span::raw("    "),
         Span::styled("Admin Asset: ", Style::default().fg(Color::Gray)),
-        Span::raw(app::short_pubkey(&pos.admin_asset)),
+        Span::raw(app::short_pubkey(&pos.current_admin_asset)),
     ];
     if !admin_name.is_empty() {
         top_spans.push(Span::raw("    "));
@@ -217,7 +221,7 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Cyan),
         ));
     }
-    let lines = vec![
+    let mut lines = vec![
         Line::from(top_spans),
         Line::from(""),
         Line::from(vec![
@@ -248,6 +252,28 @@ fn draw_position_panel(frame: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
+
+    // Recovery status line
+    if pos.recovery_asset != solana_sdk::pubkey::Pubkey::default() {
+        let lockout_days = pos.recovery_lockout_secs / 86400;
+        let lockout_str = if lockout_days > 0 {
+            format!("{} days", lockout_days)
+        } else {
+            let hours = pos.recovery_lockout_secs / 3600;
+            if hours > 0 { format!("{} hours", hours) } else { format!("{} secs", pos.recovery_lockout_secs) }
+        };
+        let locked_str = if pos.recovery_config_locked { " (locked)" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled("  Recovery: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{} lockout{}", lockout_str, locked_str),
+                Style::default().fg(Color::Green),
+            ),
+            Span::raw("    "),
+            Span::styled("Key: ", Style::default().fg(Color::Gray)),
+            Span::raw(app::short_pubkey(&pos.recovery_asset)),
+        ]));
+    }
 
     let para = Paragraph::new(Text::from(lines));
     frame.render_widget(para, inner);
@@ -667,6 +693,7 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 if app.has_perm(hardig::state::PERM_MANAGE_KEYS) {
                     parts.push("[a]uth");
                     parts.push("[x]revoke");
+                    parts.push("[h]beat");
                 }
 
                 parts.push("[n]ew");

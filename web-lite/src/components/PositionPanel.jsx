@@ -1,5 +1,15 @@
+import { PublicKey } from '@solana/web3.js';
 import { position, mfBorrowCapacity, mfDepositedShares, mfDebt, marketConfig } from '../state.js';
-import { lamportsToSol, navTokenName } from '../utils.js';
+import { lamportsToSol, navTokenName, shortPubkey } from '../utils.js';
+
+function formatLockout(secs) {
+  if (secs <= 0) return '0';
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  return `${secs}s`;
+}
 
 export function PositionPanel() {
   const pos = position.value;
@@ -7,6 +17,7 @@ export function PositionPanel() {
 
   const mc = marketConfig.value;
   const tokenName = navTokenName(mc?.navMint);
+  const hasRecovery = pos.recoveryAsset && !pos.recoveryAsset.equals(PublicKey.default);
 
   return (
     <div class="card">
@@ -27,6 +38,17 @@ export function PositionPanel() {
           {lamportsToSol(mfBorrowCapacity.value)} SOL
         </span>
       </div>
+      {hasRecovery && (
+        <div class="data-row">
+          <span class="label">Recovery</span>
+          <span class="value">
+            {formatLockout(pos.recoveryLockoutSecs)} lockout
+            {pos.recoveryConfigLocked ? ' (locked)' : ''}
+            {' \u2014 '}
+            {shortPubkey(pos.recoveryAsset.toString())}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

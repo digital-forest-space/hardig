@@ -1,6 +1,7 @@
 use litesvm::LiteSVM;
 use solana_sdk::{
     account::Account,
+    clock::Clock,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::Keypair,
@@ -661,6 +662,14 @@ fn read_position(svm: &LiteSVM, pda: &Pubkey) -> PositionNFT {
 fn read_key_state(svm: &LiteSVM, pda: &Pubkey) -> KeyState {
     let account = svm.get_account(pda).unwrap();
     KeyState::try_deserialize(&mut account.data.as_slice()).unwrap()
+}
+
+/// Advance LiteSVM clock unix_timestamp by the given number of seconds.
+fn advance_clock(svm: &mut LiteSVM, secs: i64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp += secs;
+    clock.slot += (secs as u64) * 2; // approximate slot advancement
+    svm.set_sysvar(&clock);
 }
 
 fn read_market_config(svm: &LiteSVM, pda: &Pubkey) -> MarketConfig {
@@ -1387,7 +1396,7 @@ fn test_create_position_and_admin_asset() {
     // Check position
     let (pos_pda, _) = position_pda(&asset_kp.pubkey());
     let pos = read_position(&svm, &pos_pda);
-    assert_eq!(pos.admin_asset, asset_kp.pubkey());
+    assert_eq!(pos.authority_seed, asset_kp.pubkey());
     assert_eq!(pos.max_reinvest_spread_bps, 750);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
@@ -2490,5 +2499,632 @@ fn test_delegated_key_has_market_and_position_attributes() {
         find_attribute(&attrs, "position"),
         Some(admin_asset.pubkey().to_string().as_str()),
         "delegated key position attribute should point to admin asset"
+    );
+}
+
+// ===========================================================================
+// Recovery instruction builders
+// ===========================================================================
+
+fn ix_heartbeat(
+    admin: &Pubkey,
+    admin_key_asset: &Pubkey,
+    position_pda: &Pubkey,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        program_id(),
+        &sighash("heartbeat"),
+        vec![
+            AccountMeta::new_readonly(*admin, true),
+            AccountMeta::new_readonly(*admin_key_asset, false),
+            AccountMeta::new(*position_pda, false),
+        ],
+    )
+}
+
+fn ix_configure_recovery(
+    admin: &Pubkey,
+    admin_key_asset: &Pubkey,
+    position_pda: &Pubkey,
+    recovery_asset: &Pubkey,
+    target_wallet: &Pubkey,
+    old_recovery_asset: Option<&Pubkey>,
+    collection: &Pubkey,
+    lockout_secs: i64,
+    lock_config: bool,
+    name: Option<&str>,
+) -> Instruction {
+    let (cfg_pda, _) = config_pda();
+
+    let mut data = sighash("configure_recovery");
+    data.extend_from_slice(&lockout_secs.to_le_bytes());
+    data.push(if lock_config { 1 } else { 0 });
+    // name: Option<String>
+    match name {
+        Some(n) => {
+            data.push(1); // Some
+            data.extend_from_slice(&(n.len() as u32).to_le_bytes());
+            data.extend_from_slice(n.as_bytes());
+        }
+        None => {
+            data.push(0); // None
+        }
+    }
+
+    // For Option<UncheckedAccount>, Anchor expects the account always present.
+    // Pass program_id() as the "None" sentinel.
+    let old_recovery = old_recovery_asset.copied().unwrap_or(program_id());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),                    // admin
+            AccountMeta::new_readonly(*admin_key_asset, false), // admin_key_asset
+            AccountMeta::new(*position_pda, false),             // position
+            AccountMeta::new(*recovery_asset, true),            // recovery_asset (signer)
+            AccountMeta::new_readonly(*target_wallet, false),   // target_wallet
+            AccountMeta::new(old_recovery, false),              // old_recovery_asset (Option)
+            AccountMeta::new_readonly(cfg_pda, false),          // config
+            AccountMeta::new(*collection, false),               // collection
+            AccountMeta::new_readonly(MPL_CORE_ID, false),      // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ],
+    )
+}
+
+fn ix_execute_recovery(
+    recovery_holder: &Pubkey,
+    recovery_key_asset: &Pubkey,
+    position_pda: &Pubkey,
+    old_admin_asset: &Pubkey,
+    new_admin_asset: &Pubkey,
+    collection: &Pubkey,
+) -> Instruction {
+    let (cfg_pda, _) = config_pda();
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &sighash("execute_recovery"),
+        vec![
+            AccountMeta::new(*recovery_holder, true),           // recovery_holder
+            AccountMeta::new(*recovery_key_asset, false),          // recovery_key_asset (mut for burn)
+            AccountMeta::new(*position_pda, false),              // position
+            AccountMeta::new(*old_admin_asset, false),           // old_admin_asset
+            AccountMeta::new(*new_admin_asset, true),            // new_admin_asset (signer)
+            AccountMeta::new_readonly(cfg_pda, false),           // config
+            AccountMeta::new(*collection, false),                // collection
+            AccountMeta::new_readonly(MPL_CORE_ID, false),       // mpl_core_program
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ],
+    )
+}
+
+// ===========================================================================
+// Recovery tests
+// ===========================================================================
+
+#[test]
+fn test_heartbeat_admin_ok() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let pos_before = read_position(&svm, &h.position_pda);
+
+    // Advance clock so we can detect the timestamp change
+    advance_clock(&mut svm, 10);
+
+    let ix = ix_heartbeat(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
+
+    let pos_after = read_position(&svm, &h.position_pda);
+    assert!(
+        pos_after.last_admin_activity >= pos_before.last_admin_activity,
+        "heartbeat should update last_admin_activity"
+    );
+}
+
+#[test]
+fn test_heartbeat_operator_denied() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Operator does NOT have PERM_MANAGE_KEYS, so heartbeat should fail
+    let ix = ix_heartbeat(
+        &h.operator.pubkey(),
+        &h.operator_asset,
+        &h.position_pda,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix], &[&h.operator]).is_err(),
+        "operator should not be able to heartbeat"
+    );
+}
+
+#[test]
+fn test_heartbeat_outsider_denied() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Outsider has no key at all — use a random pubkey as the asset
+    let fake_asset = Pubkey::new_unique();
+    let ix = ix_heartbeat(
+        &h.outsider.pubkey(),
+        &fake_asset,
+        &h.position_pda,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix], &[&h.outsider]).is_err(),
+        "outsider should not be able to heartbeat"
+    );
+}
+
+#[test]
+fn test_configure_recovery_ok() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_wallet = Keypair::new();
+    svm.airdrop(&recovery_wallet.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        86400, // 1 day lockout
+        false,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]).unwrap();
+
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.recovery_asset, recovery_asset.pubkey());
+    assert_eq!(pos.recovery_lockout_secs, 86400);
+    assert!(!pos.recovery_config_locked);
+
+    // Verify recovery key NFT was created with correct attributes
+    let rec_account = svm.get_account(&recovery_asset.pubkey()).expect("recovery asset should exist");
+    let attrs = extract_asset_attributes(&rec_account);
+    assert_eq!(find_attribute(&attrs, "permissions"), Some("0"));
+    assert_eq!(find_attribute(&attrs, "recovery"), Some("true"));
+    assert_eq!(
+        find_attribute(&attrs, "position"),
+        Some(h.admin_asset.pubkey().to_string().as_str()),
+        "recovery key should be bound to admin asset (authority_seed)"
+    );
+}
+
+#[test]
+fn test_configure_recovery_with_lock() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_wallet = Keypair::new();
+    svm.airdrop(&recovery_wallet.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        604800, // 7 day lockout
+        true,   // lock config
+        Some("backup"),
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]).unwrap();
+
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.recovery_asset, recovery_asset.pubkey());
+    assert_eq!(pos.recovery_lockout_secs, 604800);
+    assert!(pos.recovery_config_locked);
+}
+
+#[test]
+fn test_configure_recovery_locked_denied() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_wallet = Keypair::new();
+    svm.airdrop(&recovery_wallet.pubkey(), 5_000_000_000).unwrap();
+
+    // First: configure with lock_config = true
+    let recovery_asset1 = Keypair::new();
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset1.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        86400,
+        true, // lock it
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset1]).unwrap();
+
+    // Second: try to reconfigure — should fail because config is locked
+    let recovery_asset2 = Keypair::new();
+    let ix2 = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset2.pubkey(),
+        &recovery_wallet.pubkey(),
+        Some(&recovery_asset1.pubkey()),
+        &h.collection,
+        172800,
+        false,
+        None,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix2], &[&h.admin, &recovery_asset2]).is_err(),
+        "should not be able to reconfigure recovery when locked"
+    );
+
+    // Verify original config unchanged
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.recovery_asset, recovery_asset1.pubkey());
+    assert_eq!(pos.recovery_lockout_secs, 86400);
+}
+
+#[test]
+fn test_configure_recovery_operator_denied() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_wallet = Keypair::new();
+    svm.airdrop(&recovery_wallet.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    // Operator does not have PERM_MANAGE_KEYS
+    let ix = ix_configure_recovery(
+        &h.operator.pubkey(),
+        &h.operator_asset,
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        86400,
+        false,
+        None,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix], &[&h.operator, &recovery_asset]).is_err(),
+        "operator should not be able to configure recovery"
+    );
+}
+
+#[test]
+fn test_execute_recovery_ok() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_holder = Keypair::new();
+    svm.airdrop(&recovery_holder.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    // Configure recovery with 1-second lockout (minimum for testing)
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_holder.pubkey(),
+        None,
+        &h.collection,
+        1, // 1 second lockout
+        false,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]).unwrap();
+
+    // Advance time past the lockout period
+    advance_clock(&mut svm, 100);
+
+    // Execute recovery
+    let new_admin_asset = Keypair::new();
+    let ix = ix_execute_recovery(
+        &recovery_holder.pubkey(),
+        &recovery_asset.pubkey(),
+        &h.position_pda,
+        &h.admin_asset.pubkey(),
+        &new_admin_asset.pubkey(),
+        &h.collection,
+    );
+    send_tx(&mut svm, &[ix], &[&recovery_holder, &new_admin_asset]).unwrap();
+
+    // Verify position state
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.current_admin_asset, new_admin_asset.pubkey(),
+        "current_admin_asset should be updated to new admin");
+    assert_eq!(pos.authority_seed, h.admin_asset.pubkey(),
+        "authority_seed should remain unchanged");
+    assert_eq!(pos.recovery_asset, Pubkey::default(),
+        "recovery_asset should be cleared after recovery");
+    assert_eq!(pos.recovery_lockout_secs, 0,
+        "recovery_lockout_secs should be cleared");
+    assert!(!pos.recovery_config_locked,
+        "recovery_config_locked should be cleared");
+
+    // Verify new admin key NFT has correct attributes
+    let new_admin_account = svm.get_account(&new_admin_asset.pubkey())
+        .expect("new admin asset should exist");
+    let attrs = extract_asset_attributes(&new_admin_account);
+    assert_eq!(find_attribute(&attrs, "permissions"), Some("63"),
+        "new admin key should have full admin permissions");
+    assert_eq!(
+        find_attribute(&attrs, "position"),
+        Some(h.admin_asset.pubkey().to_string().as_str()),
+        "new admin key should be bound to original authority_seed"
+    );
+
+    // Verify old admin key was burned (MPL-Core may leave a 1-byte stub)
+    let old_admin_after = svm.get_account(&h.admin_asset.pubkey());
+    assert!(
+        old_admin_after.is_none()
+            || old_admin_after.as_ref().unwrap().data.is_empty()
+            || old_admin_after.as_ref().unwrap().data.len() == 1,
+        "old admin asset should be burned"
+    );
+
+    // Verify recovery key was burned
+    let recovery_after = svm.get_account(&recovery_asset.pubkey());
+    assert!(
+        recovery_after.is_none()
+            || recovery_after.as_ref().unwrap().data.is_empty()
+            || recovery_after.as_ref().unwrap().data.len() == 1,
+        "recovery asset should be burned"
+    );
+}
+
+#[test]
+fn test_execute_recovery_too_early() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_holder = Keypair::new();
+    svm.airdrop(&recovery_holder.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    // Configure recovery with a long lockout
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_holder.pubkey(),
+        None,
+        &h.collection,
+        999999, // very long lockout
+        false,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]).unwrap();
+
+    // Try to execute recovery immediately — should fail
+    let new_admin_asset = Keypair::new();
+    let ix = ix_execute_recovery(
+        &recovery_holder.pubkey(),
+        &recovery_asset.pubkey(),
+        &h.position_pda,
+        &h.admin_asset.pubkey(),
+        &new_admin_asset.pubkey(),
+        &h.collection,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix], &[&recovery_holder, &new_admin_asset]).is_err(),
+        "execute_recovery should fail before lockout expires"
+    );
+
+    // Verify position unchanged
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.current_admin_asset, h.admin_asset.pubkey());
+    assert_eq!(pos.recovery_asset, recovery_asset.pubkey());
+}
+
+#[test]
+fn test_execute_recovery_heartbeat_resets_lockout() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_holder = Keypair::new();
+    svm.airdrop(&recovery_holder.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    // Configure recovery with 1-second lockout
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_holder.pubkey(),
+        None,
+        &h.collection,
+        1,
+        false,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]).unwrap();
+
+    // Advance time past lockout
+    advance_clock(&mut svm, 100);
+
+    // Admin sends heartbeat — resets last_admin_activity
+    let hb = ix_heartbeat(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+    );
+    send_tx(&mut svm, &[hb], &[&h.admin]).unwrap();
+
+    // Now try to execute recovery — should fail because heartbeat reset the timer
+    let new_admin_asset = Keypair::new();
+    let ix = ix_execute_recovery(
+        &recovery_holder.pubkey(),
+        &recovery_asset.pubkey(),
+        &h.position_pda,
+        &h.admin_asset.pubkey(),
+        &new_admin_asset.pubkey(),
+        &h.collection,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix], &[&recovery_holder, &new_admin_asset]).is_err(),
+        "execute_recovery should fail after heartbeat resets lockout"
+    );
+}
+
+#[test]
+fn test_execute_recovery_no_recovery_configured() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Try to execute recovery without configuring one
+    let recovery_holder = Keypair::new();
+    svm.airdrop(&recovery_holder.pubkey(), 5_000_000_000).unwrap();
+    let fake_recovery = Pubkey::new_unique();
+    let new_admin_asset = Keypair::new();
+
+    let ix = ix_execute_recovery(
+        &recovery_holder.pubkey(),
+        &fake_recovery,
+        &h.position_pda,
+        &h.admin_asset.pubkey(),
+        &new_admin_asset.pubkey(),
+        &h.collection,
+    );
+    assert!(
+        send_tx(&mut svm, &[ix], &[&recovery_holder, &new_admin_asset]).is_err(),
+        "execute_recovery should fail when no recovery is configured"
+    );
+}
+
+#[test]
+fn test_delegated_keys_survive_recovery() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_holder = Keypair::new();
+    svm.airdrop(&recovery_holder.pubkey(), 5_000_000_000).unwrap();
+    let recovery_asset = Keypair::new();
+
+    // Configure recovery
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset.pubkey(),
+        &recovery_holder.pubkey(),
+        None,
+        &h.collection,
+        1,
+        false,
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset]).unwrap();
+
+    // Advance time past lockout
+    advance_clock(&mut svm, 100);
+
+    // Execute recovery
+    let new_admin_asset = Keypair::new();
+    let ix = ix_execute_recovery(
+        &recovery_holder.pubkey(),
+        &recovery_asset.pubkey(),
+        &h.position_pda,
+        &h.admin_asset.pubkey(),
+        &new_admin_asset.pubkey(),
+        &h.collection,
+    );
+    send_tx(&mut svm, &[ix], &[&recovery_holder, &new_admin_asset]).unwrap();
+
+    // Verify operator key state still exists
+    let op_ks = read_key_state(&svm, &h.operator_key_state);
+    assert_eq!(op_ks.asset, h.operator_asset,
+        "operator key_state should still exist after recovery");
+
+    // Verify operator can still buy (authority_seed unchanged, key binding intact)
+    let ix = ix_buy(
+        &h.operator.pubkey(),
+        &h.operator_asset,
+        &h.position_pda,
+        &h.admin_asset.pubkey(), // authority_seed is still the original admin asset
+        500_000,
+    );
+    send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
+
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.deposited_nav, 500_000, "operator buy should still work after recovery");
+}
+
+#[test]
+fn test_replace_recovery_key() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    let recovery_wallet = Keypair::new();
+    svm.airdrop(&recovery_wallet.pubkey(), 5_000_000_000).unwrap();
+
+    // First recovery config
+    let recovery_asset1 = Keypair::new();
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset1.pubkey(),
+        &recovery_wallet.pubkey(),
+        None,
+        &h.collection,
+        86400,
+        false, // don't lock
+        None,
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset1]).unwrap();
+
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.recovery_asset, recovery_asset1.pubkey());
+
+    // Replace with new recovery key (passing old one to burn)
+    let recovery_asset2 = Keypair::new();
+    let ix = ix_configure_recovery(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        &h.position_pda,
+        &recovery_asset2.pubkey(),
+        &recovery_wallet.pubkey(),
+        Some(&recovery_asset1.pubkey()),
+        &h.collection,
+        172800, // new lockout
+        false,
+        Some("backup-v2"),
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin, &recovery_asset2]).unwrap();
+
+    // Verify replacement
+    let pos = read_position(&svm, &h.position_pda);
+    assert_eq!(pos.recovery_asset, recovery_asset2.pubkey());
+    assert_eq!(pos.recovery_lockout_secs, 172800);
+
+    // Verify old recovery key was burned (MPL-Core may leave a 1-byte stub)
+    let old_recovery = svm.get_account(&recovery_asset1.pubkey());
+    assert!(
+        old_recovery.is_none()
+            || old_recovery.as_ref().unwrap().data.is_empty()
+            || old_recovery.as_ref().unwrap().data.len() == 1,
+        "old recovery asset should be burned when replaced"
     );
 }

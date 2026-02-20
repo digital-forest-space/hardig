@@ -118,6 +118,8 @@ enum Action {
         #[arg(long)]
         index: usize,
     },
+    /// Send heartbeat to prove admin liveness (resets recovery timer)
+    Heartbeat,
     /// Show compact position balances
     Balances,
     /// Transfer protocol admin to a new pubkey (current admin only)
@@ -450,6 +452,7 @@ fn action_to_name(action: &Action) -> String {
         Action::Reinvest => "reinvest".into(),
         Action::AuthorizeKey { .. } => "authorize-key".into(),
         Action::RevokeKey { .. } => "revoke-key".into(),
+        Action::Heartbeat => "heartbeat".into(),
         Action::Balances => "balances".into(),
         Action::TransferAdmin { .. } => "transfer-admin".into(),
         Action::CreateMarketConfig { .. } => "create-market-config".into(),
@@ -524,6 +527,9 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
         }
         Action::Reinvest => {
             app.build_reinvest();
+        }
+        Action::Heartbeat => {
+            app.build_heartbeat();
         }
         Action::AuthorizeKey { wallet, permissions, sell_capacity, sell_refill_slots, borrow_capacity, borrow_refill_slots, name } => {
             app.form_fields = vec![
@@ -725,7 +731,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
                 .position_pda
                 .map(|p| p.to_string())
                 .unwrap_or_default(),
-            admin_asset: pos.admin_asset.to_string(),
+            admin_asset: pos.authority_seed.to_string(),
             role: app.my_permissions.map(permissions_name).unwrap_or_else(|| "None".into()),
             deposited_nav: lamports_to_sol(pos.deposited_nav),
             debt: lamports_to_sol(pos.user_debt),

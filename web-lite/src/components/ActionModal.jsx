@@ -121,7 +121,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
           break;
         }
         case 'revoke': {
-          const adminMint = position.value?.adminAsset;
+          const adminMint = position.value?.currentAdminAsset || position.value?.adminAsset;
           const revocable = keyring.value.filter((k) => !adminMint || !k.mint.equals(adminMint));
           const idx = parseInt(revokeIdx);
           if (idx < 0 || idx >= revocable.length) { setError('Invalid key index'); setPhase('form'); return; }
@@ -391,7 +391,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 <select value={revokeIdx} onChange={(e) => setRevokeIdx(e.target.value)}>
                   {keyring.value
                     .filter((k) => {
-                      const adminMint = position.value?.adminAsset;
+                      const adminMint = position.value?.currentAdminAsset || position.value?.adminAsset;
                       return !adminMint || !k.mint.equals(adminMint);
                     })
                     .map((k, i) => (

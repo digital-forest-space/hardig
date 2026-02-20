@@ -20,8 +20,9 @@ pub struct ExecuteRecovery<'info> {
     #[account(mut)]
     pub recovery_holder: Signer<'info>,
 
-    /// The recovery key NFT (MPL-Core asset).
+    /// The recovery key NFT (MPL-Core asset). Mutable because it gets burned.
     /// CHECK: Validated in handler (owner check, matches position.recovery_asset).
+    #[account(mut)]
     pub recovery_key_asset: UncheckedAccount<'info>,
 
     /// The position to recover.

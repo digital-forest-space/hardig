@@ -368,6 +368,7 @@ impl App {
                 self.enter_authorize_key()
             }
             KeyCode::Char('x') if self.has_perm(PERM_MANAGE_KEYS) => self.enter_revoke_key(),
+            KeyCode::Char('h') if self.has_perm(PERM_MANAGE_KEYS) => self.build_heartbeat(),
             KeyCode::Char('s') if self.can_sell() => self.enter_sell(),
             KeyCode::Char('d') if self.can_borrow() => self.enter_borrow(),
 
@@ -605,7 +606,7 @@ impl App {
 
     fn enter_revoke_key(&mut self) {
         self.form_info = None;
-        let admin_asset_key = self.position.as_ref().map(|p| p.admin_asset);
+        let admin_asset_key = self.position.as_ref().map(|p| p.current_admin_asset);
         let revocable: Vec<(usize, &KeyEntry)> = self
             .keyring
             .iter()
@@ -1089,7 +1090,7 @@ impl App {
     }
 
     pub fn build_revoke_key(&mut self) {
-        let admin_asset_key = self.position.as_ref().map(|p| p.admin_asset);
+        let admin_asset_key = self.position.as_ref().map(|p| p.current_admin_asset);
         let revocable: Vec<&KeyEntry> = self
             .keyring
             .iter()
@@ -1527,6 +1528,40 @@ impl App {
         });
     }
 
+    pub fn build_heartbeat(&mut self) {
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => {
+                self.push_log("No position loaded");
+                return;
+            }
+        };
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => {
+                self.push_log("No key asset");
+                return;
+            }
+        };
+
+        let data = sighash("heartbeat");
+        let accounts = vec![
+            AccountMeta::new_readonly(self.keypair.pubkey(), true), // admin
+            AccountMeta::new_readonly(key_asset, false),            // admin_key_asset
+            AccountMeta::new(position_pda, false),                  // position
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Heartbeat".into(),
+                "Updates last_admin_activity timestamp to prove liveness.".into(),
+                format!("Position: {}", short_pubkey(&position_pda)),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
     pub fn build_transfer_admin(&mut self, new_admin: Pubkey) {
         let (config_pda, _) =
             Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
@@ -1636,8 +1671,8 @@ impl App {
         }
         self.check_protocol();
 
-        // Remember which position was selected before refresh
-        let prev_admin_asset = self.position.as_ref().map(|p| p.admin_asset);
+        // Remember which position was selected before refresh (authority_seed is permanent)
+        let prev_admin_asset = self.position.as_ref().map(|p| p.authority_seed);
         // Check if we should auto-select a newly created position
         let select_asset = self.pending_select_asset.take();
 
@@ -1791,14 +1826,14 @@ impl App {
                 Err(_) => continue,
             };
 
-            if self.check_asset_owner(&pos.admin_asset, &signer) {
+            if self.check_asset_owner(&pos.current_admin_asset, &signer) {
                 seen_positions.insert(*pos_pda);
-                let name = self.read_asset_name(&pos.admin_asset).unwrap_or_default();
+                let name = self.read_asset_name(&pos.current_admin_asset).unwrap_or_default();
                 discovered.push(DiscoveredPosition {
                     position_pda: *pos_pda,
-                    admin_asset: pos.admin_asset,
+                    admin_asset: pos.authority_seed,
                     permissions: PRESET_ADMIN,
-                    key_asset: pos.admin_asset,
+                    key_asset: pos.current_admin_asset,
                     key_state_pda: None,
                     deposited_nav: pos.deposited_nav,
                     user_debt: pos.user_debt,
@@ -1825,7 +1860,7 @@ impl App {
                 None => continue,
             };
 
-            // Find the position whose admin_asset matches this key's binding
+            // Find the position whose authority_seed matches this key's binding
             for (pos_pda, pos_acc) in &positions {
                 if seen_positions.contains(pos_pda) {
                     continue;
@@ -1834,13 +1869,13 @@ impl App {
                     Ok(p) => p,
                     Err(_) => continue,
                 };
-                if pos.admin_asset == bound_to {
+                if pos.authority_seed == bound_to {
                     let perms = self.read_asset_permissions(&ks.asset).unwrap_or(0);
                     seen_positions.insert(*pos_pda);
-                    let name = self.read_asset_name(&pos.admin_asset).unwrap_or_default();
+                    let name = self.read_asset_name(&pos.current_admin_asset).unwrap_or_default();
                     discovered.push(DiscoveredPosition {
                         position_pda: *pos_pda,
-                        admin_asset: pos.admin_asset,
+                        admin_asset: pos.authority_seed,
                         permissions: perms,
                         key_asset: ks.asset,
                         key_state_pda: Some(*ks_pda),
@@ -1922,7 +1957,7 @@ impl App {
             }
         }
 
-        // Derive per-position Mayflower addresses from admin_asset
+        // Derive per-position Mayflower addresses from authority_seed (permanent PDA seed)
         let (program_pda, _) = Pubkey::find_program_address(
             &[b"authority", admin_asset.as_ref()],
             &hardig::ID,
@@ -1950,17 +1985,19 @@ impl App {
         self.wsol_ata = get_ata(&program_pda, &base_mint);
         self.nav_sol_ata = get_ata(&program_pda, &nav_mint);
 
+        // Save current_admin_asset before moving pos
+        let current_admin = pos.current_admin_asset;
         self.position = Some(pos);
 
         // Build keyring: admin key + all delegated keys
         self.keyring.clear();
         self.key_cursor = 0;
         let signer = self.keypair.pubkey();
-        let signer_is_admin = self.check_asset_owner(&admin_asset, &signer);
-        let admin_name = self.read_asset_name(&admin_asset).unwrap_or_default();
+        let signer_is_admin = self.check_asset_owner(&current_admin, &signer);
+        let admin_name = self.read_asset_name(&current_admin).unwrap_or_default();
         self.keyring.push(KeyEntry {
             pda: pos_pda,
-            asset: admin_asset,
+            asset: current_admin,
             permissions: PRESET_ADMIN,
             held_by_signer: signer_is_admin,
             name: admin_name,
