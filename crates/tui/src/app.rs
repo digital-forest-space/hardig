@@ -93,6 +93,7 @@ pub struct DiscoveredPosition {
     pub deposited_nav: u64,
     pub user_debt: u64,
     pub is_admin: bool,
+    pub is_recovery: bool,
     /// On-chain MPL-Core asset name (e.g. "Härdig Admin Key - Savings").
     pub name: String,
 }
@@ -2104,6 +2105,7 @@ impl App {
                     deposited_nav: pos.deposited_nav,
                     user_debt: pos.user_debt,
                     is_admin: true,
+                    is_recovery: false,
                     name,
                 });
             }
@@ -2148,6 +2150,7 @@ impl App {
                         deposited_nav: pos.deposited_nav,
                         user_debt: pos.user_debt,
                         is_admin: false,
+                        is_recovery: false,
                         name,
                     });
                     break;
@@ -2155,9 +2158,41 @@ impl App {
             }
         }
 
-        // Sort: admin positions first, then by deposited_nav descending
+        // Step 5: Check recovery keys — for each position with a recovery_asset,
+        // check if signer owns that recovery key NFT
+        for (pos_pda, pos_acc) in &positions {
+            if seen_positions.contains(pos_pda) {
+                continue;
+            }
+            let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if pos.recovery_asset == Pubkey::default() {
+                continue;
+            }
+            if self.check_asset_owner(&pos.recovery_asset, &signer) {
+                seen_positions.insert(*pos_pda);
+                let name = self.read_asset_name(&pos.recovery_asset).unwrap_or_default();
+                discovered.push(DiscoveredPosition {
+                    position_pda: *pos_pda,
+                    admin_asset: pos.authority_seed,
+                    permissions: 0,
+                    key_asset: pos.recovery_asset,
+                    key_state_pda: None,
+                    deposited_nav: pos.deposited_nav,
+                    user_debt: pos.user_debt,
+                    is_admin: false,
+                    is_recovery: true,
+                    name,
+                });
+            }
+        }
+
+        // Sort: admin positions first, then delegated, then recovery; by deposited_nav descending
         discovered.sort_by(|a, b| {
             b.is_admin.cmp(&a.is_admin)
+                .then(a.is_recovery.cmp(&b.is_recovery))
                 .then(b.deposited_nav.cmp(&a.deposited_nav))
         });
 

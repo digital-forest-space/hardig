@@ -117,6 +117,8 @@ fn draw_position_list(frame: &mut Frame, app: &App, area: Rect) {
         let marker = if i == app.position_list_cursor { ">" } else { " " };
         let role = if dp.is_admin {
             "Admin".to_string()
+        } else if dp.is_recovery {
+            "Recovery".to_string()
         } else {
             app::permissions_name(dp.permissions)
         };
@@ -857,7 +859,7 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 }
                 // Execute recovery is available to anyone holding a recovery key
                 if app.position.as_ref().map(|p| p.recovery_asset != solana_sdk::pubkey::Pubkey::default()).unwrap_or(false) {
-                    row2.extend([action_key("[e]"), action_label("xecute  ")]);
+                    row2.extend([action_key("[e]"), action_label("recover  ")]);
                 }
                 row2.extend([action_key("[n]"), action_label("ew  ")]);
                 row2.extend([action_key("[r]"), action_label("efresh  ")]);
