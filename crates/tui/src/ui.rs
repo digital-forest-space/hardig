@@ -36,6 +36,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     match app.screen {
         Screen::PositionList => draw_position_list(frame, app, chunks[1]),
         Screen::Dashboard => draw_dashboard(frame, app, chunks[1]),
+        Screen::MarketPicker => draw_market_picker(frame, app, chunks[1]),
         Screen::Form => draw_form(frame, app, chunks[1]),
         Screen::Confirm => draw_confirm(frame, app, chunks[1]),
         Screen::Result => draw_result(frame, app, chunks[1]),
@@ -166,6 +167,57 @@ fn draw_position_list(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(12),
         Constraint::Length(16),
         Constraint::Length(16),
+    ];
+
+    let table = Table::new(rows, widths).header(header);
+    frame.render_widget(table, inner);
+}
+
+fn draw_market_picker(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Select Market ({}) ", app.loaded_markets.len()))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.loaded_markets.is_empty() {
+        let text = Paragraph::new("  No markets loaded.");
+        frame.render_widget(text, inner);
+        return;
+    }
+
+    let header = Row::new(vec!["", "Market", "Floor Price", "Status"])
+        .style(Style::default().add_modifier(Modifier::BOLD))
+        .bottom_margin(0);
+
+    let rows: Vec<Row> = app
+        .loaded_markets
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let marker = if i == app.market_picker_cursor { ">" } else { " " };
+            let status = if m.supported { "Supported" } else { "New" };
+            let style = if i == app.market_picker_cursor {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                marker.to_string(),
+                m.nav_symbol.clone(),
+                format!("{:.6}", m.floor_price),
+                status.to_string(),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(2),
+        Constraint::Min(16),
+        Constraint::Length(14),
+        Constraint::Length(12),
     ];
 
     let table = Table::new(rows, widths).header(header);
@@ -805,6 +857,13 @@ fn draw_action_bar(frame: &mut Frame, app: &App, area: Rect) {
                 action_key("[Enter]"), action_label("Open  "),
                 action_key("[n]"), action_label("New  "),
                 action_key("[r]"), action_label("Refresh  "),
+                action_key("[q]"), action_label("Quit"),
+            ]),
+        ],
+        Screen::MarketPicker => vec![
+            Line::from(vec![
+                action_key("[Enter]"), action_label("Select  "),
+                action_key("[Esc]"), action_label("Cancel  "),
                 action_key("[q]"), action_label("Quit"),
             ]),
         ],

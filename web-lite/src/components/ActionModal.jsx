@@ -16,6 +16,7 @@ import {
 import {
   buildInitializeProtocol,
   buildCreatePosition,
+  buildCreateMarketConfig,
   buildBuy,
   buildWithdraw,
   buildBorrow,
@@ -24,7 +25,9 @@ import {
   buildAuthorizeKey,
   buildRevokeKey,
 } from '../instructions/index.js';
+import { availableMarkets, marketEntryToPubkeys } from '../markets.js';
 import { parseSolToLamports, lamportsToSol, shortPubkey, formatDelta, permissionsName, navTokenName, explorerUrl, PERM_BUY, PERM_SELL, PERM_BORROW, PERM_REPAY, PERM_REINVEST, PERM_MANAGE_KEYS, PERM_LIMITED_SELL, PERM_LIMITED_BORROW, PRESET_OPERATOR } from '../utils.js';
+import { deriveMarketConfigPda } from '../constants.js';
 
 // Phase: form | building | confirm | result
 export function ActionModal({ action, onClose, onRefresh }) {
@@ -52,6 +55,7 @@ export function ActionModal({ action, onClose, onRefresh }) {
   const [borrowMinutes, setBorrowMinutes] = useState('');
   const [positionName, setPositionName] = useState('');
   const [keyName, setKeyName] = useState('');
+  const [selectedMarketIdx, setSelectedMarketIdx] = useState('0');
 
   const walletPk = wallet.publicKey;
 
@@ -73,7 +77,33 @@ export function ActionModal({ action, onClose, onRefresh }) {
         case 'createPosition': {
           const pName = positionName.trim() || null;
           if (pName && pName.length > 32) { setError('Label must be 32 characters or less'); setPhase('form'); return; }
-          built = await buildCreatePosition(program, walletPk, pName);
+          const markets = availableMarkets.value;
+          const idx = parseInt(selectedMarketIdx) || 0;
+          const selectedEntry = markets.length > 0 ? markets[idx] : null;
+          const mEntry = selectedEntry ? marketEntryToPubkeys(selectedEntry) : null;
+          if (mEntry) {
+            // Check if MarketConfig PDA exists; if not, auto-create it
+            const [mcPda] = deriveMarketConfigPda(mEntry.navMint);
+            const mcAcc = await connection.getAccountInfo(mcPda);
+            if (!mcAcc) {
+              // Build createMarketConfig IX and prepend it
+              const mcBuilt = await buildCreateMarketConfig(
+                program, walletPk,
+                mEntry.navMint, mEntry.baseMint, mEntry.marketGroup, mEntry.marketMeta,
+                mEntry.mayflowerMarket, mEntry.marketBaseVault, mEntry.marketNavVault, mEntry.feeVault
+              );
+              const posBuilt = await buildCreatePosition(program, walletPk, pName, mEntry);
+              built = {
+                description: [...mcBuilt.description, ...posBuilt.description],
+                instructions: [...mcBuilt.instructions, ...posBuilt.instructions],
+                extraSigners: [...mcBuilt.extraSigners, ...posBuilt.extraSigners],
+              };
+            } else {
+              built = await buildCreatePosition(program, walletPk, pName, mEntry);
+            }
+          } else {
+            built = await buildCreatePosition(program, walletPk, pName);
+          }
           break;
         }
         case 'buy': {
@@ -266,20 +296,37 @@ export function ActionModal({ action, onClose, onRefresh }) {
             )}
 
             {action === 'createPosition' && (
-              <div class="form-group">
-                <label>Label (optional)</label>
-                <input
-                  type="text"
-                  value={positionName}
-                  onInput={(e) => setPositionName(e.target.value)}
-                  placeholder="e.g. Savings"
-                  maxLength={32}
-                  autoFocus
-                />
-                <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
-                  Appended to base name: H&auml;rdig Admin Key - <em>{positionName.trim() || '...'}</em>
+              <>
+                {availableMarkets.value.length > 0 && (
+                  <div class="form-group">
+                    <label>Market</label>
+                    <select
+                      value={selectedMarketIdx}
+                      onChange={(e) => setSelectedMarketIdx(e.target.value)}
+                    >
+                      {availableMarkets.value.map((m, i) => (
+                        <option key={i} value={i}>
+                          {m.navSymbol}{m.floorPrice ? ` (floor: ${m.floorPrice.toFixed(6)})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div class="form-group">
+                  <label>Label (optional)</label>
+                  <input
+                    type="text"
+                    value={positionName}
+                    onInput={(e) => setPositionName(e.target.value)}
+                    placeholder="e.g. Savings"
+                    maxLength={32}
+                    autoFocus
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                    Appended to base name: H&auml;rdig Admin Key - <em>{positionName.trim() || '...'}</em>
+                  </div>
                 </div>
-              </div>
+              </>
             )}
 
             {action === 'authorize' && (

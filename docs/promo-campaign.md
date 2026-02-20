@@ -91,18 +91,48 @@ to each in batch transactions.
 
 ### 2. Landing Page
 
-Public-facing page showing:
-- Nirvana / Hardig explainer
-- Current borrow capacity (live from RPC)
-- Number of active keys issued
-- "Capacity available" / "Come back later" status
-- Instructions for claiming
+Separate project from web-lite (which is an admin tool). This is a public-facing
+marketing site with proper design, targeting end users who may have never heard
+of Härdig or Mayflower.
 
-Can be built on top of existing web-lite state layer.
+Should include:
+- Nirvana / Härdig explainer (what is navSOL, what are keys, why no liquidation risk)
+- Live borrow capacity and active keys count (read from RPC)
+- "Capacity available" / "Come back later" status
+- One-click "Claim Key" flow with wallet connect
+- Instructions for borrowing after claiming
+- "Run your own campaign" section: how anyone can set up their own position,
+  configure a promo, and fund a giveaway — with economics calculator and
+  step-by-step guide
+
+Can reuse web-lite's RPC/state utilities as a shared package, but the UI and
+hosting are independent.
 
 ### 3. Self-Service Key Claim (on-chain)
 
 The big unlock for "open forever" without manual admin involvement.
+
+#### Code Isolation
+
+Promo code lives inside the Härdig program but is isolated for future extraction:
+
+```
+programs/hardig/src/
+  state.rs                    # core state (PositionNFT, ProtocolConfig, etc.)
+  state/promo.rs              # PromoConfig, ClaimReceipt (promo-only state)
+  instructions/
+    mod.rs                    # core instruction re-exports
+    promo/
+      mod.rs                  # promo instruction re-exports
+      create_promo.rs
+      update_promo.rs
+      claim_promo_key.rs
+```
+
+Promo instructions import from core (validate_key, metadata_uri, ProtocolConfig)
+but core never imports from promo. This one-way dependency makes it straightforward
+to extract into a separate program later if the keyring becomes shared across
+multiple consumers.
 
 #### Overview
 
@@ -233,6 +263,37 @@ on-chain using PermanentBurnDelegate). This can be used to:
 - Remove inactive users to free conceptual slots
 - Shut down the campaign if needed
 - Run in waves: issue batch, let it drain, revoke, re-issue
+
+## Future Features
+
+### Collection-Gated Claims
+
+Gate promo claims behind ownership of an NFT from a specific collection. Adds
+`gate_collection: Option<Pubkey>` to PromoConfig. When set, `claim_promo_key`
+requires the claimer to pass a `gate_asset` account — handler verifies the
+claimer owns it and it belongs to the required collection.
+
+MPL-Core collections are straightforward (collection key is in the asset data).
+Legacy Token Metadata NFTs need more accounts (mint, token account, metadata
+PDA) and a check on `collection.key` + `collection.verified`. Start with
+MPL-Core only, add legacy support if needed.
+
+### Batch Key Issuance (CLI)
+
+CLI command for admin-curated key distribution without self-service:
+
+    hardig-tui batch-authorize \
+      --permissions LimitedBorrow \
+      --capacity 0.02 \
+      --refill-days 90 \
+      --wallets wallets.csv
+
+Reads wallet addresses from CSV, issues keys in batch transactions.
+
+### Notification System
+
+Off-chain script monitoring borrow capacity, posting "time to claim" alerts
+to Telegram/Discord. No program changes needed — just reads on-chain state.
 
 ## Open Questions
 

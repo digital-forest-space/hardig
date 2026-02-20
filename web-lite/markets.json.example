@@ -1,0 +1,15 @@
+[
+  {
+    "mayflowerMarket": "A5M1nWfi6ATSamEJ1ASr2FC87BMwijthTbNRYG7BhYSc",
+    "marketMetadata": "DotD4dZAyr4Kb6AD3RHid8VgmsHUzWF6LRd4WvAMezRj",
+    "baseMint": "So11111111111111111111111111111111111111112",
+    "navMint": "navSnrYJkCxMiyhM3F7K889X1u8JFLVHHLxiyo6Jjqo",
+    "marketGroup": "Lmdgb4NE4T3ubmQZQZQZ7t4UP6A98NdVbmZPcoEdkdC",
+    "baseVault": "43vPhZeow3pgYa6zrPXASVQhdXTMfowyfNK87BYizhnL",
+    "navVault": "BCYzijbWwmqRnsTWjGhHbneST2emQY36WcRAkbkhsQMt",
+    "feeVault": "B8jccpiKZjapgfw1ay6EH3pPnxqTmimsm2KsTZ9LSmjf",
+    "navSymbol": "navSOL",
+    "floorPrice": 1.079,
+    "supported": true
+  }
+]

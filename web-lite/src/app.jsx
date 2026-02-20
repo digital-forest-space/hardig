@@ -18,6 +18,7 @@ import {
 } from './state.js';
 import { checkProtocol, discoverPosition, selectActivePosition } from './discovery.js';
 import { refreshMayflowerState } from './mayflower.js';
+import { loadMarkets } from './markets.js';
 import { WalletButton } from './components/WalletButton.jsx';
 import { ClusterSelector } from './components/ClusterSelector.jsx';
 import { Dashboard } from './components/Dashboard.jsx';
@@ -33,6 +34,7 @@ function AppInner() {
     refreshing.value = true;
     pushLog('Refreshing...');
     try {
+      await loadMarkets(connection);
       await checkProtocol(connection);
       await discoverPosition(connection, wallet.publicKey);
       await refreshMayflowerState(connection);

@@ -79,6 +79,7 @@ fn sighash(name: &str) -> Vec<u8> {
 pub enum Screen {
     PositionList,
     Dashboard,
+    MarketPicker,
     Form,
     Confirm,
     Result,
@@ -215,6 +216,12 @@ pub struct App {
 
     // After creating a position, auto-select this admin asset on next refresh
     pending_select_asset: Option<Pubkey>,
+
+    // Market picker state (from --markets-file)
+    pub loaded_markets: Vec<crate::MarketEntry>,
+    pub market_picker_cursor: usize,
+    pub market_name_override: Option<String>,
+    pub pending_market_addresses: Option<(Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Pubkey, Pubkey)>,
 }
 
 impl App {
@@ -273,6 +280,10 @@ impl App {
             pre_tx_snapshot: None,
             last_tx_signature: None,
             pending_select_asset: None,
+            loaded_markets: Vec::new(),
+            market_picker_cursor: 0,
+            market_name_override: None,
+            pending_market_addresses: None,
         };
         app.push_log("Welcome to Härdig TUI");
         app.push_log(format!("Wallet: {}", app.keypair.pubkey()));
@@ -311,6 +322,7 @@ impl App {
                 match self.screen {
                     Screen::PositionList => self.handle_position_list(key.code),
                     Screen::Dashboard => self.handle_dashboard(key.code),
+                    Screen::MarketPicker => self.handle_market_picker(key.code),
                     Screen::Form => self.handle_form(key.code),
                     Screen::Confirm => self.handle_confirm(key.code),
                     Screen::Result => self.handle_result(key.code),
@@ -345,6 +357,55 @@ impl App {
                 if !self.discovered_positions.is_empty() {
                     let idx = self.position_list_cursor;
                     self.reselect_position(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Market picker handler
+    // -----------------------------------------------------------------------
+
+    fn handle_market_picker(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Esc => {
+                self.screen = Screen::Dashboard;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.market_picker_cursor > 0 {
+                    self.market_picker_cursor -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.loaded_markets.is_empty()
+                    && self.market_picker_cursor < self.loaded_markets.len() - 1
+                {
+                    self.market_picker_cursor += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if !self.loaded_markets.is_empty() {
+                    let entry = &self.loaded_markets[self.market_picker_cursor];
+                    match entry.to_pubkeys() {
+                        Ok(pks) => {
+                            self.market_name_override = Some(entry.nav_symbol.clone());
+                            self.pending_market_addresses = Some(pks);
+                            // Transition to create position form
+                            self.screen = Screen::Form;
+                            self.form_info = None;
+                            self.form_readonly = false;
+                            self.form_locked = false;
+                            self.form_kind = Some(FormKind::CreatePosition);
+                            self.form_fields = vec![("Label (optional)".into(), String::new())];
+                            self.input_field = 0;
+                            self.input_buf.clear();
+                        }
+                        Err(e) => {
+                            self.push_log(format!("Invalid market data: {}", e));
+                        }
+                    }
                 }
             }
             _ => {}
@@ -609,6 +670,33 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn enter_create_position(&mut self) {
+        // Clear any previous market selection
+        self.pending_market_addresses = None;
+        self.market_name_override = None;
+
+        if self.loaded_markets.len() > 1 {
+            // Show market picker first
+            self.market_picker_cursor = 0;
+            self.screen = Screen::MarketPicker;
+            return;
+        }
+
+        if self.loaded_markets.len() == 1 {
+            // Auto-select the only market
+            let entry = &self.loaded_markets[0];
+            match entry.to_pubkeys() {
+                Ok(pks) => {
+                    self.market_name_override = Some(entry.nav_symbol.clone());
+                    self.pending_market_addresses = Some(pks);
+                }
+                Err(e) => {
+                    self.push_log(format!("Invalid market data: {}", e));
+                    return;
+                }
+            }
+        }
+
+        // Fall through to form (default navSOL behavior if no markets loaded)
         self.screen = Screen::Form;
         self.form_info = None;
         self.form_readonly = false;
@@ -724,7 +812,10 @@ impl App {
 
     fn submit_form(&mut self) {
         match self.form_kind {
-            Some(FormKind::CreatePosition) => self.build_create_position(None),
+            Some(FormKind::CreatePosition) => {
+                let nav_mint = self.pending_market_addresses.map(|(nm, ..)| nm);
+                self.build_create_position(nav_mint);
+            }
             Some(FormKind::AuthorizeKey) => self.build_authorize_key(),
             Some(FormKind::RevokeKey) => self.build_revoke_key(),
             Some(FormKind::Buy) => self.build_buy(),
@@ -869,25 +960,31 @@ impl App {
                 }
             }
             Err(_) => {
-                if nav_mint.is_some() {
+                // Try to auto-create MarketConfig from pending_market_addresses or default navSOL
+                let (nm, bm, mg, mm, mfm, mbv, mnv, fv) = if let Some(addrs) = self.pending_market_addresses {
+                    addrs
+                } else if nav_mint.is_some() {
                     self.push_log(format!(
                         "No MarketConfig found for nav-mint {}. Create it first with create-market-config.",
                         nav_mint_key,
                     ));
                     return;
-                }
-                // Auto-create default navSOL MarketConfig
+                } else {
+                    (DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT, DEFAULT_MARKET_GROUP,
+                     DEFAULT_MARKET_META, DEFAULT_MAYFLOWER_MARKET, DEFAULT_MARKET_BASE_VAULT,
+                     DEFAULT_MARKET_NAV_VAULT, DEFAULT_FEE_VAULT)
+                };
                 let (config_pda, _) =
                     Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
                 let mut data = sighash("create_market_config");
-                data.extend_from_slice(DEFAULT_NAV_SOL_MINT.as_ref());
-                data.extend_from_slice(DEFAULT_WSOL_MINT.as_ref());
-                data.extend_from_slice(DEFAULT_MARKET_GROUP.as_ref());
-                data.extend_from_slice(DEFAULT_MARKET_META.as_ref());
-                data.extend_from_slice(DEFAULT_MAYFLOWER_MARKET.as_ref());
-                data.extend_from_slice(DEFAULT_MARKET_BASE_VAULT.as_ref());
-                data.extend_from_slice(DEFAULT_MARKET_NAV_VAULT.as_ref());
-                data.extend_from_slice(DEFAULT_FEE_VAULT.as_ref());
+                data.extend_from_slice(nm.as_ref());
+                data.extend_from_slice(bm.as_ref());
+                data.extend_from_slice(mg.as_ref());
+                data.extend_from_slice(mm.as_ref());
+                data.extend_from_slice(mfm.as_ref());
+                data.extend_from_slice(mbv.as_ref());
+                data.extend_from_slice(mnv.as_ref());
+                data.extend_from_slice(fv.as_ref());
                 let accounts = vec![
                     AccountMeta::new(self.keypair.pubkey(), true),
                     AccountMeta::new_readonly(config_pda, false),
@@ -898,14 +995,14 @@ impl App {
                 description.push(format!("Create MarketConfig: {}", short_pubkey(&mc_pda)));
                 // Build a synthetic MarketConfig for PDA derivations
                 MarketConfig {
-                    nav_mint: DEFAULT_NAV_SOL_MINT,
-                    base_mint: DEFAULT_WSOL_MINT,
-                    market_group: DEFAULT_MARKET_GROUP,
-                    market_meta: DEFAULT_MARKET_META,
-                    mayflower_market: DEFAULT_MAYFLOWER_MARKET,
-                    market_base_vault: DEFAULT_MARKET_BASE_VAULT,
-                    market_nav_vault: DEFAULT_MARKET_NAV_VAULT,
-                    fee_vault: DEFAULT_FEE_VAULT,
+                    nav_mint: nm,
+                    base_mint: bm,
+                    market_group: mg,
+                    market_meta: mm,
+                    mayflower_market: mfm,
+                    market_base_vault: mbv,
+                    market_nav_vault: mnv,
+                    fee_vault: fv,
                     bump: 0,
                 }
             }
@@ -937,7 +1034,8 @@ impl App {
         };
 
         // Resolve market name from nav_mint for the on-chain attribute
-        let market_name = nav_token_name(&mc.nav_mint);
+        let market_name = self.market_name_override.take()
+            .unwrap_or_else(|| nav_token_name(&mc.nav_mint).to_string());
 
         let mut data = sighash("create_position");
         data.extend_from_slice(&0u16.to_le_bytes());

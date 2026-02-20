@@ -15,24 +15,38 @@ import {
 import { collection, marketConfig, marketConfigPda } from '../state.js';
 import { shortPubkey, navTokenName } from '../utils.js';
 
-export async function buildCreatePosition(program, wallet, name = null) {
+/**
+ * @param {object} program - Anchor program instance
+ * @param {PublicKey} wallet - Payer/admin wallet
+ * @param {string|null} name - Optional label suffix
+ * @param {object|null} marketEntry - Optional market entry from marketEntryToPubkeys()
+ *   { navMint, baseMint, marketGroup, marketMeta, mayflowerMarket, marketBaseVault, marketNavVault, feeVault, navSymbol }
+ */
+export async function buildCreatePosition(program, wallet, name = null, marketEntry = null) {
   const assetKp = Keypair.generate();
   const adminAsset = assetKp.publicKey;
   const [positionPda] = derivePositionPda(adminAsset);
   const [programPda] = deriveProgramPda(adminAsset);
   const [configPda] = deriveConfigPda();
 
-  // Use loaded market config or derive default
-  const mcPda = marketConfigPda.value || deriveMarketConfigPda(DEFAULT_NAV_SOL_MINT)[0];
-  const mc = marketConfig.value;
-  const marketMeta = mc ? mc.marketMeta : DEFAULT_MARKET_META;
-  const navMint = mc ? mc.navMint : DEFAULT_NAV_SOL_MINT;
+  // Use market entry if provided, otherwise fall back to loaded market config or default
+  let mcPda, marketMeta, navMint, marketName;
+  if (marketEntry) {
+    [mcPda] = deriveMarketConfigPda(marketEntry.navMint);
+    marketMeta = marketEntry.marketMeta;
+    navMint = marketEntry.navMint;
+    marketName = marketEntry.navSymbol;
+  } else {
+    mcPda = marketConfigPda.value || deriveMarketConfigPda(DEFAULT_NAV_SOL_MINT)[0];
+    const mc = marketConfig.value;
+    marketMeta = mc ? mc.marketMeta : DEFAULT_MARKET_META;
+    navMint = mc ? mc.navMint : DEFAULT_NAV_SOL_MINT;
+    marketName = navTokenName(navMint);
+  }
 
   const [ppPda] = derivePersonalPosition(programPda, marketMeta);
   const [escrowPda] = derivePersonalPositionEscrow(ppPda);
   const [logPda] = deriveLogAccount();
-
-  const marketName = navTokenName(navMint);
 
   const ix = await program.methods
     .createPosition(0, name, marketName)
@@ -60,6 +74,7 @@ export async function buildCreatePosition(program, wallet, name = null) {
   return {
     description: [
       'Create Position',
+      `Market: ${marketName}`,
       `Admin Asset: ${shortPubkey(adminAsset)}`,
       `Position PDA: ${shortPubkey(positionPda)}`,
     ],

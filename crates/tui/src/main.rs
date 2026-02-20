@@ -34,6 +34,10 @@ struct Cli {
     #[arg(long, global = true)]
     position: Option<String>,
 
+    /// Path to a markets JSON file (from discover_markets.dart)
+    #[arg(long, global = true)]
+    markets_file: Option<String>,
+
     #[command(subcommand)]
     action: Option<Action>,
 }
@@ -56,8 +60,11 @@ enum Action {
     CreatePosition {
         /// Nav token mint to use (defaults to navSOL).
         /// When specified, the MarketConfig for this mint must already exist on-chain.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "market")]
         nav_mint: Option<String>,
+        /// Market name (e.g. "navSOL") — resolved from --markets-file
+        #[arg(long, conflicts_with = "nav_mint")]
+        market: Option<String>,
         /// Optional name for the position NFT (max 32 characters)
         #[arg(long)]
         name: Option<String>,
@@ -153,10 +160,10 @@ enum Action {
     },
     /// Create a MarketConfig PDA (protocol admin only)
     CreateMarketConfig {
-        /// Market name shorthand (e.g. navSOL) — fetches addresses from API
-        #[arg(long, requires = "markets_url", conflicts_with_all = ["nav_mint", "base_mint", "market_group", "market_meta", "mayflower_market", "market_base_vault", "market_nav_vault", "fee_vault"])]
+        /// Market name shorthand (e.g. navSOL) — fetches addresses from API or --markets-file
+        #[arg(long, conflicts_with_all = ["nav_mint", "base_mint", "market_group", "market_meta", "mayflower_market", "market_base_vault", "market_nav_vault", "fee_vault"])]
         market: Option<String>,
-        /// URL of the markets API (required with --market)
+        /// URL of the markets API (required with --market when --markets-file not provided)
         #[arg(long, requires = "market")]
         markets_url: Option<String>,
         /// Nav token mint (e.g. navSOL)
@@ -357,6 +364,141 @@ fn resolve_market(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// Markets file support (from discover_markets.dart JSON output)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketEntry {
+    pub nav_symbol: String,
+    pub nav_mint: String,
+    pub base_mint: String,
+    pub market_group: String,
+    pub market_metadata: String,
+    pub mayflower_market: String,
+    pub base_vault: String,
+    pub nav_vault: String,
+    pub fee_vault: String,
+    #[serde(default)]
+    pub floor_price: f64,
+    #[serde(default)]
+    pub supported: bool,
+}
+
+impl MarketEntry {
+    /// Parse the 8 pubkeys needed for create_market_config / create_position.
+    pub fn to_pubkeys(
+        &self,
+    ) -> Result<
+        (
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+            solana_sdk::pubkey::Pubkey,
+        ),
+        String,
+    > {
+        use std::str::FromStr;
+        let pk = |val: &str, field: &str| {
+            solana_sdk::pubkey::Pubkey::from_str(val)
+                .map_err(|_| format!("Invalid pubkey for '{}': {}", field, val))
+        };
+        Ok((
+            pk(&self.nav_mint, "navMint")?,
+            pk(&self.base_mint, "baseMint")?,
+            pk(&self.market_group, "marketGroup")?,
+            pk(&self.market_metadata, "marketMetadata")?,
+            pk(&self.mayflower_market, "mayflowerMarket")?,
+            pk(&self.base_vault, "baseVault")?,
+            pk(&self.nav_vault, "navVault")?,
+            pk(&self.fee_vault, "feeVault")?,
+        ))
+    }
+}
+
+fn load_markets_file(path: &str) -> Result<Vec<MarketEntry>, String> {
+    let data =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+    serde_json::from_str(&data).map_err(|e| format!("Failed to parse markets JSON: {}", e))
+}
+
+fn find_market_by_name<'a>(
+    markets: &'a [MarketEntry],
+    name: &str,
+) -> Result<&'a MarketEntry, String> {
+    let needle = name.to_lowercase();
+    markets
+        .iter()
+        .find(|m| m.nav_symbol.to_lowercase() == needle)
+        .ok_or_else(|| {
+            let available: Vec<&str> = markets.iter().map(|m| m.nav_symbol.as_str()).collect();
+            format!(
+                "Market \"{}\" not found. Available: {}",
+                name,
+                available.join(", ")
+            )
+        })
+}
+
+/// Verify market entries against on-chain state. Returns only verified entries.
+fn verify_markets(rpc: &solana_client::rpc_client::RpcClient, markets: Vec<MarketEntry>) -> Vec<MarketEntry> {
+    use std::str::FromStr;
+
+    let mayflower_program = solana_sdk::pubkey::Pubkey::from_str("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA").unwrap();
+    let spl_token = solana_sdk::pubkey::Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+    let token_2022 = solana_sdk::pubkey::Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap();
+
+    // Collect all pubkeys to fetch in one batch
+    let mut keys_to_fetch = Vec::new();
+    let mut valid_indices = Vec::new();
+    for (i, m) in markets.iter().enumerate() {
+        let mf_market = match solana_sdk::pubkey::Pubkey::from_str(&m.mayflower_market) {
+            Ok(pk) => pk,
+            Err(_) => continue,
+        };
+        let nav_mint = match solana_sdk::pubkey::Pubkey::from_str(&m.nav_mint) {
+            Ok(pk) => pk,
+            Err(_) => continue,
+        };
+        valid_indices.push((i, keys_to_fetch.len()));
+        keys_to_fetch.push(mf_market);
+        keys_to_fetch.push(nav_mint);
+    }
+
+    // Batch fetch
+    let accounts = match rpc.get_multiple_accounts(&keys_to_fetch) {
+        Ok(accs) => accs,
+        Err(e) => {
+            eprintln!("[WARN] Failed to verify markets: {}", e);
+            return markets; // Return unverified on RPC failure
+        }
+    };
+
+    let mut verified = Vec::new();
+    for (market_idx, fetch_offset) in &valid_indices {
+        let mf_acc = &accounts[*fetch_offset];
+        let mint_acc = &accounts[*fetch_offset + 1];
+
+        let mf_ok = mf_acc.as_ref().map_or(false, |a| a.owner == mayflower_program);
+        let mint_ok = mint_acc.as_ref().map_or(false, |a| a.owner == spl_token || a.owner == token_2022);
+
+        if mf_ok && mint_ok {
+            verified.push(markets[*market_idx].clone());
+        } else {
+            eprintln!(
+                "[WARN] Market {} failed verification (mf={}, mint={}), skipping",
+                markets[*market_idx].nav_symbol, mf_ok, mint_ok
+            );
+        }
+    }
+    verified
+}
+
 fn cluster_to_url(cluster: &str) -> &str {
     match cluster {
         "localnet" | "localhost" => "http://127.0.0.1:8899",
@@ -377,14 +519,14 @@ fn main() -> io::Result<()> {
 
     match cli.action {
         Some(action) => {
-            run_oneshot(rpc_url, keypair, cli.verbose, cli.position, action);
+            run_oneshot(rpc_url, keypair, cli.verbose, cli.position, cli.markets_file.as_deref(), action);
             Ok(())
         }
-        None => run_interactive(rpc_url, keypair),
+        None => run_interactive(rpc_url, keypair, cli.markets_file.as_deref()),
     }
 }
 
-fn run_interactive(rpc_url: &str, keypair: solana_sdk::signature::Keypair) -> io::Result<()> {
+fn run_interactive(rpc_url: &str, keypair: solana_sdk::signature::Keypair, markets_file: Option<&str>) -> io::Result<()> {
     // Panic hook: always restore terminal.
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
@@ -400,6 +542,21 @@ fn run_interactive(rpc_url: &str, keypair: solana_sdk::signature::Keypair) -> io
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = app::App::new(rpc_url, keypair, false);
+
+    // Load and verify markets file if provided
+    if let Some(path) = markets_file {
+        match load_markets_file(path) {
+            Ok(markets) => {
+                let verified = verify_markets(&app.rpc, markets);
+                app.push_log(format!("Loaded {} verified markets from {}", verified.len(), path));
+                app.loaded_markets = verified;
+            }
+            Err(e) => {
+                app.push_log(format!("Markets file error: {}", e));
+            }
+        }
+    }
+
     let result = app.run(&mut terminal);
 
     disable_raw_mode()?;
@@ -413,6 +570,7 @@ fn run_oneshot(
     keypair: solana_sdk::signature::Keypair,
     verbose: bool,
     position_filter: Option<String>,
+    markets_file: Option<&str>,
     action: Action,
 ) {
     let mut app = app::App::new(rpc_url, keypair, verbose);
@@ -460,7 +618,7 @@ fn run_oneshot(
     }
 
     // Pre-fill form_fields and call the appropriate build_* method
-    if let Some(noop) = populate_and_build(&mut app, &action) {
+    if let Some(noop) = populate_and_build(&mut app, &action, markets_file) {
         println!("{}", serde_json::to_string(&noop).unwrap());
         return;
     }
@@ -505,7 +663,7 @@ fn sol_amount_to_field(amount: f64) -> String {
     format!("{}", amount)
 }
 
-fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> {
+fn populate_and_build(app: &mut app::App, action: &Action, markets_file: Option<&str>) -> Option<CliOutput> {
     match action {
         Action::Status | Action::Balances => unreachable!(),
         Action::InitProtocol => {
@@ -529,26 +687,73 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             }
             app.build_create_collection(uri.clone());
         }
-        Action::CreatePosition { ref nav_mint, ref name } => {
-            let parsed_mint = match nav_mint {
-                Some(s) => {
-                    use std::str::FromStr;
-                    match solana_sdk::pubkey::Pubkey::from_str(s) {
-                        Ok(pk) => Some(pk),
-                        Err(_) => {
-                            return Some(CliOutput::Error {
-                                action: "create-position".into(),
-                                error: format!("Invalid --nav-mint pubkey: {}", s),
-                            });
+        Action::CreatePosition { ref nav_mint, ref market, ref name } => {
+            if let Some(market_name) = market {
+                // --market flag: load from markets file
+                let mf_path = match markets_file {
+                    Some(p) => p,
+                    None => {
+                        return Some(CliOutput::Error {
+                            action: "create-position".into(),
+                            error: "--market requires --markets-file".into(),
+                        });
+                    }
+                };
+                let markets = match load_markets_file(mf_path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        return Some(CliOutput::Error {
+                            action: "create-position".into(),
+                            error: e,
+                        });
+                    }
+                };
+                let verified = verify_markets(&app.rpc, markets);
+                let entry = match find_market_by_name(&verified, market_name) {
+                    Ok(e) => e.clone(),
+                    Err(e) => {
+                        return Some(CliOutput::Error {
+                            action: "create-position".into(),
+                            error: e,
+                        });
+                    }
+                };
+                let pks = match entry.to_pubkeys() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return Some(CliOutput::Error {
+                            action: "create-position".into(),
+                            error: e,
+                        });
+                    }
+                };
+                app.pending_market_addresses = Some(pks);
+                app.market_name_override = Some(entry.nav_symbol.clone());
+                app.form_fields = vec![
+                    ("Label (optional)".into(), name.clone().unwrap_or_default()),
+                ];
+                app.build_create_position(Some(pks.0));
+            } else {
+                let parsed_mint = match nav_mint {
+                    Some(s) => {
+                        use std::str::FromStr;
+                        match solana_sdk::pubkey::Pubkey::from_str(s) {
+                            Ok(pk) => Some(pk),
+                            Err(_) => {
+                                return Some(CliOutput::Error {
+                                    action: "create-position".into(),
+                                    error: format!("Invalid --nav-mint pubkey: {}", s),
+                                });
+                            }
                         }
                     }
-                }
-                None => None,
-            };
-            app.form_fields = vec![
-                ("Label (optional)".into(), name.clone().unwrap_or_default()),
-            ];
-            app.build_create_position(parsed_mint);
+                    None => None,
+                };
+                app.form_fields = vec![
+                    ("Label (optional)".into(), name.clone().unwrap_or_default()),
+                ];
+                app.build_create_position(parsed_mint);
+            }
         }
         Action::Buy { amount } => {
             app.form_fields = vec![("Amount (SOL)".into(), sol_amount_to_field(*amount))];
@@ -633,8 +838,19 @@ fn populate_and_build(app: &mut app::App, action: &Action) -> Option<CliOutput> 
             fee_vault,
         } => {
             let result = if let Some(name) = market {
-                let url = markets_url.as_deref().unwrap();
-                resolve_market(url, name)
+                // Prefer --markets-file over --markets-url
+                if let Some(mf_path) = markets_file {
+                    load_markets_file(mf_path)
+                        .and_then(|markets| {
+                            let verified = verify_markets(&app.rpc, markets);
+                            let entry = find_market_by_name(&verified, name)?;
+                            entry.to_pubkeys()
+                        })
+                } else if let Some(url) = markets_url.as_deref() {
+                    resolve_market(url, name)
+                } else {
+                    Err("--market requires --markets-file or --markets-url".into())
+                }
             } else {
                 use std::str::FromStr;
                 let parse = |s: &Option<String>| {
