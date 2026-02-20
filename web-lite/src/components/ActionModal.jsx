@@ -421,9 +421,6 @@ export function ActionModal({ action, onClose, onRefresh }) {
                 <li key={i}>{i === 0 ? <strong>{line}</strong> : line}</li>
               ))}
               <li>{pending.instructions.length} instruction(s)</li>
-              {pending.extraSigners.length > 0 && (
-                <li>{pending.extraSigners.length} extra signer(s)</li>
-              )}
             </ul>
             <div class="btn-row">
               <button class="btn" onClick={onClose} disabled={sending}>Cancel</button>
