@@ -950,7 +950,8 @@ impl App {
     }
 
     fn enter_create_promo(&mut self) {
-        self.perm_bits = PRESET_OPERATOR;
+        let default_perms = PERM_BUY | PERM_LIMITED_BORROW;
+        self.perm_bits = default_perms;
         self.perm_cursor = 0;
         self.screen = Screen::Form;
         self.form_info = None;
@@ -959,16 +960,16 @@ impl App {
         self.form_kind = Some(FormKind::CreatePromo);
         self.form_fields = vec![
             ("Name Suffix".into(), String::new()),
-            ("Permissions".into(), PRESET_OPERATOR.to_string()),
-            ("Borrow Capacity (SOL)".into(), "0".into()),
-            ("Borrow Refill Days".into(), "0".into()),
+            ("Permissions".into(), default_perms.to_string()),
+            ("Borrow Capacity (SOL)".into(), "0.05".into()),
+            ("Borrow Refill Days".into(), "90".into()),
             ("Borrow Refill Hours".into(), "0".into()),
             ("Borrow Refill Minutes".into(), "0".into()),
             ("Sell Capacity (SOL)".into(), "0".into()),
             ("Sell Refill Days".into(), "0".into()),
             ("Sell Refill Hours".into(), "0".into()),
             ("Sell Refill Minutes".into(), "0".into()),
-            ("Min Deposit (SOL)".into(), "0".into()),
+            ("Min Deposit (SOL)".into(), "0.02".into()),
             ("Max Claims (0=unlimited)".into(), "0".into()),
             ("Image URI (optional)".into(), String::new()),
         ];

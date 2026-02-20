@@ -137,13 +137,15 @@ if [ "$UPGRADE" = true ]; then
     solana program deploy "$BPF_SO" \
         --program-id "$PROGRAM_KP" \
         --keypair "$PAYER_KP" \
-        --url "$SOLANA_RPC_URL"
+        --url "$SOLANA_RPC_URL" \
+        --with-compute-unit-price 50000
 else
     echo "Deploying program..."
     solana program deploy "$BPF_SO" \
         --program-id "$PROGRAM_KP" \
         --keypair "$PAYER_KP" \
-        --url "$SOLANA_RPC_URL"
+        --url "$SOLANA_RPC_URL" \
+        --with-compute-unit-price 50000
 fi
 
 echo ""

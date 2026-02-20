@@ -62,16 +62,16 @@ export function ActionModal({ action, actionData, onClose, onRefresh }) {
 
   // Promo form fields
   const [promoNameSuffix, setPromoNameSuffix] = useState('');
-  const [promoPermissions, setPromoPermissions] = useState(String(PERM_BUY | PERM_REPAY | PERM_LIMITED_BORROW));
-  const [promoBorrowCapacity, setPromoBorrowCapacity] = useState('');
-  const [promoBorrowDays, setPromoBorrowDays] = useState('');
+  const [promoPermissions, setPromoPermissions] = useState(String(PERM_BUY | PERM_LIMITED_BORROW));
+  const [promoBorrowCapacity, setPromoBorrowCapacity] = useState('0.05');
+  const [promoBorrowDays, setPromoBorrowDays] = useState('90');
   const [promoBorrowHours, setPromoBorrowHours] = useState('');
   const [promoBorrowMinutes, setPromoBorrowMinutes] = useState('');
   const [promoSellCapacity, setPromoSellCapacity] = useState('');
   const [promoSellDays, setPromoSellDays] = useState('');
   const [promoSellHours, setPromoSellHours] = useState('');
   const [promoSellMinutes, setPromoSellMinutes] = useState('');
-  const [promoMinDeposit, setPromoMinDeposit] = useState('');
+  const [promoMinDeposit, setPromoMinDeposit] = useState('0.02');
   const [promoMaxClaims, setPromoMaxClaims] = useState('0');
   const [promoImageUri, setPromoImageUri] = useState('');
   const [editMaxClaims, setEditMaxClaims] = useState('');
