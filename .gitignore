@@ -2,6 +2,7 @@ target/
 node_modules/
 .test-ledger/
 .anchor/
+.claude/worktrees/
 test-fixtures/*.so
 web-lite/dist/
 
