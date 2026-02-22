@@ -2,6 +2,7 @@ import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 import {
   PROGRAM_ID,
   derivePromoPda,
+  deriveConfigPda,
   SYSTEM_PROGRAM_ID,
 } from '../constants.js';
 import { myKeyAsset, positionPda, position } from '../state.js';
@@ -86,11 +87,13 @@ export async function buildCreatePromo(
   data.set(imageUriBytes, offset); offset += imageUriBytes.length;
   data.set(marketNameBytes, offset); offset += marketNameBytes.length;
 
+  const [configPda] = deriveConfigPda();
   const keys = [
     { pubkey: wallet, isSigner: true, isWritable: true },
     { pubkey: adminKeyAsset, isSigner: false, isWritable: false },
     { pubkey: posPda, isSigner: false, isWritable: false },
     { pubkey: promoPda, isSigner: false, isWritable: true },
+    { pubkey: configPda, isSigner: false, isWritable: false },
     { pubkey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
   ];
 

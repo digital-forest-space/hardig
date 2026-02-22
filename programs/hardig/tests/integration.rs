@@ -3410,6 +3410,18 @@ fn ix_claim_promo_key(
     collection: &Pubkey,
     amount: u64,
 ) -> Instruction {
+    ix_claim_promo_key_with_min_out(claimer, promo_pda_key, admin_asset, key_asset, collection, amount, 0)
+}
+
+fn ix_claim_promo_key_with_min_out(
+    claimer: &Pubkey,
+    promo_pda_key: &Pubkey,
+    admin_asset: &Pubkey,
+    key_asset: &Pubkey,
+    collection: &Pubkey,
+    amount: u64,
+    min_out: u64,
+) -> Instruction {
     let (pos_pda, _) = position_pda(admin_asset);
     let (claim_receipt, _) = claim_receipt_pda(promo_pda_key, claimer);
     let (ks_pda, _) = key_state_pda(key_asset);
@@ -3419,7 +3431,7 @@ fn ix_claim_promo_key(
 
     let mut data = sighash("claim_promo_key");
     data.extend_from_slice(&amount.to_le_bytes());
-    data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage check)
+    data.extend_from_slice(&min_out.to_le_bytes());
 
     Instruction::new_with_bytes(
         program_id(),
@@ -4007,4 +4019,363 @@ fn test_claim_promo_key_max_claims_reached() {
     );
     let result = send_tx(&mut svm, &[ix_b], &[&claimer_b, &key_b]);
     assert!(result.is_err(), "claim should fail when max_claims reached");
+}
+
+// ---------------------------------------------------------------------------
+// 10. test_promo_key_can_buy — end-to-end: claim promo key, then buy with it
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_promo_key_can_buy() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Buy Promo";
+    let permissions: u8 = PERM_BUY | PERM_LIMITED_BORROW;
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        permissions,
+        20_000_000, // borrow_capacity
+        1000,       // borrow_refill_period
+        0, 0,       // no sell limits
+        0,          // min_deposit_lamports = 0 (allow any amount)
+        100,
+        "",
+        "navSOL",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Claimer claims a promo key with amount=0 (no deposit at claim time)
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+        0,
+    );
+    send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
+
+    // Verify position deposited_nav is 0 before buy
+    let pos = read_position(&svm, &pos_pda);
+    assert_eq!(pos.deposited_nav, 0, "deposited_nav should be 0 before buy");
+
+    // Now use the promo key to call buy
+    let buy_ix = ix_buy(
+        &claimer.pubkey(),
+        &key_asset.pubkey(),
+        &pos_pda,
+        &admin_asset.pubkey(),
+        1_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&claimer]).unwrap();
+
+    // Verify deposited_nav increased (mock Mayflower does 1:1)
+    let pos = read_position(&svm, &pos_pda);
+    assert_eq!(pos.deposited_nav, 1_000_000, "deposited_nav should reflect the buy");
+}
+
+// ---------------------------------------------------------------------------
+// 11. test_promo_key_cannot_sell — promo key with BUY perm denied on withdraw
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_promo_key_cannot_sell() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "No Sell";
+    let permissions: u8 = PERM_BUY | PERM_LIMITED_BORROW;
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        permissions,
+        20_000_000,
+        1000,
+        0, 0,
+        0,
+        100,
+        "",
+        "navSOL",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Admin buys first so there's something to sell
+    let buy_ix = ix_buy(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        &pos_pda,
+        &admin_asset.pubkey(),
+        1_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&admin]).unwrap();
+
+    // Claimer claims a promo key
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+        0,
+    );
+    send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
+
+    // Try to sell (withdraw) using the promo key — should fail
+    let (ks_pda, _) = key_state_pda(&key_asset.pubkey());
+    let sell_ix = ix_withdraw(
+        &claimer.pubkey(),
+        &key_asset.pubkey(),
+        Some(&ks_pda),
+        &pos_pda,
+        &admin_asset.pubkey(),
+        500_000,
+    );
+    let result = send_tx(&mut svm, &[sell_ix], &[&claimer]);
+    assert!(result.is_err(), "promo key without SELL permission should not be able to withdraw");
+}
+
+// ---------------------------------------------------------------------------
+// 12. test_claim_promo_below_min_deposit_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_below_min_deposit_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Min Deposit";
+    let min_deposit: u64 = 10_000_000;
+
+    // Create promo with min_deposit_lamports = 10_000_000
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY,
+        0, 0, 0, 0,
+        min_deposit,
+        100,
+        "",
+        "navSOL",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Claim with amount = 5_000_000, below min_deposit_lamports
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+        5_000_000, // below min_deposit
+    );
+    let result = send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]);
+    assert!(result.is_err(), "claim with amount below min_deposit should fail");
+}
+
+// ---------------------------------------------------------------------------
+// 13. test_claim_promo_deposited_nav_updated
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_deposited_nav_updated() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Deposit Nav";
+
+    // Create promo with min_deposit = 0 to allow any amount
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY,
+        0, 0, 0, 0,
+        0, // no minimum
+        100,
+        "",
+        "navSOL",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Verify deposited_nav starts at 0
+    let pos_before = read_position(&svm, &pos_pda);
+    assert_eq!(pos_before.deposited_nav, 0);
+
+    // Claim with amount = 2_000_000
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+    let deposit_amount: u64 = 2_000_000;
+
+    let ix_claim = ix_claim_promo_key(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+        deposit_amount,
+    );
+    send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
+
+    // Verify deposited_nav increased by deposit_amount (mock Mayflower does 1:1)
+    let pos_after = read_position(&svm, &pos_pda);
+    assert_eq!(
+        pos_after.deposited_nav, deposit_amount,
+        "deposited_nav should increase by the deposited amount (1:1 mock)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 14. test_claim_promo_slippage_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_claim_promo_slippage_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "Slippage";
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY,
+        0, 0, 0, 0,
+        0,
+        100,
+        "",
+        "navSOL",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Claim with amount = 1_000_000 but min_out = 1_000_001 (impossible)
+    let claimer = Keypair::new();
+    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
+    let key_asset = Keypair::new();
+    let amount: u64 = 1_000_000;
+
+    let ix_claim = ix_claim_promo_key_with_min_out(
+        &claimer.pubkey(),
+        &pda,
+        &admin_asset.pubkey(),
+        &key_asset.pubkey(),
+        &collection,
+        amount,
+        amount + 1, // min_out higher than what mock returns (1:1)
+    );
+    let result = send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]);
+    assert!(result.is_err(), "claim with min_out exceeding actual output should fail with SlippageExceeded");
+}
+
+// ---------------------------------------------------------------------------
+// 15. test_update_promo_non_admin_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_update_promo_non_admin_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
+
+    let authority_seed = admin_asset.pubkey();
+    let name_suffix = "No Touch";
+
+    // Create promo
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        name_suffix,
+        PERM_BUY,
+        0, 0, 0, 0, 0, 100, "", "",
+    );
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    let (pda, _) = promo_pda(&authority_seed, name_suffix);
+
+    // Non-admin tries to update the promo
+    let non_admin = Keypair::new();
+    svm.airdrop(&non_admin.pubkey(), 5_000_000_000).unwrap();
+
+    // Build update_promo ix with non_admin as signer but referencing admin's asset
+    let (pos_pda, _) = position_pda(&admin_asset.pubkey());
+    let mut data = sighash("update_promo");
+    // active = Some(false)
+    data.push(1); // Some
+    data.push(0); // false
+    // max_claims = None
+    data.push(0);
+
+    let ix_update = Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(non_admin.pubkey(), true),            // admin (non-admin signer)
+            AccountMeta::new_readonly(admin_asset.pubkey(), false), // admin_key_asset
+            AccountMeta::new_readonly(pos_pda, false),             // position
+            AccountMeta::new(pda, false),                          // promo (mut)
+            AccountMeta::new_readonly(config_pda().0, false),      // config
+        ],
+    );
+
+    let result = send_tx(&mut svm, &[ix_update], &[&non_admin]);
+    assert!(result.is_err(), "non-admin should not be able to update promo");
+}
+
+// ---------------------------------------------------------------------------
+// 16. test_create_promo_invalid_permissions_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_promo_invalid_permissions_rejected() {
+    let (mut svm, _) = setup();
+    let (admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
+
+    // Try to create a promo with PERM_SELL, which is not in KeyCreatorOrigin::Promo's allowed set.
+    // Promo only allows PERM_BUY | PERM_LIMITED_BORROW.
+    let ix = ix_create_promo(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        "Bad Perms",
+        PERM_SELL, // invalid for promo origin
+        0, 0, 0, 0, 0, 100, "", "",
+    );
+    let result = send_tx(&mut svm, &[ix], &[&admin]);
+    assert!(result.is_err(), "creating promo with PERM_SELL should fail (not in Promo allowed set)");
 }

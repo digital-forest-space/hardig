@@ -2335,11 +2335,15 @@ impl App {
         data.extend_from_slice(&(mn_bytes.len() as u32).to_le_bytes());
         data.extend_from_slice(mn_bytes);
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),    // admin
             AccountMeta::new_readonly(admin_key_asset, false), // admin_key_asset
             AccountMeta::new_readonly(position_pda, false),    // position
             AccountMeta::new(promo_pda, false),                // promo
+            AccountMeta::new_readonly(config_pda, false),      // config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false), // system_program
         ];
 
@@ -2396,11 +2400,15 @@ impl App {
         // max_claims: Option<u32> — None
         data.push(0x00); // None
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),    // admin
             AccountMeta::new_readonly(admin_key_asset, false), // admin_key_asset
             AccountMeta::new_readonly(position_pda, false),    // position
             AccountMeta::new(entry.pda, false),                // promo
+            AccountMeta::new_readonly(config_pda, false),      // config
         ];
 
         let status_str = if new_active { "Active" } else { "Paused" };
@@ -2449,11 +2457,15 @@ impl App {
         data.push(0x01); // Some
         data.extend_from_slice(&new_max.to_le_bytes());
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),    // admin
             AccountMeta::new_readonly(admin_key_asset, false), // admin_key_asset
             AccountMeta::new_readonly(position_pda, false),    // position
             AccountMeta::new(entry.pda, false),                // promo
+            AccountMeta::new_readonly(config_pda, false),      // config
         ];
 
         let max_str = if new_max == 0 { "unlimited".to_string() } else { new_max.to_string() };

@@ -530,11 +530,6 @@ export function ActionModal({ action, actionData, onClose, onRefresh }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
                     {[
                       [PERM_BUY, 'Buy'],
-                      [PERM_SELL, 'Sell'],
-                      [PERM_BORROW, 'Borrow'],
-                      [PERM_REPAY, 'Repay'],
-                      [PERM_REINVEST, 'Reinvest'],
-                      [PERM_LIMITED_SELL, 'Limited Sell'],
                       [PERM_LIMITED_BORROW, 'Limited Borrow'],
                     ].map(([bit, name]) => {
                       const p = parseInt(promoPermissions) || 0;

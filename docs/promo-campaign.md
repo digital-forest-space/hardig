@@ -215,28 +215,42 @@ Handler:
 5. Init KeyState with rate limits from promo config
 6. Increment `promo.claims_count`
 
-#### Deposit via Transaction Bundling
+#### Deposit via Embedded Buy CPI
 
-The claim instruction intentionally does NOT include a Mayflower deposit CPI.
-Instead, the claimed key includes BUY permission, and the frontend bundles
-two instructions in a single atomic transaction:
+The claim instruction includes a Mayflower buy CPI directly. The `amount`
+and `min_out` parameters control the deposit and slippage protection:
+
+    claim_promo_key(amount: u64, min_out: u64)
+
+When `amount > 0`, the handler performs a Mayflower buy CPI using the
+position's program PDA as signer, converting the deposited SOL into navSOL.
+The on-chain program enforces `amount >= promo.min_deposit_lamports`.
+
+The client transaction must prepend SOL wrapping instructions before the
+claim instruction:
 
     Transaction {
-        ix[0]: claim_promo_key   → mints key + KeyState
-        ix[1]: buy               → deposits SOL using the freshly minted key
+        ix[0]: createAssociatedTokenAccountIdempotent  (PDA's wSOL ATA)
+        ix[1]: SystemProgram.transfer                  (claimer → PDA wSOL ATA)
+        ix[2]: syncNative                              (sync wSOL balance)
+        ix[3]: claim_promo_key                         (mints key + buys navSOL)
     }
-
-Solana transactions are atomic — instruction 2 sees the KeyState created by
-instruction 1. The deposit goes through the normal Mayflower buy path, making
-it a real navSOL purchase (not a fee). One click, one signature.
 
 This is important for tax treatment: the SOL goes into a navSOL position as
 a deposit, not as a fee payment to a third party.
 
-`PromoConfig.min_deposit_lamports` tells the frontend how much to include in
-the buy instruction. No on-chain enforcement — if someone claims without
-depositing they just have a key with limited utility (shared borrow capacity
-is small per-user anyway).
+#### Security: Zero Deposit + Borrow Permission
+
+**Warning:** Creating a promo with `min_deposit_lamports = 0` and
+`PERM_LIMITED_BORROW` enabled allows anyone to claim a free key and
+immediately borrow SOL from the position without depositing anything.
+Multiply by many wallets and the position drains up to the aggregate of
+all per-key rate limits.
+
+The on-chain program allows this combination (it's the admin's choice), but
+both TUI and web-lite should warn when this configuration is selected. If you
+want a free giveaway with borrow access, consider setting a non-zero
+`min_deposit_lamports` as a spam filter, or use `PERM_BUY` only (no borrow).
 
 #### What This Enables
 

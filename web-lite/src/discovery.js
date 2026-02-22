@@ -22,6 +22,9 @@ import {
   marketConfig,
   pushLog,
   resetPositionState,
+  discoveredPositions,
+  activePositionIndex,
+  discoveredPromos,
 } from './state.js';
 import { shortPubkey, permissionsName, PERM_MANAGE_KEYS, PRESET_ADMIN } from './utils.js';
 import { deriveConfigPda } from './constants.js';
@@ -133,7 +136,7 @@ export async function discoverPosition(connection, wallet) {
   // (small account set), then load specific MPL-Core assets by pubkey.
   // This avoids getProgramAccounts on MPL Core which most RPC providers reject.
 
-  const POSITION_SIZE = 132; // PositionNFT account size
+  const POSITION_SIZE = 205; // PositionNFT account size (8+32+32+32+8+8+2+8+1+1+32+32+8+1)
 
   const [positionAccounts, keyStateAccounts] = await Promise.all([
     connection.getProgramAccounts(PROGRAM_ID, {
@@ -182,6 +185,7 @@ export async function discoverPosition(connection, wallet) {
 
   let bestPos = null;
   let best = null;
+  const allFound = []; // collect all wallet-accessible positions for multi-position UI
 
   function popcount(n) { let c = 0; while (n) { c += n & 1; n >>= 1; } return c; }
 
@@ -194,6 +198,8 @@ export async function discoverPosition(connection, wallet) {
 
     const permissions = readPermissionsFromAssetData(info.data) ?? PRESET_ADMIN;
     const posPda = positions[i].posPda;
+
+    allFound.push({ posPda, permissions, assetPubkey: adminAssetPubkeys[i], isAdmin: true, adminAsset: positions[i].adminAsset });
 
     let isBetter = !best;
     if (!isBetter) {
@@ -227,6 +233,9 @@ export async function discoverPosition(connection, wallet) {
 
       const posPda = adminAssetToPos.get(positionBinding);
       if (!posPda) continue;
+
+      const bindingPk = new PublicKey(positionBinding);
+      allFound.push({ posPda, permissions, assetPubkey: delegatedPubkeys[i], isAdmin: false, adminAsset: bindingPk });
 
       let isBetter = !best;
       if (!isBetter) {
@@ -272,6 +281,7 @@ export async function discoverPosition(connection, wallet) {
 
       const posData = {
         adminAsset,
+        authoritySeed: adminAsset, // alias: same bytes 8-40, used by derivePromoPda
         positionPda: mfPositionPda,
         marketConfig: mcPda,
         depositedNav,
@@ -378,9 +388,186 @@ export async function discoverPosition(connection, wallet) {
   }
   keyring.value = posKeys;
 
+  // Populate discoveredPositions for multi-position UI
+  const enriched = allFound.map((f) => ({
+    ...f,
+    depositedNav: f.posPda.equals(bestPos) ? (position.value?.depositedNav ?? 0) : 0,
+  }));
+  discoveredPositions.value = enriched;
+  activePositionIndex.value = enriched.findIndex((f) => f.posPda.equals(bestPos));
+
   pushLog(
     `Found position ${shortPubkey(bestPos)} (permissions: ${permissionsName(best.permissions)}${
       mayflowerInitialized.value ? ', Nirvana OK' : ''
     })`
   );
+
+  // Discover promos for the active position
+  await discoverPromos(connection);
+}
+
+/**
+ * Switch to a different discovered position by index.
+ * Re-loads the position data and keyring for the selected position.
+ */
+export async function selectActivePosition(index, connection) {
+  const positions = discoveredPositions.value;
+  if (index < 0 || index >= positions.length) {
+    throw new Error('Invalid position index');
+  }
+  const selected = positions[index];
+  activePositionIndex.value = index;
+
+  positionPda.value = selected.posPda;
+  myPermissions.value = selected.permissions;
+  myKeyAsset.value = selected.assetPubkey;
+  myNftMint.value = selected.assetPubkey;
+
+  // Re-load position account data
+  const posInfo = await connection.getAccountInfo(selected.posPda);
+  if (posInfo) {
+    const data = posInfo.data;
+    const view = new DataView(data.buffer, data.byteOffset);
+    const adminAsset = new PublicKey(data.slice(8, 40));
+    const mfPositionPda = new PublicKey(data.slice(40, 72));
+    const mcPda = new PublicKey(data.slice(72, 104));
+    const depositedNav = Number(view.getBigUint64(104, true));
+    const userDebt = Number(view.getBigUint64(112, true));
+    const lastAdminActivity = Number(view.getBigInt64(122, true));
+    const bump = data[130];
+
+    position.value = {
+      adminAsset,
+      authoritySeed: adminAsset,
+      positionPda: mfPositionPda,
+      marketConfig: mcPda,
+      depositedNav,
+      userDebt,
+      lastAdminActivity,
+      bump,
+    };
+    mayflowerInitialized.value = !mfPositionPda.equals(PublicKey.default);
+  }
+
+  // Re-discover promos for the newly selected position
+  await discoverPromos(connection);
+}
+
+/**
+ * Discover PromoConfig accounts for the active position's authority_seed.
+ * PromoConfig layout (327 bytes total):
+ *   discriminator(8) + authority_seed(32) + permissions(1) + borrow_capacity(8) +
+ *   borrow_refill_period(8) + sell_capacity(8) + sell_refill_period(8) +
+ *   min_deposit_lamports(8) + claims_count(4) + max_claims(4) + active(1) +
+ *   name_suffix: String(4+max64) + image_uri: String(4+max128) + market_name: String(4+max32) + bump(1)
+ */
+const PROMO_CONFIG_SIZE = 327;
+
+function parseBorshString(data, offset) {
+  if (offset + 4 > data.length) return { value: '', bytesRead: 4 };
+  const view = new DataView(data.buffer, data.byteOffset);
+  const len = view.getUint32(offset, true);
+  const end = offset + 4 + len;
+  if (end > data.length) return { value: '', bytesRead: 4 };
+  const value = new TextDecoder().decode(data.slice(offset + 4, end));
+  return { value, bytesRead: 4 + len };
+}
+
+export async function discoverPromos(connection) {
+  const pos = position.value;
+  if (!pos || !pos.authoritySeed) {
+    discoveredPromos.value = [];
+    return;
+  }
+
+  try {
+    const promoAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
+      filters: [
+        { dataSize: PROMO_CONFIG_SIZE },
+        { memcmp: { offset: 8, bytes: pos.authoritySeed.toBase58() } },
+      ],
+      commitment: 'confirmed',
+    });
+
+    const promos = [];
+    for (const { pubkey, account } of promoAccounts) {
+      const data = account.data;
+      if (data.length < PROMO_CONFIG_SIZE) continue;
+
+      const view = new DataView(data.buffer, data.byteOffset);
+      let offset = 8; // skip discriminator
+
+      const authoritySeed = new PublicKey(data.slice(offset, offset + 32));
+      offset += 32;
+
+      const permissions = data[offset];
+      offset += 1;
+
+      const borrowCapacity = Number(view.getBigUint64(offset, true));
+      offset += 8;
+
+      const borrowRefillPeriod = Number(view.getBigUint64(offset, true));
+      offset += 8;
+
+      const sellCapacity = Number(view.getBigUint64(offset, true));
+      offset += 8;
+
+      const sellRefillPeriod = Number(view.getBigUint64(offset, true));
+      offset += 8;
+
+      const minDepositLamports = Number(view.getBigUint64(offset, true));
+      offset += 8;
+
+      const claimsCount = view.getUint32(offset, true);
+      offset += 4;
+
+      const maxClaims = view.getUint32(offset, true);
+      offset += 4;
+
+      const active = data[offset] !== 0;
+      offset += 1;
+
+      const nameSuffixResult = parseBorshString(data, offset);
+      const nameSuffix = nameSuffixResult.value;
+      offset += nameSuffixResult.bytesRead;
+
+      const imageUriResult = parseBorshString(data, offset);
+      const imageUri = imageUriResult.value;
+      offset += imageUriResult.bytesRead;
+
+      const marketNameResult = parseBorshString(data, offset);
+      const marketName = marketNameResult.value;
+      offset += marketNameResult.bytesRead;
+
+      const bump = data[offset];
+
+      promos.push({
+        pda: pubkey,
+        config: {
+          authoritySeed,
+          permissions,
+          borrowCapacity,
+          borrowRefillPeriod,
+          sellCapacity,
+          sellRefillPeriod,
+          minDepositLamports,
+          claimsCount,
+          maxClaims,
+          active,
+          nameSuffix,
+          imageUri,
+          marketName,
+          bump,
+        },
+      });
+    }
+
+    discoveredPromos.value = promos;
+    if (promos.length > 0) {
+      pushLog(`Found ${promos.length} promo(s) for this position.`);
+    }
+  } catch (e) {
+    pushLog('Promo discovery failed: ' + e.message);
+    discoveredPromos.value = [];
+  }
 }

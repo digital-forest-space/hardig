@@ -1,5 +1,5 @@
 import { TransactionInstruction } from '@solana/web3.js';
-import { PROGRAM_ID } from '../constants.js';
+import { PROGRAM_ID, deriveConfigPda } from '../constants.js';
 import { myKeyAsset, positionPda } from '../state.js';
 import { shortPubkey } from '../utils.js';
 
@@ -47,11 +47,13 @@ export async function buildUpdatePromo(program, wallet, promoPda, active, maxCla
   data.set(activeBytes, offset); offset += activeBytes.length;
   data.set(maxClaimsBytes, offset); offset += maxClaimsBytes.length;
 
+  const [configPda] = deriveConfigPda();
   const keys = [
     { pubkey: wallet, isSigner: true, isWritable: true },
     { pubkey: adminKeyAsset, isSigner: false, isWritable: false },
     { pubkey: posPda, isSigner: false, isWritable: false },
     { pubkey: promoPda, isSigner: false, isWritable: true },
+    { pubkey: configPda, isSigner: false, isWritable: false },
   ];
 
   const ix = new TransactionInstruction({
