@@ -237,6 +237,15 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
         .checked_sub(debt_before)
         .ok_or(HardigError::BorrowCapacityExceeded)?;
 
+    // Update debt accounting immediately — the borrow CPI already succeeded,
+    // so Mayflower's debt increased regardless of what happens next.
+    ctx.accounts.position.user_debt = ctx
+        .accounts
+        .position
+        .user_debt
+        .checked_add(actual_borrowed)
+        .ok_or(HardigError::BorrowCapacityExceeded)?;
+
     // Step 2: Read actual wSOL balance after borrow (fees may have been deducted)
     let wsol_data = ctx.accounts.user_base_token_ata.try_borrow_data()?;
     let actual_amount = if wsol_data.len() >= 72 {
@@ -324,14 +333,6 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
             );
         }
     }
-
-    // Update accounting with actual amounts from Mayflower
-    ctx.accounts.position.user_debt = ctx
-        .accounts
-        .position
-        .user_debt
-        .checked_add(actual_borrowed)
-        .ok_or(HardigError::BorrowCapacityExceeded)?;
 
     ctx.accounts.position.deposited_nav = ctx
         .accounts

@@ -17,7 +17,7 @@ use hardig::mayflower::{
 };
 use hardig::state::{
     ClaimReceipt, KeyState, MarketConfig, PositionNFT, PromoConfig, ProtocolConfig,
-    PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
+    PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST,
     PERM_LIMITED_SELL, PERM_LIMITED_BORROW,
     PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
 };
@@ -446,6 +446,7 @@ fn ix_buy(
             AccountMeta::new(*signer, true),                          // signer
             AccountMeta::new_readonly(*key_asset, false),             // key_asset
             AccountMeta::new(*position_pda, false),                   // position
+            AccountMeta::new_readonly(config_pda().0, false),         // config
             AccountMeta::new_readonly(mc_pda, false),                 // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false), // system_program
             AccountMeta::new(program_pda, false),                      // program_pda (mut for CPI)
@@ -494,6 +495,7 @@ fn ix_withdraw(
             AccountMeta::new_readonly(*key_asset, false),             // key_asset
             AccountMeta::new(key_state_key, false),                   // key_state (Option)
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(config_pda().0, false),          // config
             AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
             AccountMeta::new(program_pda, false),
@@ -540,6 +542,7 @@ fn ix_borrow(
             AccountMeta::new_readonly(*key_asset, false),             // key_asset
             AccountMeta::new(key_state_key, false),                   // key_state (Option)
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(config_pda().0, false),          // config
             AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
             AccountMeta::new(program_pda, false),
@@ -580,6 +583,7 @@ fn ix_repay(
             AccountMeta::new(*signer, true),
             AccountMeta::new_readonly(*key_asset, false),             // key_asset
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(config_pda().0, false),          // config
             AccountMeta::new_readonly(mc_pda, false),                  // market_config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
             AccountMeta::new(program_pda, false),
@@ -616,6 +620,7 @@ fn ix_reinvest(
             AccountMeta::new_readonly(*key_asset, false),             // key_asset
             AccountMeta::new(*position_pda, false),
             AccountMeta::new_readonly(mc_pda, false),                  // market_config
+            AccountMeta::new_readonly(config_pda().0, false),          // config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
             AccountMeta::new(program_pda, false),
             AccountMeta::new(pp_pda, false),                          // personal_position
@@ -2518,6 +2523,7 @@ fn ix_heartbeat(
             AccountMeta::new_readonly(*admin, true),
             AccountMeta::new_readonly(*admin_key_asset, false),
             AccountMeta::new(*position_pda, false),
+            AccountMeta::new_readonly(config_pda().0, false),          // config
         ],
     )
 }
@@ -3309,6 +3315,7 @@ fn ix_create_promo(
     min_deposit_lamports: u64,
     max_claims: u32,
     image_uri: &str,
+    market_name: &str,
 ) -> Instruction {
     let (pos_pda, _) = position_pda(admin_asset);
     let position = read_position_seed(admin_asset);
@@ -3330,6 +3337,9 @@ fn ix_create_promo(
     // image_uri: String
     data.extend_from_slice(&(image_uri.len() as u32).to_le_bytes());
     data.extend_from_slice(image_uri.as_bytes());
+    // market_name: String
+    data.extend_from_slice(&(market_name.len() as u32).to_le_bytes());
+    data.extend_from_slice(market_name.as_bytes());
 
     Instruction::new_with_bytes(
         program_id(),
@@ -3339,6 +3349,7 @@ fn ix_create_promo(
             AccountMeta::new_readonly(*admin_asset, false),                    // admin_key_asset
             AccountMeta::new_readonly(pos_pda, false),                         // position
             AccountMeta::new(promo, false),                                    // promo (init)
+            AccountMeta::new_readonly(config_pda().0, false),                  // config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),  // system_program
         ],
     )
@@ -3386,6 +3397,7 @@ fn ix_update_promo(
             AccountMeta::new_readonly(*admin_asset, false),    // admin_key_asset
             AccountMeta::new_readonly(pos_pda, false),         // position
             AccountMeta::new(*promo_pda_key, false),           // promo (mut)
+            AccountMeta::new_readonly(config_pda().0, false),  // config
         ],
     )
 }
@@ -3396,13 +3408,18 @@ fn ix_claim_promo_key(
     admin_asset: &Pubkey,
     key_asset: &Pubkey,
     collection: &Pubkey,
+    amount: u64,
 ) -> Instruction {
     let (pos_pda, _) = position_pda(admin_asset);
     let (claim_receipt, _) = claim_receipt_pda(promo_pda_key, claimer);
     let (ks_pda, _) = key_state_pda(key_asset);
     let (cfg_pda, _) = config_pda();
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_asset);
 
-    let data = sighash("claim_promo_key");
+    let mut data = sighash("claim_promo_key");
+    data.extend_from_slice(&amount.to_le_bytes());
+    data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage check)
 
     Instruction::new_with_bytes(
         program_id(),
@@ -3411,13 +3428,31 @@ fn ix_claim_promo_key(
             AccountMeta::new(*claimer, true),                                  // claimer
             AccountMeta::new(*promo_pda_key, false),                           // promo (mut)
             AccountMeta::new(claim_receipt, false),                            // claim_receipt (init)
-            AccountMeta::new_readonly(pos_pda, false),                         // position
+            AccountMeta::new(pos_pda, false),                                  // position (mut)
             AccountMeta::new(*key_asset, true),                                // key_asset (signer)
             AccountMeta::new(ks_pda, false),                                   // key_state (init)
             AccountMeta::new_readonly(cfg_pda, false),                         // config
             AccountMeta::new(*collection, false),                              // collection
             AccountMeta::new_readonly(MPL_CORE_ID, false),                     // mpl_core_program
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),  // system_program
+            AccountMeta::new_readonly(mc_pda, false),                          // market_config
+            AccountMeta::new(program_pda, false),                              // program_pda
+            AccountMeta::new(pp_pda, false),                                   // personal_position
+            AccountMeta::new(escrow_pda, false),                               // user_shares
+            AccountMeta::new(nav_sol_ata, false),                              // user_nav_sol_ata
+            AccountMeta::new(wsol_ata, false),                                 // user_wsol_ata
+            AccountMeta::new_readonly(MAYFLOWER_TENANT, false),                // tenant
+            AccountMeta::new_readonly(DEFAULT_MARKET_GROUP, false),            // market_group
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),             // market_meta
+            AccountMeta::new(DEFAULT_MAYFLOWER_MARKET, false),                 // mayflower_market
+            AccountMeta::new(DEFAULT_NAV_SOL_MINT, false),                     // nav_sol_mint
+            AccountMeta::new(DEFAULT_MARKET_BASE_VAULT, false),                // market_base_vault
+            AccountMeta::new(DEFAULT_MARKET_NAV_VAULT, false),                 // market_nav_vault
+            AccountMeta::new(DEFAULT_FEE_VAULT, false),                        // fee_vault
+            AccountMeta::new_readonly(DEFAULT_WSOL_MINT, false),               // wsol_mint
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),            // mayflower_program
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),                    // token_program
+            AccountMeta::new(log_pda, false),                                  // log_account
         ],
     )
 }
@@ -3473,7 +3508,7 @@ fn test_create_promo() {
     let (admin, admin_asset, _pos_pda, _collection) = promo_setup(&mut svm);
 
     let name_suffix = "Test Promo";
-    let permissions: u8 = PERM_BUY | PERM_REPAY | PERM_LIMITED_BORROW;
+    let permissions: u8 = PERM_BUY | PERM_LIMITED_BORROW;
     let borrow_capacity: u64 = 20_000_000;
     let borrow_refill_period: u64 = 1000;
     let sell_capacity: u64 = 0;
@@ -3494,6 +3529,7 @@ fn test_create_promo() {
         min_deposit,
         max_claims,
         image_uri,
+        "navSOL",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3514,6 +3550,7 @@ fn test_create_promo() {
     assert!(promo.active);
     assert_eq!(promo.name_suffix, name_suffix);
     assert_eq!(promo.image_uri, image_uri);
+    assert_eq!(promo.market_name, "navSOL");
 }
 
 // ---------------------------------------------------------------------------
@@ -3547,6 +3584,8 @@ fn test_create_promo_non_admin_rejected() {
     data.extend_from_slice(&10u32.to_le_bytes()); // max_claims
     let uri = "";
     data.extend_from_slice(&(uri.len() as u32).to_le_bytes());
+    let mn = "";
+    data.extend_from_slice(&(mn.len() as u32).to_le_bytes());
 
     let ix = Instruction::new_with_bytes(
         program_id(),
@@ -3556,6 +3595,7 @@ fn test_create_promo_non_admin_rejected() {
             AccountMeta::new_readonly(admin_asset.pubkey(), false),             // admin_key_asset
             AccountMeta::new_readonly(pos_pda, false),                         // position
             AccountMeta::new(promo, false),                                    // promo (init)
+            AccountMeta::new_readonly(config_pda().0, false),                  // config
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
     );
@@ -3580,8 +3620,8 @@ fn test_create_multiple_promos_per_position() {
         &admin.pubkey(),
         &admin_asset.pubkey(),
         "Promo A",
-        PERM_BUY | PERM_REPAY,
-        0, 0, 0, 0, 5_000_000, 50, "",
+        PERM_BUY,
+        0, 0, 0, 0, 5_000_000, 50, "", "navSOL",
     );
     send_tx(&mut svm, &[ix_a], &[&admin]).unwrap();
 
@@ -3591,7 +3631,7 @@ fn test_create_multiple_promos_per_position() {
         &admin_asset.pubkey(),
         "Promo B",
         PERM_BUY | PERM_LIMITED_BORROW,
-        10_000_000, 500, 0, 0, 1_000_000, 200, "https://example.com/b.png",
+        10_000_000, 500, 0, 0, 1_000_000, 200, "https://example.com/b.png", "navSOL",
     );
     send_tx(&mut svm, &[ix_b], &[&admin]).unwrap();
 
@@ -3599,7 +3639,7 @@ fn test_create_multiple_promos_per_position() {
     let (pda_a, _) = promo_pda(&authority_seed, "Promo A");
     let promo_a = read_promo_config(&svm, &pda_a);
     assert_eq!(promo_a.name_suffix, "Promo A");
-    assert_eq!(promo_a.permissions, PERM_BUY | PERM_REPAY);
+    assert_eq!(promo_a.permissions, PERM_BUY);
     assert_eq!(promo_a.max_claims, 50);
     assert!(promo_a.active);
 
@@ -3630,8 +3670,8 @@ fn test_update_promo() {
         &admin.pubkey(),
         &admin_asset.pubkey(),
         name_suffix,
-        PERM_BUY | PERM_REPAY,
-        0, 0, 0, 0, 0, 100, "",
+        PERM_BUY,
+        0, 0, 0, 0, 0, 100, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3691,8 +3731,8 @@ fn test_update_promo_max_below_current_rejected() {
         &admin.pubkey(),
         &admin_asset.pubkey(),
         name_suffix,
-        PERM_BUY | PERM_REPAY,
-        0, 0, 0, 0, 0, 0, "",
+        PERM_BUY,
+        0, 0, 0, 0, 0, 0, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3708,6 +3748,7 @@ fn test_update_promo_max_below_current_rejected() {
         &admin_asset.pubkey(),
         &key_asset.pubkey(),
         &collection,
+        0, // min_deposit_lamports = 0 for this promo
     );
     send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
 
@@ -3741,7 +3782,7 @@ fn test_claim_promo_key() {
 
     let authority_seed = admin_asset.pubkey();
     let name_suffix = "Claim Me";
-    let permissions: u8 = PERM_BUY | PERM_REPAY | PERM_LIMITED_BORROW;
+    let permissions: u8 = PERM_BUY | PERM_LIMITED_BORROW;
     let borrow_capacity: u64 = 20_000_000;
     let borrow_refill_period: u64 = 1000;
 
@@ -3757,6 +3798,7 @@ fn test_claim_promo_key() {
         10_000_000,
         100,
         "https://example.com/img.png",
+        "navSOL",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3773,6 +3815,7 @@ fn test_claim_promo_key() {
         &admin_asset.pubkey(),
         &key_asset.pubkey(),
         &collection,
+        10_000_000, // amount = min_deposit_lamports
     );
     send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]).unwrap();
 
@@ -3823,8 +3866,8 @@ fn test_claim_promo_key_duplicate_rejected() {
         &admin.pubkey(),
         &admin_asset.pubkey(),
         name_suffix,
-        PERM_BUY | PERM_REPAY,
-        0, 0, 0, 0, 0, 0, "",
+        PERM_BUY,
+        0, 0, 0, 0, 0, 0, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3840,6 +3883,7 @@ fn test_claim_promo_key_duplicate_rejected() {
         &admin_asset.pubkey(),
         &key_asset_1.pubkey(),
         &collection,
+        0, // min_deposit_lamports = 0 for this promo
     );
     send_tx(&mut svm, &[ix_claim_1], &[&claimer, &key_asset_1]).unwrap();
 
@@ -3851,6 +3895,7 @@ fn test_claim_promo_key_duplicate_rejected() {
         &admin_asset.pubkey(),
         &key_asset_2.pubkey(),
         &collection,
+        0,
     );
     let result = send_tx(&mut svm, &[ix_claim_2], &[&claimer, &key_asset_2]);
     assert!(result.is_err(), "duplicate claim from same wallet should fail");
@@ -3874,7 +3919,7 @@ fn test_claim_promo_key_inactive_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, "",
+        0, 0, 0, 0, 0, 0, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3900,6 +3945,7 @@ fn test_claim_promo_key_inactive_rejected() {
         &admin_asset.pubkey(),
         &key_asset.pubkey(),
         &collection,
+        0, // min_deposit_lamports = 0 for this promo
     );
     let result = send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]);
     assert!(result.is_err(), "claiming from inactive promo should fail");
@@ -3922,8 +3968,8 @@ fn test_claim_promo_key_max_claims_reached() {
         &admin.pubkey(),
         &admin_asset.pubkey(),
         name_suffix,
-        PERM_BUY | PERM_REPAY,
-        0, 0, 0, 0, 0, 1, "",
+        PERM_BUY,
+        0, 0, 0, 0, 0, 1, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3939,6 +3985,7 @@ fn test_claim_promo_key_max_claims_reached() {
         &admin_asset.pubkey(),
         &key_a.pubkey(),
         &collection,
+        0, // min_deposit_lamports = 0 for this promo
     );
     send_tx(&mut svm, &[ix_a], &[&claimer_a, &key_a]).unwrap();
 
@@ -3956,6 +4003,7 @@ fn test_claim_promo_key_max_claims_reached() {
         &admin_asset.pubkey(),
         &key_b.pubkey(),
         &collection,
+        0,
     );
     let result = send_tx(&mut svm, &[ix_b], &[&claimer_b, &key_b]);
     assert!(result.is_err(), "claim should fail when max_claims reached");

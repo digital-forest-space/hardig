@@ -194,7 +194,8 @@ export function ActionModal({ action, actionData, onClose, onRefresh }) {
           const pmc = parseInt(promoMaxClaims) || 0;
           const piu = promoImageUri.trim();
           if (piu.length > 128) { setError('Image URI must be 128 characters or less'); setPhase('form'); return; }
-          built = await buildCreatePromo(program, walletPk, ns, pp, pbc, pbr, psc, psr, pmd, pmc, piu);
+          const promoMarketName = marketConfig.value?.navMint ? navTokenName(marketConfig.value.navMint) : '';
+          built = await buildCreatePromo(program, walletPk, ns, pp, pbc, pbr, psc, psr, pmd, pmc, piu, promoMarketName);
           break;
         }
         case 'togglePromo': {

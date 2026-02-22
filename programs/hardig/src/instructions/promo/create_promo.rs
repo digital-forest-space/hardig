@@ -49,6 +49,7 @@ pub fn handler(
     min_deposit_lamports: u64,
     max_claims: u32,
     image_uri: String,
+    market_name: String,
 ) -> Result<()> {
     // Validate admin holds their key with MANAGE_KEYS permission
     validate_key(
@@ -66,6 +67,12 @@ pub fn handler(
     require!(
         image_uri.len() <= PromoConfig::MAX_IMAGE_URI_LEN,
         HardigError::ImageUriTooLong
+    );
+
+    // Validate market_name length
+    require!(
+        market_name.len() <= PromoConfig::MAX_MARKET_NAME_LEN,
+        HardigError::NameTooLong
     );
 
     // Validate permissions + rate-limit params for promo-created keys
@@ -92,6 +99,7 @@ pub fn handler(
     promo.active = true;
     promo.name_suffix = name_suffix;
     promo.image_uri = image_uri;
+    promo.market_name = market_name;
     promo.bump = ctx.bumps.promo;
 
     Ok(())

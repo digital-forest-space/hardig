@@ -2329,6 +2329,11 @@ impl App {
         let uri_bytes = image_uri.as_bytes();
         data.extend_from_slice(&(uri_bytes.len() as u32).to_le_bytes());
         data.extend_from_slice(uri_bytes);
+        // market_name: String (4-byte len + utf8)
+        let market_name = self.market_name_override.clone().unwrap_or_default();
+        let mn_bytes = market_name.as_bytes();
+        data.extend_from_slice(&(mn_bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(mn_bytes);
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),    // admin

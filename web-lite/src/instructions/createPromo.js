@@ -53,7 +53,8 @@ export async function buildCreatePromo(
   sellRefillPeriod,
   minDepositLamports,
   maxClaims,
-  imageUri
+  imageUri,
+  marketName = ''
 ) {
   const posPda = positionPda.value;
   const adminKeyAsset = myKeyAsset.value;
@@ -64,11 +65,12 @@ export async function buildCreatePromo(
   // Build instruction data:
   // discriminator(8) + name_suffix(String) + permissions(u8) + borrow_capacity(u64) +
   // borrow_refill_period(u64) + sell_capacity(u64) + sell_refill_period(u64) +
-  // min_deposit_lamports(u64) + max_claims(u32) + image_uri(String)
+  // min_deposit_lamports(u64) + max_claims(u32) + image_uri(String) + market_name(String)
   const nameSuffixBytes = encodeBorshString(nameSuffix);
   const imageUriBytes = encodeBorshString(imageUri);
+  const marketNameBytes = encodeBorshString(marketName);
 
-  const dataLen = 8 + nameSuffixBytes.length + 1 + 8 + 8 + 8 + 8 + 8 + 4 + imageUriBytes.length;
+  const dataLen = 8 + nameSuffixBytes.length + 1 + 8 + 8 + 8 + 8 + 8 + 4 + imageUriBytes.length + marketNameBytes.length;
   const data = new Uint8Array(dataLen);
   let offset = 0;
 
@@ -82,6 +84,7 @@ export async function buildCreatePromo(
   data.set(encodeU64(minDepositLamports), offset); offset += 8;
   data.set(encodeU32(maxClaims), offset); offset += 4;
   data.set(imageUriBytes, offset); offset += imageUriBytes.length;
+  data.set(marketNameBytes, offset); offset += marketNameBytes.length;
 
   const keys = [
     { pubkey: wallet, isSigner: true, isWritable: true },
