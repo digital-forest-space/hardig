@@ -34,8 +34,8 @@ pub enum HardigError {
     #[msg("Market/floor spread exceeds max_reinvest_spread_bps")]
     ReinvestSpreadTooHigh,
 
-    // Mayflower CPI errors
-    #[msg("Invalid Mayflower account address or derivation")]
+    // Nirvana CPI errors
+    #[msg("Invalid Nirvana account address or derivation")]
     InvalidMayflowerAccount,
 
     // Slippage errors

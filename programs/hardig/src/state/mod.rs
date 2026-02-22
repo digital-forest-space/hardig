@@ -117,6 +117,26 @@ pub const PERM_LIMITED_MASK: u8 = 0xC0;
 /// All defined permissions (bits 0-7).
 pub const PERM_ALL: u8 = 0xFF;
 
+/// Who is creating this delegated key — determines which permissions are allowed.
+#[derive(Clone, Copy)]
+pub enum KeyCreatorOrigin {
+    /// Admin directly authorizes a key to a known recipient.
+    Admin,
+    /// Permissionless promo claim — anyone can mint.
+    Promo,
+}
+
+impl KeyCreatorOrigin {
+    /// Permission bits allowed for this origin.
+    pub fn allowed_permissions(&self) -> u8 {
+        match self {
+            Self::Admin => PERM_BUY | PERM_SELL | PERM_BORROW | PERM_REPAY
+                         | PERM_REINVEST | PERM_LIMITED_SELL | PERM_LIMITED_BORROW,
+            Self::Promo => PERM_BUY | PERM_LIMITED_BORROW,
+        }
+    }
+}
+
 // Backwards-compatible presets
 pub const PRESET_ADMIN: u8 = 0x3F; // all 6 bits
 pub const PRESET_OPERATOR: u8 = 0x19; // buy + repay + reinvest

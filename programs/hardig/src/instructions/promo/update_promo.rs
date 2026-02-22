@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, PromoConfig, PERM_MANAGE_KEYS};
+use crate::state::{PositionNFT, PromoConfig, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -24,6 +24,13 @@ pub struct UpdatePromo<'info> {
         constraint = promo.authority_seed == position.authority_seed @ HardigError::InvalidKey,
     )]
     pub promo: Account<'info, PromoConfig>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 }
 
 pub fn handler(
@@ -37,6 +44,7 @@ pub fn handler(
         &ctx.accounts.admin_key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
+        &ctx.accounts.config.collection,
     )?;
 
     let promo = &mut ctx.accounts.promo;

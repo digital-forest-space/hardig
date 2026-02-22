@@ -12,12 +12,12 @@ use mpl_core::{
 
 use crate::errors::HardigError;
 use crate::state::{
-    KeyState, PositionNFT, ProtocolConfig, RateBucket,
+    KeyCreatorOrigin, KeyState, PositionNFT, ProtocolConfig, RateBucket,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS,
 };
 
 use super::validate_key::validate_key;
-use super::{permission_attributes, metadata_uri, format_sol_amount, slots_to_duration};
+use super::{permission_attributes, metadata_uri, format_sol_amount, slots_to_duration, validate_delegated_permissions};
 
 #[derive(Accounts)]
 pub struct AuthorizeKey<'info> {
@@ -88,35 +88,18 @@ pub fn handler(
         &ctx.accounts.admin_key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
+        &ctx.accounts.config.collection,
     )?;
 
-    // Validate the permissions bitmask
-    require!(permissions != 0, HardigError::InvalidKeyRole);
-    require!(permissions & PERM_MANAGE_KEYS == 0, HardigError::CannotCreateSecondAdmin);
-
-    // Validate rate-limit params match permission bits
-    if permissions & PERM_LIMITED_SELL != 0 {
-        require!(
-            sell_bucket_capacity > 0 && sell_refill_period_slots > 0,
-            HardigError::InvalidKeyRole
-        );
-    } else {
-        require!(
-            sell_bucket_capacity == 0 && sell_refill_period_slots == 0,
-            HardigError::InvalidKeyRole
-        );
-    }
-    if permissions & PERM_LIMITED_BORROW != 0 {
-        require!(
-            borrow_bucket_capacity > 0 && borrow_refill_period_slots > 0,
-            HardigError::InvalidKeyRole
-        );
-    } else {
-        require!(
-            borrow_bucket_capacity == 0 && borrow_refill_period_slots == 0,
-            HardigError::InvalidKeyRole
-        );
-    }
+    // Validate permissions + rate-limit params for admin-created delegated keys
+    validate_delegated_permissions(
+        KeyCreatorOrigin::Admin,
+        permissions,
+        sell_bucket_capacity,
+        sell_refill_period_slots,
+        borrow_bucket_capacity,
+        borrow_refill_period_slots,
+    )?;
 
     // --- Read admin asset's name and market attribute ---
     // Deserialize the admin key's MPL-Core BaseAssetV1 to get the position name

@@ -69,6 +69,7 @@ pub fn handler(ctx: Context<RevokeKey>) -> Result<()> {
         &ctx.accounts.admin_key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
+        &ctx.accounts.config.collection,
     )?;
 
     // Prevent revoking the admin key

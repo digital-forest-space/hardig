@@ -74,6 +74,7 @@ pub fn handler(
         &ctx.accounts.admin_key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
+        &ctx.accounts.config.collection,
     )?;
 
     // Check config is not locked

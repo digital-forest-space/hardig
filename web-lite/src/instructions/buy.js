@@ -13,7 +13,7 @@ import {
   DEFAULT_WSOL_MINT,
   DEFAULT_NAV_SOL_MINT,
 } from '../constants.js';
-import { myKeyAsset, positionPda, myPermissions, position, marketConfigPda, marketConfig } from '../state.js';
+import { myKeyAsset, positionPda, myPermissions, position, marketConfigPda, marketConfig, mfFloorPrice } from '../state.js';
 import { shortPubkey, lamportsToSol, permissionsName } from '../utils.js';
 
 export async function buildBuy(program, wallet, amountLamports) {
@@ -39,8 +39,20 @@ export async function buildBuy(program, wallet, amountLamports) {
   });
   const syncIx = createSyncNativeInstruction(wsolAta, TOKEN_PROGRAM_ID);
 
+  // Slippage protection: estimate min_out using floor price.
+  // buy: input SOL lamports -> output navSOL lamports
+  // expected_nav = amount * 1e9 / floor_price, then apply 1% slippage
+  const floorPrice = mfFloorPrice.value;
+  let minOut;
+  if (floorPrice > 0) {
+    const expected = BigInt(amountLamports) * BigInt(1_000_000_000) / BigInt(floorPrice);
+    minOut = new BN((expected * BigInt(99) / BigInt(100)).toString());
+  } else {
+    minOut = new BN(0); // floor price unavailable; no slippage protection
+  }
+
   const buyIx = await program.methods
-    .buy(new BN(amountLamports), new BN(0)) // min_out = 0 (no slippage protection)
+    .buy(new BN(amountLamports), minOut)
     .accounts({
       signer: wallet,
       keyAsset: keyAsset,

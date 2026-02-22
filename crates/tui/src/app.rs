@@ -1333,7 +1333,10 @@ impl App {
                 return;
             }
         };
-        let admin_asset = self.my_asset.unwrap();
+        let admin_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
 
         let asset_kp = Keypair::new();
         let new_asset = asset_kp.pubkey();
@@ -1465,8 +1468,14 @@ impl App {
         }
 
         let target = &revocable[idx];
-        let position_pda = self.position_pda.unwrap();
-        let admin_asset = self.my_asset.unwrap();
+        let position_pda = match self.position_pda {
+            Some(p) => p,
+            None => { self.push_log("No position loaded"); return; }
+        };
+        let admin_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
 
         // Derive the target key's KeyState PDA
         let (target_key_state, _) = Pubkey::find_program_address(
@@ -1523,13 +1532,35 @@ impl App {
             }
         };
 
-        let key_asset = self.my_asset.unwrap();
-        let mc_pda = self.market_config_pda.unwrap();
-        let mc = self.market_config.as_ref().unwrap();
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
+        let mc_pda = match self.market_config_pda {
+            Some(p) => p,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+        let mc = match self.market_config.as_ref() {
+            Some(c) => c,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+
+        // Slippage protection: estimate min_out using floor price.
+        // buy: input SOL lamports -> output navSOL lamports
+        // expected_nav = amount * 1e9 / floor_price, then apply 1% slippage
+        let min_out = if self.mf_floor_price > 0 {
+            let expected = (amount as u128)
+                .saturating_mul(1_000_000_000)
+                / (self.mf_floor_price as u128);
+            // Apply 1% slippage tolerance (99% of expected)
+            (expected * 99 / 100) as u64
+        } else {
+            0u64 // floor price unavailable; no slippage protection
+        };
 
         let mut data = sighash("buy");
         data.extend_from_slice(&amount.to_le_bytes());
-        data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
+        data.extend_from_slice(&min_out.to_le_bytes());
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
@@ -1606,13 +1637,35 @@ impl App {
             }
         };
 
-        let key_asset = self.my_asset.unwrap();
-        let mc_pda = self.market_config_pda.unwrap();
-        let mc = self.market_config.as_ref().unwrap();
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
+        let mc_pda = match self.market_config_pda {
+            Some(p) => p,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+        let mc = match self.market_config.as_ref() {
+            Some(c) => c,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+
+        // Slippage protection: estimate min_out using floor price.
+        // sell/withdraw: input navSOL lamports -> output SOL lamports
+        // expected_sol = amount * floor_price / 1e9, then apply 1% slippage
+        let min_out = if self.mf_floor_price > 0 {
+            let expected = (amount as u128)
+                .saturating_mul(self.mf_floor_price as u128)
+                / 1_000_000_000u128;
+            // Apply 1% slippage tolerance (99% of expected)
+            (expected * 99 / 100) as u64
+        } else {
+            0u64 // floor price unavailable; no slippage protection
+        };
 
         let mut data = sighash("withdraw");
         data.extend_from_slice(&amount.to_le_bytes());
-        data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
+        data.extend_from_slice(&min_out.to_le_bytes());
 
         // For sell/withdraw, key_state is optional (only needed for rate-limited keys).
         // Pass it if we have a KeyState PDA for this key.
@@ -1689,9 +1742,18 @@ impl App {
             }
         };
 
-        let key_asset = self.my_asset.unwrap();
-        let mc_pda = self.market_config_pda.unwrap();
-        let mc = self.market_config.as_ref().unwrap();
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
+        let mc_pda = match self.market_config_pda {
+            Some(p) => p,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+        let mc = match self.market_config.as_ref() {
+            Some(c) => c,
+            None => { self.push_log("No market config loaded"); return; }
+        };
 
         let mut data = sighash("borrow");
         data.extend_from_slice(&amount.to_le_bytes());
@@ -1763,9 +1825,18 @@ impl App {
             }
         };
 
-        let key_asset = self.my_asset.unwrap();
-        let mc_pda = self.market_config_pda.unwrap();
-        let mc = self.market_config.as_ref().unwrap();
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
+        let mc_pda = match self.market_config_pda {
+            Some(p) => p,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+        let mc = match self.market_config.as_ref() {
+            Some(c) => c,
+            None => { self.push_log("No market config loaded"); return; }
+        };
 
         let mut data = sighash("repay");
         data.extend_from_slice(&amount.to_le_bytes());
@@ -1826,12 +1897,36 @@ impl App {
             }
         };
 
-        let key_asset = self.my_asset.unwrap();
-        let mc_pda = self.market_config_pda.unwrap();
-        let mc = self.market_config.as_ref().unwrap();
+        let key_asset = match self.my_asset {
+            Some(a) => a,
+            None => { self.push_log("No key asset loaded"); return; }
+        };
+        let mc_pda = match self.market_config_pda {
+            Some(p) => p,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+        let mc = match self.market_config.as_ref() {
+            Some(c) => c,
+            None => { self.push_log("No market config loaded"); return; }
+        };
+
+        // Slippage protection: reinvest borrows max capacity then buys navSOL.
+        // We can't easily predict the exact output here since the borrow amount
+        // depends on on-chain state at execution time. Use floor price to estimate
+        // min_out from the borrow capacity we see locally.
+        let min_out = if self.mf_floor_price > 0 && self.mf_borrow_capacity > 0 {
+            let expected_nav = (self.mf_borrow_capacity as u128)
+                .saturating_mul(1_000_000_000)
+                / (self.mf_floor_price as u128);
+            // Apply 2% slippage tolerance (wider than buy/sell since borrow capacity
+            // may shift between our read and tx execution)
+            (expected_nav * 98 / 100) as u64
+        } else {
+            0u64 // floor price or capacity unavailable; no slippage protection
+        };
 
         let mut data = sighash("reinvest");
-        data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage protection)
+        data.extend_from_slice(&min_out.to_le_bytes());
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
@@ -2905,7 +3000,7 @@ impl App {
             short_pubkey(&pos_pda),
             permissions_name(perms),
             if self.mayflower_initialized {
-                ", Mayflower OK"
+                ", Nirvana OK"
             } else {
                 ""
             },

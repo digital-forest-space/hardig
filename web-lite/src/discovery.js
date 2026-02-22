@@ -20,9 +20,6 @@ import {
   mayflowerInitialized,
   marketConfigPda,
   marketConfig,
-  discoveredPositions,
-  activePositionIndex,
-  discoveredPromos,
   pushLog,
   resetPositionState,
 } from './state.js';
@@ -66,25 +63,13 @@ function parseMplCoreAsset(data) {
   // Bytes 33: UpdateAuthority tag (0 = None, 1 = Address, 2 = Collection)
   const uaTag = data[33];
   let updateAuthority = null;
-  let nameOffset = 34; // tag 0 (None): no pubkey follows
   if ((uaTag === 1 || uaTag === 2) && data.length >= 66) {
     updateAuthority = new PublicKey(data.slice(34, 66));
-    nameOffset = 66;
   } else if (uaTag !== 0) {
     return null; // unknown tag
   }
 
-  // Name: borsh String (u32 length + utf8 bytes)
-  let name = null;
-  if (nameOffset + 4 <= data.length) {
-    const view = new DataView(data.buffer, data.byteOffset);
-    const nameLen = view.getUint32(nameOffset, true);
-    if (nameLen > 0 && nameLen <= 200 && nameOffset + 4 + nameLen <= data.length) {
-      name = new TextDecoder().decode(data.slice(nameOffset + 4, nameOffset + 4 + nameLen));
-    }
-  }
-
-  return { owner, updateAuthority, name };
+  return { owner, updateAuthority };
 }
 
 /**
@@ -141,19 +126,14 @@ function readPositionBindingFromAssetData(data) {
   return readAttributeFromAssetData(data, 'position');
 }
 
-// Module-level cache from last discovery — used by selectActivePosition when
-// switching positions without a full re-discovery.
-let _lastDiscoveryCache = null;
-
 export async function discoverPosition(connection, wallet) {
   resetPositionState();
-  _lastDiscoveryCache = null;
 
   // Discovery strategy: scan PositionNFT and KeyState accounts from the hardig program
   // (small account set), then load specific MPL-Core assets by pubkey.
   // This avoids getProgramAccounts on MPL Core which most RPC providers reject.
 
-  const POSITION_SIZE = 205; // PositionNFT account size (with recovery fields)
+  const POSITION_SIZE = 132; // PositionNFT account size
 
   const [positionAccounts, keyStateAccounts] = await Promise.all([
     connection.getProgramAccounts(PROGRAM_ID, {
@@ -176,14 +156,13 @@ export async function discoverPosition(connection, wallet) {
     keyStates.push({ pubkey, asset, buckets });
   }
 
-  // Parse all PositionNFT accounts to get authority_seed and current_admin_asset
-  const positions = []; // { posPda, authoritySeed, currentAdminAsset }
+  // Parse all PositionNFT accounts to get admin_asset pubkeys
+  const positions = []; // { posPda, adminAsset }
   for (const { pubkey, account } of positionAccounts) {
     const data = account.data;
     if (data.length < POSITION_SIZE) continue;
-    const authoritySeed = new PublicKey(data.slice(8, 40));
-    const currentAdminAsset = new PublicKey(data.slice(132, 164));
-    positions.push({ posPda: pubkey, authoritySeed, currentAdminAsset });
+    const adminAsset = new PublicKey(data.slice(8, 40));
+    positions.push({ posPda: pubkey, adminAsset });
   }
 
   if (positions.length === 0 && keyStates.length === 0) {
@@ -191,27 +170,21 @@ export async function discoverPosition(connection, wallet) {
     return;
   }
 
-  // Build lookup: authority_seed string -> posPda (delegated keys bind to authority_seed)
+  // Build lookup: admin_asset string -> posPda
   const adminAssetToPos = new Map();
   for (const p of positions) {
-    adminAssetToPos.set(p.authoritySeed.toString(), p.posPda);
+    adminAssetToPos.set(p.adminAsset.toString(), p.posPda);
   }
 
-  // Step 1: Check admin keys — load each position's current_admin_asset and check owner
-  const currentAdminPubkeys = positions.map((p) => p.currentAdminAsset);
-  const adminAssetInfos = await connection.getMultipleAccountsInfo(currentAdminPubkeys);
+  // Step 1: Check admin keys — load each position's admin_asset and check owner
+  const adminAssetPubkeys = positions.map((p) => p.adminAsset);
+  const adminAssetInfos = await connection.getMultipleAccountsInfo(adminAssetPubkeys);
 
-  // Step 2: Also load ALL delegated asset infos for multi-position discovery
-  const delegatedPubkeys = keyStates.map((ks) => ks.asset);
-  const delegatedInfos = keyStates.length > 0
-    ? await connection.getMultipleAccountsInfo(delegatedPubkeys)
-    : [];
+  let bestPos = null;
+  let best = null;
 
-  // Collect ALL positions the wallet has access to
-  const discovered = [];
-  const seenPositions = new Set();
+  function popcount(n) { let c = 0; while (n) { c += n & 1; n >>= 1; } return c; }
 
-  // Admin positions
   for (let i = 0; i < positions.length; i++) {
     const info = adminAssetInfos[i];
     if (!info) continue;
@@ -221,157 +194,97 @@ export async function discoverPosition(connection, wallet) {
 
     const permissions = readPermissionsFromAssetData(info.data) ?? PRESET_ADMIN;
     const posPda = positions[i].posPda;
-    const posKey = posPda.toString();
-    if (seenPositions.has(posKey)) continue;
-    seenPositions.add(posKey);
 
-    // Read deposited_nav and user_debt from position account
-    const posAcc = positionAccounts.find(({ pubkey }) => pubkey.equals(posPda));
-    let depositedNav = 0, userDebt = 0;
-    if (posAcc) {
-      const view = new DataView(posAcc.account.data.buffer, posAcc.account.data.byteOffset);
-      depositedNav = Number(view.getBigUint64(104, true));
-      userDebt = Number(view.getBigUint64(112, true));
+    let isBetter = !best;
+    if (!isBetter) {
+      const newPop = popcount(permissions);
+      const oldPop = popcount(best.permissions);
+      isBetter = newPop > oldPop
+        || (newPop === oldPop && (permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
     }
-
-    discovered.push({
-      posPda,
-      adminAsset: positions[i].authoritySeed,
-      permissions,
-      keyAsset: currentAdminPubkeys[i],
-      keyStatePda: null,
-      depositedNav,
-      userDebt,
-      isAdmin: true,
-    });
+    if (isBetter) {
+      bestPos = posPda;
+      best = { permissions, assetPubkey: adminAssetPubkeys[i] };
+    }
   }
 
-  // Delegated positions
-  for (let i = 0; i < keyStates.length; i++) {
-    const info = delegatedInfos[i];
-    if (!info) continue;
-    const parsed = parseMplCoreAsset(info.data);
-    if (!parsed) continue;
-    if (!parsed.owner.equals(wallet)) continue;
+  // Step 2: If no admin key found, check delegated keys via KeyState assets
+  if (!bestPos && keyStates.length > 0) {
+    const delegatedPubkeys = keyStates.map((ks) => ks.asset);
+    const delegatedInfos = await connection.getMultipleAccountsInfo(delegatedPubkeys);
 
-    const permissions = readPermissionsFromAssetData(info.data);
-    if (permissions === null) continue;
-    const positionBinding = readPositionBindingFromAssetData(info.data);
-    if (!positionBinding) continue;
+    for (let i = 0; i < keyStates.length; i++) {
+      const info = delegatedInfos[i];
+      if (!info) continue;
+      const parsed = parseMplCoreAsset(info.data);
+      if (!parsed) continue;
+      if (!parsed.owner.equals(wallet)) continue;
 
-    const posPda = adminAssetToPos.get(positionBinding);
-    if (!posPda) continue;
-    const posKey = posPda.toString();
-    if (seenPositions.has(posKey)) continue;
-    seenPositions.add(posKey);
+      const permissions = readPermissionsFromAssetData(info.data);
+      if (permissions === null) continue;
+      const positionBinding = readPositionBindingFromAssetData(info.data);
+      if (!positionBinding) continue;
 
-    const posAcc = positionAccounts.find(({ pubkey }) => pubkey.equals(posPda));
-    let depositedNav = 0, userDebt = 0;
-    if (posAcc) {
-      const view = new DataView(posAcc.account.data.buffer, posAcc.account.data.byteOffset);
-      depositedNav = Number(view.getBigUint64(104, true));
-      userDebt = Number(view.getBigUint64(112, true));
+      const posPda = adminAssetToPos.get(positionBinding);
+      if (!posPda) continue;
+
+      let isBetter = !best;
+      if (!isBetter) {
+        const newPop = popcount(permissions);
+        const oldPop = popcount(best.permissions);
+        isBetter = newPop > oldPop
+          || (newPop === oldPop && (permissions & PERM_MANAGE_KEYS) !== 0 && (best.permissions & PERM_MANAGE_KEYS) === 0);
+      }
+      if (isBetter) {
+        bestPos = posPda;
+        best = { permissions, assetPubkey: delegatedPubkeys[i] };
+      }
     }
-
-    discovered.push({
-      posPda,
-      adminAsset: new PublicKey(positionBinding), // authority_seed (from key's position attribute)
-      permissions,
-      keyAsset: delegatedPubkeys[i],
-      keyStatePda: keyStates[i].pubkey,
-      depositedNav,
-      userDebt,
-      isAdmin: false,
-    });
   }
 
-  // Sort: admin positions first, then by deposited_nav descending
-  discovered.sort((a, b) => {
-    if (a.isAdmin !== b.isAdmin) return a.isAdmin ? -1 : 1;
-    return b.depositedNav - a.depositedNav;
-  });
-
-  discoveredPositions.value = discovered;
-
-  if (discovered.length === 0) {
+  if (!bestPos || !best) {
     pushLog('No position found for this wallet.');
     return;
   }
 
-  // Store cache for position switching without re-discovery
-  _lastDiscoveryCache = {
-    positions, keyStates, currentAdminPubkeys, adminAssetInfos, delegatedPubkeys, delegatedInfos,
-  };
-
-  // Auto-select the first position
-  await selectActivePosition(0, connection, _lastDiscoveryCache);
-
-  pushLog(
-    `Found ${discovered.length} position(s).`
-  );
-}
-
-/**
- * Select a specific discovered position and load its full state.
- * Exported so UI components can call it when switching positions.
- */
-export async function selectActivePosition(index, connection, cache) {
-  const dp = discoveredPositions.value[index];
-  if (!dp) return;
-
-  // Use provided cache or fall back to module-level cache from last discovery
-  const effectiveCache = cache || _lastDiscoveryCache;
-  if (!effectiveCache) {
-    pushLog('No discovery cache available — please refresh first.');
-    return;
-  }
-
-  activePositionIndex.value = index;
-  positionPda.value = dp.posPda;
-  myPermissions.value = dp.permissions;
-  myKeyAsset.value = dp.keyAsset;
-  myNftMint.value = dp.keyAsset;
-
-  const { positions, keyStates, currentAdminPubkeys, adminAssetInfos, delegatedPubkeys, delegatedInfos } = effectiveCache;
+  positionPda.value = bestPos;
+  myPermissions.value = best.permissions;
+  myKeyAsset.value = best.assetPubkey;
+  myNftMint.value = best.assetPubkey; // For backwards compat in UI (used in KeyringTable)
 
   // Load position account data
   try {
-    const posInfo = await connection.getAccountInfo(dp.posPda);
+    const posInfo = await connection.getAccountInfo(bestPos);
     if (posInfo) {
       const data = posInfo.data;
+      // Parse PositionNFT: discriminator(8) + admin_asset(32) + position_pda(32) + market_config(32)
+      // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
+      // + last_admin_activity(8) + bump(1) + authority_bump(1)
       const view = new DataView(data.buffer, data.byteOffset);
-      const authoritySeed = new PublicKey(data.slice(8, 40));
+      const adminAsset = new PublicKey(data.slice(8, 40));
       const mfPositionPda = new PublicKey(data.slice(40, 72));
       const mcPda = new PublicKey(data.slice(72, 104));
       const depositedNav = Number(view.getBigUint64(104, true));
       const userDebt = Number(view.getBigUint64(112, true));
+      // bytes 120-121: max_reinvest_spread_bps (unused, skip)
       const lastAdminActivity = Number(view.getBigInt64(122, true));
       const bump = data[130];
-      const currentAdminAsset = new PublicKey(data.slice(132, 164));
-      const recoveryAsset = new PublicKey(data.slice(164, 196));
-      const recoveryLockoutSecs = Number(view.getBigInt64(196, true));
-      const recoveryConfigLocked = data[204] !== 0;
 
       const posData = {
-        authoritySeed,
-        adminAsset: authoritySeed, // backward compat alias
+        adminAsset,
         positionPda: mfPositionPda,
         marketConfig: mcPda,
         depositedNav,
         userDebt,
         lastAdminActivity,
         bump,
-        currentAdminAsset,
-        recoveryAsset,
-        recoveryLockoutSecs,
-        recoveryConfigLocked,
       };
 
       position.value = posData;
       mayflowerInitialized.value =
         !mfPositionPda.equals(PublicKey.default);
 
-      // Fetch MarketConfig
+      // Fetch MarketConfig: from position if set, otherwise try default
       const mcToFetch = !mcPda.equals(PublicKey.default)
         ? mcPda
         : deriveMarketConfigPda(DEFAULT_NAV_SOL_MINT)[0];
@@ -401,10 +314,9 @@ export async function selectActivePosition(index, connection, cache) {
 
   // Build keyring: admin key + all delegated keys for this position
   const posKeys = [];
-  const posAuthoritySeed = position.value?.authoritySeed;
-  const posCurrentAdmin = position.value?.currentAdminAsset;
-  if (posAuthoritySeed) {
-    const authorityStr = posAuthoritySeed.toString();
+  const posAdminAsset = position.value?.adminAsset;
+  if (posAdminAsset) {
+    const adminAssetStr = posAdminAsset.toString();
 
     // Build a map of asset pubkey -> KeyState data for bucket info
     const keyStateMap = new Map();
@@ -422,167 +334,53 @@ export async function selectActivePosition(index, connection, cache) {
       };
     }
 
-    // Admin key (use current_admin_asset, which may differ from authority_seed after recovery)
-    const adminIdx = currentAdminPubkeys.findIndex((pk) => posCurrentAdmin && pk.equals(posCurrentAdmin));
+    // Admin key: we already loaded it above; re-read owner to check if signer holds it
+    const adminIdx = adminAssetPubkeys.findIndex((pk) => pk.equals(posAdminAsset));
     if (adminIdx >= 0 && adminAssetInfos[adminIdx]) {
       const parsed = parseMplCoreAsset(adminAssetInfos[adminIdx].data);
+      const held = parsed && parsed.owner.equals(wallet);
       posKeys.push({
         pda: null,
-        mint: posCurrentAdmin,
+        mint: posAdminAsset,
         permissions: PRESET_ADMIN,
-        heldBySigner: dp.isAdmin,
-        name: parsed?.name || null,
+        heldBySigner: !!held,
       });
     }
 
-    // Delegated keys: use cached delegatedInfos when available, fall back to RPC
-    for (let i = 0; i < keyStates.length; i++) {
-      let info = delegatedInfos[i];
-      if (!info) {
-        try { info = await connection.getAccountInfo(keyStates[i].asset); }
-        catch { continue; }
-      }
+    // Delegated keys: load all KeyState assets, check position binding
+    for (const ks of keyStates) {
+      let info;
+      // Reuse already-loaded data if this key was loaded above (i.e., wallet held it)
+      const delegIdx = keyStates.indexOf(ks);
+      // We need to load it — delegated infos were only loaded in step 2 if bestPos wasn't found via admin.
+      // Safest: just load them now.
+      try {
+        info = await connection.getAccountInfo(ks.asset);
+      } catch { continue; }
       if (!info) continue;
 
       const permissions = readPermissionsFromAssetData(info.data);
       if (permissions === null) continue;
       const binding = readPositionBindingFromAssetData(info.data);
-      if (binding !== authorityStr) continue;
+      if (binding !== adminAssetStr) continue;
 
       const parsed = parseMplCoreAsset(info.data);
-      // Check if this delegated key's asset is the one we discovered for this position
-      const isOurKey = keyStates[i].asset.equals(dp.keyAsset);
+      const held = parsed && parsed.owner.equals(wallet);
 
       posKeys.push({
         pda: null,
-        mint: keyStates[i].asset,
+        mint: ks.asset,
         permissions,
-        heldBySigner: isOurKey && !dp.isAdmin,
-        name: parsed?.name || null,
-        ...attachBuckets(keyStates[i].asset),
+        heldBySigner: !!held,
+        ...attachBuckets(ks.asset),
       });
     }
   }
   keyring.value = posKeys;
 
-  // Discover promos for this position
-  await discoverPromos(connection);
-}
-
-/**
- * Discover all PromoConfig accounts for the currently active position.
- * Uses getProgramAccounts with the PromoConfig discriminator and filters
- * by authority_seed matching the current position.
- */
-export async function discoverPromos(connection) {
-  discoveredPromos.value = [];
-
-  const pos = position.value;
-  if (!pos || !pos.authoritySeed) return;
-
-  const authoritySeed = pos.authoritySeed;
-
-  // PromoConfig account discriminator: sha256("account:PromoConfig")[..8] = "N1FrpUTeaxt" (base58)
-  const PROMO_DISC_B58 = 'N1FrpUTeaxt';
-
-  try {
-    const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
-      filters: [
-        // Discriminator (first 8 bytes)
-        { memcmp: { offset: 0, bytes: PROMO_DISC_B58 } },
-        // authority_seed at offset 8 (32 bytes)
-        { memcmp: { offset: 8, bytes: authoritySeed.toBase58() } },
-      ],
-      commitment: 'confirmed',
-    });
-
-    const promos = [];
-    for (const { pubkey, account } of accounts) {
-      const data = account.data;
-      if (data.length < 82) continue; // Minimum reasonable size
-
-      const view = new DataView(data.buffer, data.byteOffset);
-
-      // Parse PromoConfig layout (after 8-byte discriminator):
-      // authority_seed: 32 bytes (Pubkey) [8..40]
-      // permissions: 1 byte (u8) [40]
-      // borrow_capacity: 8 bytes (u64 LE) [41..49]
-      // borrow_refill_period: 8 bytes (u64 LE) [49..57]
-      // sell_capacity: 8 bytes (u64 LE) [57..65]
-      // sell_refill_period: 8 bytes (u64 LE) [65..73]
-      // min_deposit_lamports: 8 bytes (u64 LE) [73..81]
-      // max_claims: 4 bytes (u32 LE) [81..85]
-      // claims_count: 4 bytes (u32 LE) [85..89]
-      // active: 1 byte (bool) [89]
-      // name_suffix: 4 bytes length + UTF-8 bytes [90..]
-      // image_uri: 4 bytes length + UTF-8 bytes [after name_suffix]
-      // bump: 1 byte (u8) [after image_uri]
-
-      const parsedAuthoritySeed = new PublicKey(data.slice(8, 40));
-      const permissions = data[40];
-      const borrowCapacity = Number(view.getBigUint64(41, true));
-      const borrowRefillPeriod = Number(view.getBigUint64(49, true));
-      const sellCapacity = Number(view.getBigUint64(57, true));
-      const sellRefillPeriod = Number(view.getBigUint64(65, true));
-      const minDepositLamports = Number(view.getBigUint64(73, true));
-      const maxClaims = view.getUint32(81, true);
-      const claimsCount = view.getUint32(85, true);
-      const active = data[89] !== 0;
-
-      // Parse name_suffix (Borsh String: u32 len + bytes)
-      let offset = 90;
-      let nameSuffix = '';
-      if (offset + 4 <= data.length) {
-        const nameLen = view.getUint32(offset, true);
-        offset += 4;
-        if (nameLen > 0 && nameLen <= 200 && offset + nameLen <= data.length) {
-          nameSuffix = new TextDecoder().decode(data.slice(offset, offset + nameLen));
-          offset += nameLen;
-        }
-      }
-
-      // Parse image_uri (Borsh String: u32 len + bytes)
-      let imageUri = '';
-      if (offset + 4 <= data.length) {
-        const uriLen = view.getUint32(offset, true);
-        offset += 4;
-        if (uriLen > 0 && uriLen <= 200 && offset + uriLen <= data.length) {
-          imageUri = new TextDecoder().decode(data.slice(offset, offset + uriLen));
-          offset += uriLen;
-        }
-      }
-
-      // bump
-      const bump = offset < data.length ? data[offset] : 0;
-
-      promos.push({
-        pda: pubkey,
-        config: {
-          authoritySeed: parsedAuthoritySeed,
-          permissions,
-          borrowCapacity,
-          borrowRefillPeriod,
-          sellCapacity,
-          sellRefillPeriod,
-          minDepositLamports,
-          maxClaims,
-          claimsCount,
-          active,
-          nameSuffix,
-          imageUri,
-          bump,
-        },
-      });
-    }
-
-    // Sort by name_suffix alphabetically
-    promos.sort((a, b) => a.config.nameSuffix.localeCompare(b.config.nameSuffix));
-    discoveredPromos.value = promos;
-
-    if (promos.length > 0) {
-      pushLog(`Found ${promos.length} promo(s) for this position.`);
-    }
-  } catch (e) {
-    pushLog('Failed to discover promos: ' + e.message, true);
-  }
+  pushLog(
+    `Found position ${shortPubkey(bestPos)} (permissions: ${permissionsName(best.permissions)}${
+      mayflowerInitialized.value ? ', Nirvana OK' : ''
+    })`
+  );
 }

@@ -11,7 +11,7 @@ import {
   DEFAULT_WSOL_MINT,
   DEFAULT_NAV_SOL_MINT,
 } from '../constants.js';
-import { myKeyAsset, positionPda, myPermissions, position, marketConfigPda, marketConfig } from '../state.js';
+import { myKeyAsset, positionPda, myPermissions, position, marketConfigPda, marketConfig, mfFloorPrice, mfBorrowCapacity } from '../state.js';
 import { shortPubkey, permissionsName } from '../utils.js';
 
 export async function buildReinvest(program, wallet) {
@@ -33,8 +33,21 @@ export async function buildReinvest(program, wallet) {
     units: 400_000,
   });
 
+  // Slippage protection: reinvest borrows max capacity then buys navSOL.
+  // We estimate min_out from locally-known borrow capacity and floor price.
+  // Wider tolerance (2%) since capacity may shift between read and execution.
+  const floorPrice = mfFloorPrice.value;
+  const borrowCap = mfBorrowCapacity.value;
+  let minOut;
+  if (floorPrice > 0 && borrowCap > 0) {
+    const expectedNav = BigInt(borrowCap) * BigInt(1_000_000_000) / BigInt(floorPrice);
+    minOut = new BN((expectedNav * BigInt(98) / BigInt(100)).toString());
+  } else {
+    minOut = new BN(0); // floor price or capacity unavailable; no slippage protection
+  }
+
   const ix = await program.methods
-    .reinvest(new BN(0)) // min_out = 0 (no slippage protection)
+    .reinvest(minOut)
     .accounts({
       signer: wallet,
       keyAsset: keyAsset,

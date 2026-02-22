@@ -39,7 +39,9 @@ pub struct ClaimPromoKey<'info> {
     )]
     pub claim_receipt: Account<'info, ClaimReceipt>,
 
-    /// The position this promo is for (read-only, for key binding).
+    /// The position this promo is for. Mutable because min_deposit_lamports
+    /// transfers SOL into this account as a deposit bond.
+    #[account(mut)]
     pub position: Account<'info, PositionNFT>,
 
     /// The new MPL-Core asset for the key NFT.
@@ -99,24 +101,41 @@ pub fn handler(ctx: Context<ClaimPromoKey>) -> Result<()> {
         HardigError::InvalidKey
     );
 
-    // 4. Populate ClaimReceipt
+    // 4. Enforce minimum deposit bond
+    if promo.min_deposit_lamports > 0 {
+        let transfer_ix = anchor_lang::system_program::Transfer {
+            from: ctx.accounts.claimer.to_account_info(),
+            to: ctx.accounts.position.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            transfer_ix,
+        );
+        anchor_lang::system_program::transfer(cpi_ctx, promo.min_deposit_lamports)?;
+    }
+
+    // 5. Populate ClaimReceipt
     let claim_receipt = &mut ctx.accounts.claim_receipt;
     claim_receipt.claimer = ctx.accounts.claimer.key();
     claim_receipt.promo = ctx.accounts.promo.key();
     claim_receipt.bump = ctx.bumps.claim_receipt;
 
-    // 5. Build NFT name
+    // 6. Build NFT name
     let nft_name = format!("H\u{00e4}rdig Key - {}", promo.name_suffix);
 
-    // 6. Build attributes
+    // 7. Build attributes
     let permissions = promo.permissions;
     let mut attrs = permission_attributes(permissions);
     attrs.push(Attribute {
         key: "position".to_string(),
         value: ctx.accounts.position.authority_seed.to_string(),
     });
+    attrs.push(Attribute {
+        key: "promo".to_string(),
+        value: ctx.accounts.promo.key().to_string(),
+    });
 
-    // 7. Build limited sell/borrow strings if applicable
+    // 8. Build limited sell/borrow strings if applicable
     let sell_limit_str = if promo.sell_capacity > 0 {
         let v = format!(
             "{} navSOL / {}",
@@ -147,14 +166,14 @@ pub fn handler(ctx: Context<ClaimPromoKey>) -> Result<()> {
         None
     };
 
-    // 8. Determine image override
+    // 9. Determine image override
     let image = if promo.image_uri.is_empty() {
         None
     } else {
         Some(promo.image_uri.as_str())
     };
 
-    // 9. Build metadata URI
+    // 10. Build metadata URI
     let uri = metadata_uri(
         &nft_name,
         permissions,
@@ -165,7 +184,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>) -> Result<()> {
         image,
     );
 
-    // 10. Mint key NFT via MPL-Core CreateV2CpiBuilder
+    // 11. Mint key NFT via MPL-Core CreateV2CpiBuilder
     let config = &ctx.accounts.config;
     let config_seeds: &[&[u8]] = &[ProtocolConfig::SEED, &[config.bump]];
 
@@ -196,7 +215,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>) -> Result<()> {
         ])
         .invoke_signed(&[config_seeds])?;
 
-    // 11. Initialize KeyState
+    // 12. Initialize KeyState
     let clock = Clock::get()?;
     let current_slot = clock.slot;
 
@@ -221,8 +240,10 @@ pub fn handler(ctx: Context<ClaimPromoKey>) -> Result<()> {
         };
     }
 
-    // 12. Increment claims_count
-    ctx.accounts.promo.claims_count += 1;
+    // 13. Increment claims_count (checked to prevent overflow)
+    ctx.accounts.promo.claims_count = ctx.accounts.promo.claims_count
+        .checked_add(1)
+        .ok_or(error!(HardigError::PromoMaxClaimsReached))?;
 
     Ok(())
 }

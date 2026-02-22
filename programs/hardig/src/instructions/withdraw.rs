@@ -6,7 +6,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyState, MarketConfig, PositionNFT, PERM_LIMITED_SELL, PERM_SELL};
+use crate::state::{KeyState, MarketConfig, PositionNFT, ProtocolConfig, PERM_LIMITED_SELL, PERM_SELL};
 
 use super::consume_rate_limit::consume_rate_limit;
 use super::validate_key::validate_key;
@@ -27,6 +27,13 @@ pub struct Withdraw<'info> {
     /// The position to withdraw from.
     #[account(mut)]
     pub position: Account<'info, PositionNFT>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 
     /// The MarketConfig for this position's market.
     #[account(
@@ -118,6 +125,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         &ctx.accounts.key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_SELL | PERM_LIMITED_SELL,
+        &ctx.accounts.config.collection,
     )?;
 
     // Validate KeyState matches key_asset if provided

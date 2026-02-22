@@ -39,7 +39,9 @@ pub use revoke_key::*;
 pub use transfer_admin::*;
 pub use withdraw::*;
 
+use anchor_lang::prelude::*;
 use mpl_core::types::Attribute;
+use crate::errors::HardigError;
 use crate::state::*;
 
 /// Build human-readable on-chain attributes from a permission bitmask.
@@ -84,6 +86,26 @@ pub fn slots_to_duration(slots: u64) -> String {
     parts.join(", ")
 }
 
+/// Escape a string for safe embedding in JSON values.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                // Unicode escape for other control characters
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Image hosted on Irys, shared by all Härdig key NFTs.
 const KEY_IMAGE: &str = "https://gateway.irys.xyz/GKa2AyPSRe2VnsPXBepTzhzohEBsLNdxFctR1MFoYojK";
 
@@ -115,27 +137,27 @@ pub fn metadata_uri(
     ];
     for &(bit, label) in bits {
         if permissions & bit != 0 {
-            attrs.push(format!("{{\"trait_type\":\"{}\",\"value\":\"true\"}}", label));
+            attrs.push(format!("{{\"trait_type\":\"{}\",\"value\":\"true\"}}", json_escape(label)));
         }
     }
     if let Some(v) = limited_sell {
-        attrs.push(format!("{{\"trait_type\":\"limited_sell\",\"value\":\"{}\"}}", v));
+        attrs.push(format!("{{\"trait_type\":\"limited_sell\",\"value\":\"{}\"}}", json_escape(v)));
     }
     if let Some(v) = limited_borrow {
-        attrs.push(format!("{{\"trait_type\":\"limited_borrow\",\"value\":\"{}\"}}", v));
+        attrs.push(format!("{{\"trait_type\":\"limited_borrow\",\"value\":\"{}\"}}", json_escape(v)));
     }
     if let Some(v) = market {
-        attrs.push(format!("{{\"trait_type\":\"market\",\"value\":\"{}\"}}", v));
+        attrs.push(format!("{{\"trait_type\":\"market\",\"value\":\"{}\"}}", json_escape(v)));
     }
     if let Some(v) = position_name {
-        attrs.push(format!("{{\"trait_type\":\"position_name\",\"value\":\"{}\"}}", v));
+        attrs.push(format!("{{\"trait_type\":\"position_name\",\"value\":\"{}\"}}", json_escape(v)));
     }
 
     let image = image_override.unwrap_or(KEY_IMAGE);
 
     format!(
         "data:application/json,{{\"name\":\"{}\",\"symbol\":\"HKEY\",\"description\":\"Permission key for managing a H\\u00e4rdig position.\",\"image\":\"{}\",\"attributes\":[{}]}}",
-        name, image, attrs.join(","),
+        json_escape(name), json_escape(image), attrs.join(","),
     )
 }
 
@@ -151,4 +173,46 @@ pub fn format_sol_amount(raw: u64) -> String {
     let frac_str = format!("{:09}", frac);
     let trimmed = frac_str.trim_end_matches('0');
     format!("{}.{}", whole, trimmed)
+}
+
+/// Validate that the requested permissions are valid for the given origin and that
+/// rate-limit parameters are consistent with the permission bits.
+pub fn validate_delegated_permissions(
+    origin: KeyCreatorOrigin,
+    permissions: u8,
+    sell_capacity: u64,
+    sell_refill_period: u64,
+    borrow_capacity: u64,
+    borrow_refill_period: u64,
+) -> Result<()> {
+    require!(permissions != 0, HardigError::InvalidKeyRole);
+    require!(
+        permissions & !origin.allowed_permissions() == 0,
+        HardigError::InvalidKeyRole
+    );
+
+    if permissions & PERM_LIMITED_SELL != 0 {
+        require!(
+            sell_capacity > 0 && sell_refill_period > 0,
+            HardigError::InvalidKeyRole
+        );
+    } else {
+        require!(
+            sell_capacity == 0 && sell_refill_period == 0,
+            HardigError::InvalidKeyRole
+        );
+    }
+    if permissions & PERM_LIMITED_BORROW != 0 {
+        require!(
+            borrow_capacity > 0 && borrow_refill_period > 0,
+            HardigError::InvalidKeyRole
+        );
+    } else {
+        require!(
+            borrow_capacity == 0 && borrow_refill_period == 0,
+            HardigError::InvalidKeyRole
+        );
+    }
+
+    Ok(())
 }

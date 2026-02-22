@@ -4,3 +4,10 @@ node_modules/
 .anchor/
 test-fixtures/*.so
 web-lite/dist/
+
+# Secrets and keypairs
+.env
+.env.*
+*-keypair.json
+*.pem
+*.key

@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, PromoConfig, PERM_MANAGE_KEYS};
+use crate::state::{KeyCreatorOrigin, PositionNFT, PromoConfig, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::super::validate_key::validate_key;
+use super::super::validate_delegated_permissions;
 
 #[derive(Accounts)]
 #[instruction(name_suffix: String)]
@@ -21,11 +22,18 @@ pub struct CreatePromo<'info> {
     #[account(
         init,
         payer = admin,
-        space = 8 + std::mem::size_of::<PromoConfig>() + 4 + 64 + 4 + PromoConfig::MAX_IMAGE_URI_LEN,
+        space = PromoConfig::SIZE,
         seeds = [PromoConfig::SEED, position.authority_seed.as_ref(), name_suffix.as_bytes()],
         bump,
     )]
     pub promo: Account<'info, PromoConfig>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 
     pub system_program: Program<'info, System>,
 }
@@ -48,6 +56,7 @@ pub fn handler(
         &ctx.accounts.admin_key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
+        &ctx.accounts.config.collection,
     )?;
 
     // Validate name_suffix length
@@ -59,8 +68,15 @@ pub fn handler(
         HardigError::ImageUriTooLong
     );
 
-    // A key with no permissions is useless
-    require!(permissions != 0, HardigError::InvalidKeyRole);
+    // Validate permissions + rate-limit params for promo-created keys
+    validate_delegated_permissions(
+        KeyCreatorOrigin::Promo,
+        permissions,
+        sell_capacity,
+        sell_refill_period,
+        borrow_capacity,
+        borrow_refill_period,
+    )?;
 
     // Populate the PromoConfig
     let promo = &mut ctx.accounts.promo;

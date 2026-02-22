@@ -3799,6 +3799,12 @@ fn test_claim_promo_key() {
     // Verify the key NFT exists (account should be owned by MPL-Core)
     let key_account = svm.get_account(&key_asset.pubkey()).unwrap();
     assert_eq!(key_account.owner, MPL_CORE_ID);
+
+    // Verify the key NFT has a promo attribute matching the promo PDA
+    let attrs = extract_asset_attributes(&key_account);
+    let promo_attr = attrs.iter().find(|(k, _)| k == "promo");
+    assert!(promo_attr.is_some(), "key NFT should have a promo attribute");
+    assert_eq!(promo_attr.unwrap().1, pda.to_string());
 }
 
 // ---------------------------------------------------------------------------

@@ -72,7 +72,7 @@ pub fn calculate_borrow_capacity(
 
     let capacity = floor_value.saturating_sub(current_debt as u128);
 
-    Ok(capacity as u64)
+    Ok(u64::try_from(capacity).unwrap_or(u64::MAX))
 }
 
 /// Decode a 16-byte Rust Decimal into lamports (scaled by 1e9).
@@ -101,7 +101,7 @@ fn decode_rust_decimal_to_lamports(bytes: &[u8]) -> Result<u64> {
 
     let result = scaled / divisor;
 
-    Ok(result as u64)
+    Ok(u64::try_from(result).unwrap_or(u64::MAX))
 }
 
 #[cfg(test)]

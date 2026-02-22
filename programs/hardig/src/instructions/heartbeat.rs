@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, PERM_MANAGE_KEYS};
+use crate::state::{PositionNFT, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -15,6 +15,13 @@ pub struct Heartbeat<'info> {
     /// The position to update activity for.
     #[account(mut)]
     pub position: Account<'info, PositionNFT>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 }
 
 pub fn handler(ctx: Context<Heartbeat>) -> Result<()> {
@@ -32,6 +39,7 @@ pub fn handler(ctx: Context<Heartbeat>) -> Result<()> {
         &ctx.accounts.admin_key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_MANAGE_KEYS,
+        &ctx.accounts.config.collection,
     )?;
 
     ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;

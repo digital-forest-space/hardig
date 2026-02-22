@@ -84,7 +84,7 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
         )
     } else {
         format!(
-            " Härdig | {} | Role: {}{} | Mayflower: {} | Last refresh: {} ",
+            " Härdig | {} | Role: {}{} | Nirvana: {} | Last refresh: {} ",
             short_wallet, role_str, pos_indicator, mf_status, refresh_str,
         )
     };

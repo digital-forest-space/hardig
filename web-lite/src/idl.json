@@ -8,48 +8,6 @@
   },
   "instructions": [
     {
-      "name": "accept_admin",
-      "docs": [
-        "Accept a pending admin transfer (must be called by the nominated key)."
-      ],
-      "discriminator": [
-        112,
-        42,
-        45,
-        90,
-        116,
-        181,
-        13,
-        170
-      ],
-      "accounts": [
-        {
-          "name": "new_admin",
-          "signer": true
-        },
-        {
-          "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "authorize_key",
       "docs": [
         "Authorize a new key NFT for a position (admin only)."
@@ -182,12 +140,6 @@
         {
           "name": "borrow_refill_period_slots",
           "type": "u64"
-        },
-        {
-          "name": "name",
-          "type": {
-            "option": "string"
-          }
         }
       ]
     },
@@ -876,16 +828,6 @@
         {
           "name": "max_reinvest_spread_bps",
           "type": "u16"
-        },
-        {
-          "name": "name",
-          "type": {
-            "option": "string"
-          }
-        },
-        {
-          "name": "market_name",
-          "type": "string"
         }
       ]
     },
@@ -1351,8 +1293,7 @@
     {
       "name": "transfer_admin",
       "docs": [
-        "Nominate a new protocol admin (current admin only). The nominated key",
-        "must call `accept_admin` to complete the transfer."
+        "Transfer protocol admin rights to a new pubkey (current admin only)."
       ],
       "discriminator": [
         42,
@@ -1674,7 +1615,7 @@
     {
       "code": 6013,
       "name": "InvalidMayflowerAccount",
-      "msg": "Invalid Mayflower account address or derivation"
+      "msg": "Invalid Nirvana account address or derivation"
     },
     {
       "code": 6014,
@@ -1720,11 +1661,6 @@
       "code": 6022,
       "name": "PositionAlreadyExists",
       "msg": "Position already exists for this admin key"
-    },
-    {
-      "code": 6023,
-      "name": "NameTooLong",
-      "msg": "Custom name suffix exceeds 32 characters"
     }
   ],
   "types": [
@@ -1946,13 +1882,6 @@
             "name": "collection",
             "docs": [
               "The MPL-Core collection for all Härdig key NFTs (Pubkey::default() = not yet created)."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "pending_admin",
-            "docs": [
-              "Pending admin for two-step transfer (Pubkey::default() = no pending transfer)."
             ],
             "type": "pubkey"
           },

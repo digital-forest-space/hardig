@@ -6,7 +6,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyState, MarketConfig, PositionNFT, PERM_BORROW, PERM_LIMITED_BORROW};
+use crate::state::{KeyState, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_LIMITED_BORROW};
 
 use super::consume_rate_limit::consume_rate_limit;
 use super::validate_key::validate_key;
@@ -27,6 +27,13 @@ pub struct Borrow<'info> {
     /// The position to borrow against.
     #[account(mut)]
     pub position: Account<'info, PositionNFT>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 
     /// The MarketConfig for this position's market.
     #[account(
@@ -104,6 +111,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
         &ctx.accounts.key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_BORROW | PERM_LIMITED_BORROW,
+        &ctx.accounts.config.collection,
     )?;
 
     // Validate KeyState matches key_asset if provided

@@ -5,7 +5,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{MarketConfig, PositionNFT, PERM_BUY};
+use crate::state::{MarketConfig, PositionNFT, ProtocolConfig, PERM_BUY};
 
 use super::validate_key::validate_key;
 
@@ -21,6 +21,13 @@ pub struct Buy<'info> {
     /// The position to buy navSOL for.
     #[account(mut)]
     pub position: Account<'info, PositionNFT>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 
     /// The MarketConfig for this position's market.
     #[account(
@@ -157,6 +164,7 @@ pub fn handler(ctx: Context<Buy>, amount: u64, min_out: u64) -> Result<()> {
         &ctx.accounts.key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_BUY,
+        &ctx.accounts.config.collection,
     )?;
 
     require!(amount > 0, HardigError::InsufficientFunds);

@@ -5,7 +5,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{MarketConfig, PositionNFT, PERM_REINVEST};
+use crate::state::{MarketConfig, PositionNFT, ProtocolConfig, PERM_REINVEST};
 
 use super::validate_key::validate_key;
 
@@ -27,6 +27,13 @@ pub struct Reinvest<'info> {
         constraint = market_config.key() == position.market_config @ HardigError::InvalidMayflowerAccount,
     )]
     pub market_config: Account<'info, MarketConfig>,
+
+    /// Protocol config PDA — provides collection pubkey for key validation.
+    #[account(
+        seeds = [ProtocolConfig::SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
 
     pub system_program: Program<'info, System>,
 
@@ -122,6 +129,7 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
         &ctx.accounts.key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_REINVEST,
+        &ctx.accounts.config.collection,
     )?;
 
     let mc = &ctx.accounts.market_config;
@@ -298,7 +306,7 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
     require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
     // Enforce reinvest spread limit
-    if ctx.accounts.position.max_reinvest_spread_bps > 0 && floor_price > 0 {
+    if ctx.accounts.position.max_reinvest_spread_bps > 0 && floor_price > 0 && shares_received > 0 {
         // effective_price = actual_amount * 1e9 / shares_received (lamports per share, 1e9 scaled)
         let effective_price = (actual_amount as u128)
             .checked_mul(1_000_000_000u128)

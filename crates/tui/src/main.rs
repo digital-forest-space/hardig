@@ -56,7 +56,7 @@ enum Action {
         #[arg(long)]
         uri: String,
     },
-    /// Create a new position NFT (also initializes Mayflower PersonalPosition)
+    /// Create a new position NFT (also initializes Nirvana PersonalPosition)
     CreatePosition {
         /// Nav token mint to use (defaults to navSOL).
         /// When specified, the MarketConfig for this mint must already exist on-chain.
@@ -172,13 +172,13 @@ enum Action {
         /// Base token mint (e.g. wSOL)
         #[arg(long, required_unless_present = "market")]
         base_mint: Option<String>,
-        /// Mayflower market group
+        /// Nirvana market group
         #[arg(long, required_unless_present = "market")]
         market_group: Option<String>,
-        /// Mayflower market meta
+        /// Nirvana market meta
         #[arg(long, required_unless_present = "market")]
         market_meta: Option<String>,
-        /// Mayflower market
+        /// Nirvana market
         #[arg(long, required_unless_present = "market")]
         mayflower_market: Option<String>,
         /// Market base vault
@@ -243,7 +243,7 @@ struct PositionStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     position: Option<PositionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    mayflower: Option<MayflowerInfo>,
+    mayflower: Option<NirvanaInfo>,
     keyring: Vec<KeyInfo>,
 }
 
@@ -274,7 +274,7 @@ struct RecoveryInfo {
 }
 
 #[derive(Serialize)]
-struct MayflowerInfo {
+struct NirvanaInfo {
     initialized: bool,
     atas_exist: bool,
     wsol_balance: String,
@@ -289,7 +289,7 @@ struct KeyInfo {
     held_by_signer: bool,
 }
 
-/// Fetch Mayflower market configs from the API and resolve a market by name.
+/// Fetch Nirvana market configs from the API and resolve a market by name.
 /// Returns the 8 pubkeys needed for create_market_config.
 fn resolve_market(
     url: &str,
@@ -1049,7 +1049,7 @@ fn build_status_output(app: &app::App) -> CliOutput {
     });
 
     let mayflower = if app.position.is_some() {
-        Some(MayflowerInfo {
+        Some(NirvanaInfo {
             initialized: app.mayflower_initialized,
             atas_exist: app.atas_exist,
             wsol_balance: lamports_to_sol(app.wsol_balance),

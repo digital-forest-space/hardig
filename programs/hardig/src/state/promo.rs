@@ -39,6 +39,17 @@ pub struct PromoConfig {
 impl PromoConfig {
     pub const SEED: &'static [u8] = b"promo";
     pub const MAX_IMAGE_URI_LEN: usize = 128;
+
+    // discriminator(8) + authority_seed(32) + permissions(1)
+    // + borrow_capacity(8) + borrow_refill_period(8)
+    // + sell_capacity(8) + sell_refill_period(8) + min_deposit_lamports(8)
+    // + max_claims(4) + claims_count(4) + active(1)
+    // + name_suffix(4 + 64) + image_uri(4 + 128) + bump(1)
+    pub const SIZE: usize = 8 + 32 + 1
+        + 8 + 8
+        + 8 + 8 + 8
+        + 4 + 4 + 1
+        + (4 + 64) + (4 + Self::MAX_IMAGE_URI_LEN) + 1;
 }
 
 /// One-time claim receipt preventing double-claims.

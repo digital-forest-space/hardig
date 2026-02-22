@@ -10,8 +10,9 @@ use mpl_core::{
 use crate::errors::HardigError;
 
 /// Validates that the signer owns the given MPL-Core key asset, that the asset
-/// belongs to the expected position (via the `position` attribute), and that the
-/// key has at least one of the required permission bits set.
+/// belongs to the expected position (via the `position` attribute), that the
+/// asset's update authority is the expected collection, and that the key has at
+/// least one of the required permission bits set.
 ///
 /// Returns the permissions bitmask for further checks (e.g., rate limiting).
 pub fn validate_key(
@@ -19,6 +20,7 @@ pub fn validate_key(
     key_asset_info: &AccountInfo,
     expected_admin_asset: &Pubkey,
     required: u8,
+    expected_collection: &Pubkey,
 ) -> Result<u8> {
     // Verify the account is owned by the MPL-Core program
     require!(
@@ -39,6 +41,15 @@ pub fn validate_key(
     require!(data.len() >= 33, HardigError::InvalidKey);
     let owner = Pubkey::try_from(&data[1..33])
         .map_err(|_| error!(HardigError::InvalidKey))?;
+
+    // Verify update_authority is Collection(expected_collection).
+    // BaseAssetV1 layout: key(1) + owner(32) + update_authority(1 tag + 32 pubkey).
+    // UpdateAuthority tag: 0=None, 1=Address, 2=Collection.
+    require!(data.len() >= 66, HardigError::InvalidKey);
+    require!(data[33] == 2, HardigError::InvalidKey); // must be Collection variant
+    let ua_collection = Pubkey::try_from(&data[34..66])
+        .map_err(|_| error!(HardigError::InvalidKey))?;
+    require!(ua_collection == *expected_collection, HardigError::InvalidKey);
 
     drop(data);
 

@@ -11,7 +11,7 @@ import {
   DEFAULT_WSOL_MINT,
   DEFAULT_NAV_SOL_MINT,
 } from '../constants.js';
-import { myKeyAsset, positionPda, position, marketConfigPda, marketConfig } from '../state.js';
+import { myKeyAsset, positionPda, position, marketConfigPda, marketConfig, mfFloorPrice } from '../state.js';
 import { shortPubkey, lamportsToSol, PERM_LIMITED_SELL } from '../utils.js';
 
 export async function buildWithdraw(program, wallet, amountLamports) {
@@ -32,8 +32,20 @@ export async function buildWithdraw(program, wallet, amountLamports) {
   // Include keyState if the key might be rate-limited
   const [keyStatePda] = deriveKeyStatePda(keyAsset);
 
+  // Slippage protection: estimate min_out using floor price.
+  // sell/withdraw: input navSOL lamports -> output SOL lamports
+  // expected_sol = amount * floor_price / 1e9, then apply 1% slippage
+  const floorPrice = mfFloorPrice.value;
+  let minOut;
+  if (floorPrice > 0) {
+    const expected = BigInt(amountLamports) * BigInt(floorPrice) / BigInt(1_000_000_000);
+    minOut = new BN((expected * BigInt(99) / BigInt(100)).toString());
+  } else {
+    minOut = new BN(0); // floor price unavailable; no slippage protection
+  }
+
   const ix = await program.methods
-    .withdraw(new BN(amountLamports), new BN(0)) // min_out = 0 (no slippage protection)
+    .withdraw(new BN(amountLamports), minOut)
     .accounts({
       admin: wallet,
       keyAsset: keyAsset,
