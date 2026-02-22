@@ -1762,7 +1762,7 @@ impl App {
         let key_state_pda = self.my_key_state_pda;
 
         let mut accounts = vec![
-            AccountMeta::new(self.keypair.pubkey(), true),          // admin
+            AccountMeta::new(self.keypair.pubkey(), true),          // signer
             AccountMeta::new_readonly(key_asset, false),            // key_asset
         ];
         // Optional key_state account (Anchor Option<Account>)

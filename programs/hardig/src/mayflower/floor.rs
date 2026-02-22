@@ -12,6 +12,11 @@ pub fn read_floor_price(market_data: &[u8]) -> Result<u64> {
         market_data.len() > MARKET_FLOOR_PRICE_OFFSET + RUST_DECIMAL_SIZE,
         HardigError::InvalidPositionPda
     );
+    // Verify MayflowerMarket discriminator
+    require!(
+        market_data[..8] == MARKET_DISCRIMINATOR,
+        HardigError::InvalidMayflowerAccount
+    );
 
     let decimal_bytes =
         &market_data[MARKET_FLOOR_PRICE_OFFSET..MARKET_FLOOR_PRICE_OFFSET + RUST_DECIMAL_SIZE];
@@ -72,7 +77,7 @@ pub fn calculate_borrow_capacity(
 
     let capacity = floor_value.saturating_sub(current_debt as u128);
 
-    Ok(u64::try_from(capacity).unwrap_or(u64::MAX))
+    u64::try_from(capacity).map_err(|_| error!(HardigError::InsufficientFunds))
 }
 
 /// Decode a 16-byte Rust Decimal into lamports (scaled by 1e9).
@@ -108,7 +113,7 @@ fn decode_rust_decimal_to_lamports(bytes: &[u8]) -> Result<u64> {
 
     let result = scaled / divisor;
 
-    Ok(u64::try_from(result).unwrap_or(u64::MAX))
+    u64::try_from(result).map_err(|_| error!(HardigError::InsufficientFunds))
 }
 
 #[cfg(test)]
@@ -180,5 +185,24 @@ mod tests {
         bytes[4] = 1; // mantissa = 1
         let result = decode_rust_decimal_to_lamports(&bytes).unwrap();
         assert_eq!(result, 0); // negative → 0
+    }
+
+    #[test]
+    fn test_read_floor_price_valid_discriminator() {
+        // Build a minimal Market account: discriminator + enough bytes for floor price
+        let mut data = vec![0u8; MARKET_FLOOR_PRICE_OFFSET + RUST_DECIMAL_SIZE + 1];
+        data[..8].copy_from_slice(&MARKET_DISCRIMINATOR);
+        // Write floor price = 1.0 SOL as Rust Decimal at offset 104
+        data[MARKET_FLOOR_PRICE_OFFSET + 2] = 0; // scale = 0
+        data[MARKET_FLOOR_PRICE_OFFSET + 4] = 1; // mantissa = 1
+        let result = read_floor_price(&data).unwrap();
+        assert_eq!(result, 1_000_000_000);
+    }
+
+    #[test]
+    fn test_read_floor_price_wrong_discriminator() {
+        let mut data = vec![0u8; MARKET_FLOOR_PRICE_OFFSET + RUST_DECIMAL_SIZE + 1];
+        data[..8].copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]); // wrong discriminator
+        assert!(read_floor_price(&data).is_err());
     }
 }

@@ -55,5 +55,7 @@ pub const PP_DEPOSITED_SHARES_OFFSET: usize = 104; // u64 LE
 pub const PP_DEBT_OFFSET: usize = 112; // u64 LE
 
 // MayflowerMarket account layout
+// sha256("account:Market")[..8]
+pub const MARKET_DISCRIMINATOR: [u8; 8] = [219, 190, 213, 55, 0, 227, 198, 154];
 pub const MARKET_FLOOR_PRICE_OFFSET: usize = 104; // Rust Decimal, 16 bytes
 pub const RUST_DECIMAL_SIZE: usize = 16;

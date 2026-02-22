@@ -30,7 +30,7 @@ export async function buildBorrow(program, wallet, amountLamports) {
   const ix = await program.methods
     .borrow(new BN(amountLamports))
     .accounts({
-      admin: wallet,
+      signer: wallet,
       keyAsset: keyAsset,
       keyState: keyStatePda,
       position: posPda,

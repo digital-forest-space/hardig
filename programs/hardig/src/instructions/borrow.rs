@@ -14,7 +14,7 @@ use super::validate_key::validate_key;
 #[derive(Accounts)]
 pub struct Borrow<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
+    pub signer: Signer<'info>,
 
     /// The signer's key NFT (MPL-Core asset).
     /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
@@ -107,7 +107,7 @@ pub struct Borrow<'info> {
 
 pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     let permissions = validate_key(
-        &ctx.accounts.admin,
+        &ctx.accounts.signer,
         &ctx.accounts.key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_BORROW | PERM_LIMITED_BORROW,
@@ -213,7 +213,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
         .checked_sub(debt_before)
         .ok_or(HardigError::BorrowCapacityExceeded)?;
 
-    // Close PDA's wSOL ATA — returns borrowed wSOL + rent as native SOL to admin
+    // Close PDA's wSOL ATA — returns borrowed wSOL + rent as native SOL to signer
     // Only attempt if the account is an initialized SPL token account (state byte at offset 108)
     let ata_initialized = {
         let data = ctx.accounts.user_base_token_ata.try_borrow_data()?;
@@ -224,7 +224,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
             program_id: anchor_spl::token::ID,
             accounts: vec![
                 AccountMeta::new(ctx.accounts.user_base_token_ata.key(), false),
-                AccountMeta::new(ctx.accounts.admin.key(), false),
+                AccountMeta::new(ctx.accounts.signer.key(), false),
                 AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
             ],
             data: vec![9], // SPL Token CloseAccount
@@ -233,7 +233,7 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
             &close_ix,
             &[
                 ctx.accounts.user_base_token_ata.to_account_info(),
-                ctx.accounts.admin.to_account_info(),
+                ctx.accounts.signer.to_account_info(),
                 ctx.accounts.program_pda.to_account_info(),
             ],
             signer_seeds,

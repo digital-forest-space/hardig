@@ -76,7 +76,7 @@ pub mod hardig {
         instructions::withdraw::handler(ctx, amount, min_out)
     }
 
-    /// Borrow SOL against the navSOL floor (admin only).
+    /// Borrow SOL against the navSOL floor (borrow or limited-borrow key).
     pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()> {
         instructions::borrow::handler(ctx, amount)
     }
