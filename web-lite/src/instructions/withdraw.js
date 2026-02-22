@@ -47,7 +47,7 @@ export async function buildWithdraw(program, wallet, amountLamports) {
   const ix = await program.methods
     .withdraw(new BN(amountLamports), minOut)
     .accounts({
-      admin: wallet,
+      signer: wallet,
       keyAsset: keyAsset,
       keyState: keyStatePda,
       position: posPda,

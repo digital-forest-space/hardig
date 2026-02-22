@@ -263,7 +263,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
     }
 
     // 8. Build limited sell/borrow strings if applicable
-    let sell_limit_str = if promo.sell_capacity > 0 {
+    let sell_limit_str = if permissions & PERM_LIMITED_SELL != 0 {
         let v = format!(
             "{} navSOL / {}",
             format_sol_amount(promo.sell_capacity),
@@ -278,7 +278,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
         None
     };
 
-    let borrow_limit_str = if promo.borrow_capacity > 0 {
+    let borrow_limit_str = if permissions & PERM_LIMITED_BORROW != 0 {
         let v = format!(
             "{} SOL / {}",
             format_sol_amount(promo.borrow_capacity),
@@ -350,7 +350,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
     key_state.asset = ctx.accounts.key_asset.key();
     key_state.bump = ctx.bumps.key_state;
 
-    if permissions & PERM_LIMITED_SELL != 0 && promo.sell_capacity > 0 {
+    if permissions & PERM_LIMITED_SELL != 0 {
         key_state.sell_bucket = RateBucket {
             capacity: promo.sell_capacity,
             refill_period: promo.sell_refill_period,
@@ -358,7 +358,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
             last_update: current_slot,
         };
     }
-    if permissions & PERM_LIMITED_BORROW != 0 && promo.borrow_capacity > 0 {
+    if permissions & PERM_LIMITED_BORROW != 0 {
         key_state.borrow_bucket = RateBucket {
             capacity: promo.borrow_capacity,
             refill_period: promo.borrow_refill_period,

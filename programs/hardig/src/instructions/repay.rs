@@ -94,14 +94,10 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     )?;
 
     require!(amount > 0, HardigError::InsufficientFunds);
-    require!(
-        amount <= ctx.accounts.position.user_debt,
-        HardigError::InsufficientFunds
-    );
 
     let mc = &ctx.accounts.market_config;
 
-    // Validate PDA-derived accounts
+    // Validate PDA-derived accounts BEFORE reading from them
     let program_pda = ctx.accounts.program_pda.key();
     let (expected_pp, _) = mayflower::derive_personal_position(&program_pda, &mc.market_meta);
     require!(
@@ -112,6 +108,16 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
     require!(
         ctx.accounts.log_account.key() == expected_log,
         HardigError::InvalidMayflowerAccount
+    );
+
+    // Use Mayflower's actual debt as the ceiling (source of truth)
+    let mayflower_debt = {
+        let data = ctx.accounts.personal_position.try_borrow_data()?;
+        mayflower::read_debt(&data)?
+    };
+    require!(
+        amount <= mayflower_debt,
+        HardigError::InsufficientFunds
     );
 
     if ctx.accounts.key_asset.key() == ctx.accounts.position.current_admin_asset {
@@ -180,8 +186,7 @@ pub fn handler(ctx: Context<Repay>, amount: u64) -> Result<()> {
         .accounts
         .position
         .user_debt
-        .checked_sub(actual_repaid)
-        .ok_or(HardigError::InsufficientFunds)?;
+        .saturating_sub(actual_repaid);
 
     Ok(())
 }

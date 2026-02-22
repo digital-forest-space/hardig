@@ -128,6 +128,12 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
         HardigError::InvalidPositionPda
     );
 
+    let (expected_log, _) = mayflower::derive_log_account();
+    require!(
+        ctx.accounts.mayflower_log.key() == expected_log,
+        HardigError::InvalidMayflowerAccount
+    );
+
     // --- Build NFT name from base + optional suffix ---
     let base_name = "H\u{00e4}rdig Admin Key";
     let nft_name = match &name {

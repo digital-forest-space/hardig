@@ -14,7 +14,7 @@ use super::validate_key::validate_key;
 #[derive(Accounts)]
 pub struct Withdraw<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
+    pub signer: Signer<'info>,
 
     /// The signer's key NFT (MPL-Core asset).
     /// CHECK: Validated in handler via validate_key (owner, update_authority, permissions).
@@ -121,7 +121,7 @@ pub struct Withdraw<'info> {
 
 pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> {
     let permissions = validate_key(
-        &ctx.accounts.admin,
+        &ctx.accounts.signer,
         &ctx.accounts.key_asset.to_account_info(),
         &ctx.accounts.position.authority_seed,
         PERM_SELL | PERM_LIMITED_SELL,
@@ -134,25 +134,10 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     }
 
     require!(amount > 0, HardigError::InsufficientFunds);
-    require!(
-        amount <= ctx.accounts.position.deposited_nav,
-        HardigError::InsufficientFunds
-    );
-
-    // Enforce rate limit for PERM_LIMITED_SELL (skipped if unlimited PERM_SELL is set)
-    if permissions & PERM_SELL == 0 && permissions & PERM_LIMITED_SELL != 0 {
-        let key_state = ctx.accounts.key_state.as_deref_mut()
-            .ok_or(error!(HardigError::RateLimitExceeded))?;
-        consume_rate_limit(
-            &mut key_state.sell_bucket,
-            amount,
-            Clock::get()?.slot,
-        )?;
-    }
 
     let mc = &ctx.accounts.market_config;
 
-    // Validate PDA-derived accounts
+    // Validate PDA-derived accounts BEFORE reading from them
     let program_pda = ctx.accounts.program_pda.key();
     let (expected_pp, _) = mayflower::derive_personal_position(&program_pda, &mc.market_meta);
     require!(
@@ -169,6 +154,27 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         ctx.accounts.log_account.key() == expected_log,
         HardigError::InvalidMayflowerAccount
     );
+
+    // Use Mayflower's actual deposited shares as the ceiling (source of truth)
+    let mayflower_shares = {
+        let data = ctx.accounts.personal_position.try_borrow_data()?;
+        mayflower::read_deposited_shares(&data)?
+    };
+    require!(
+        amount <= mayflower_shares,
+        HardigError::InsufficientFunds
+    );
+
+    // Enforce rate limit for PERM_LIMITED_SELL (skipped if unlimited PERM_SELL is set)
+    if permissions & PERM_SELL == 0 && permissions & PERM_LIMITED_SELL != 0 {
+        let key_state = ctx.accounts.key_state.as_deref_mut()
+            .ok_or(error!(HardigError::RateLimitExceeded))?;
+        consume_rate_limit(
+            &mut key_state.sell_bucket,
+            amount,
+            Clock::get()?.slot,
+        )?;
+    }
 
     if ctx.accounts.key_asset.key() == ctx.accounts.position.current_admin_asset {
         ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
@@ -264,7 +270,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     let sol_received = wsol_after.saturating_sub(wsol_before);
     require!(sol_received >= min_out, HardigError::SlippageExceeded);
 
-    // Close PDA's wSOL ATA — returns all wSOL + rent as native SOL to admin
+    // Close PDA's wSOL ATA — returns all wSOL + rent as native SOL to signer
     // Only attempt if the account is an initialized SPL token account (state byte at offset 108)
     let wsol_initialized = {
         let data = ctx.accounts.user_wsol_ata.try_borrow_data()?;
@@ -275,7 +281,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
             program_id: anchor_spl::token::ID,
             accounts: vec![
                 AccountMeta::new(ctx.accounts.user_wsol_ata.key(), false),
-                AccountMeta::new(ctx.accounts.admin.key(), false),
+                AccountMeta::new(ctx.accounts.signer.key(), false),
                 AccountMeta::new_readonly(ctx.accounts.program_pda.key(), true),
             ],
             data: vec![9], // SPL Token CloseAccount
@@ -284,7 +290,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
             &close_ix,
             &[
                 ctx.accounts.user_wsol_ata.to_account_info(),
-                ctx.accounts.admin.to_account_info(),
+                ctx.accounts.signer.to_account_info(),
                 ctx.accounts.program_pda.to_account_info(),
             ],
             signer_seeds,
@@ -295,8 +301,7 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         .accounts
         .position
         .deposited_nav
-        .checked_sub(shares_sold)
-        .ok_or(HardigError::InsufficientFunds)?;
+        .saturating_sub(shares_sold);
 
     Ok(())
 }

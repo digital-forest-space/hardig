@@ -84,6 +84,13 @@ pub fn calculate_borrow_capacity(
 /// value = mantissa / 10^scale
 /// Returns value * 1e9 as u64.
 fn decode_rust_decimal_to_lamports(bytes: &[u8]) -> Result<u64> {
+    // Sign bit is the MSB of byte 3 (flags word). A negative floor price
+    // should never occur, but if it does, treat it as zero to avoid
+    // inflating borrow capacity via underflow.
+    if bytes[3] & 0x80 != 0 {
+        return Ok(0);
+    }
+
     let scale = bytes[2] as u32;
 
     let mut mantissa: u128 = 0;
@@ -163,5 +170,15 @@ mod tests {
         let bytes = [0u8; 16];
         let result = decode_rust_decimal_to_lamports(&bytes).unwrap();
         assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_decode_rust_decimal_negative() {
+        let mut bytes = [0u8; 16];
+        bytes[2] = 0; // scale
+        bytes[3] = 0x80; // sign bit set (negative)
+        bytes[4] = 1; // mantissa = 1
+        let result = decode_rust_decimal_to_lamports(&bytes).unwrap();
+        assert_eq!(result, 0); // negative → 0
     }
 }

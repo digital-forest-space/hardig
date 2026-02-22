@@ -70,7 +70,7 @@ pub mod hardig {
         instructions::buy::handler(ctx, amount, min_out)
     }
 
-    /// Withdraw SOL/navSOL from the position (admin only).
+    /// Withdraw SOL/navSOL from the position (sell or limited-sell key).
     /// `min_out`: minimum wSOL to receive (slippage protection, 0 = no check).
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> {
         instructions::withdraw::handler(ctx, amount, min_out)
