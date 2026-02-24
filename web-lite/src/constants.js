@@ -34,8 +34,10 @@ export const PP_DEPOSITED_SHARES_OFFSET = 104;
 export const PP_DEBT_OFFSET = 112;
 export const MARKET_FLOOR_PRICE_OFFSET = 104;
 
-// KeyState account size: discriminator(8) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32) = 105
-export const KEY_STATE_SIZE = 105;
+// KeyState account size: discriminator(8) + authority_seed(32) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32) = 137
+export const KEY_STATE_SIZE = 137;
+// Offset of authority_seed within KeyState (for memcmp filtering by position)
+export const KEY_STATE_AUTHORITY_SEED_OFFSET = 8;
 
 // Derive per-position program PDA (authority)
 export function deriveProgramPda(adminAsset) {

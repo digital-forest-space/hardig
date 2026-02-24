@@ -1,3 +1,4 @@
+import { PublicKey } from '@solana/web3.js';
 import { deriveKeyStatePda, KEY_STATE_SIZE } from './constants.js';
 
 /**
@@ -25,21 +26,23 @@ function parseBucket(data) {
 /**
  * Parse a KeyState account into its component fields.
  *
- * KeyState layout (105 bytes):
- *   discriminator   (8 bytes)
- *   asset           (32 bytes)  [offset 8]
- *   bump            (1 byte)    [offset 40]
- *   sell_bucket     (32 bytes)  [offset 41]
- *   borrow_bucket   (32 bytes)  [offset 73]
+ * KeyState layout (137 bytes):
+ *   discriminator    (8 bytes)
+ *   authority_seed   (32 bytes)  [offset 8]   — memcmp filterable
+ *   asset            (32 bytes)  [offset 40]
+ *   bump             (1 byte)    [offset 72]
+ *   sell_bucket      (32 bytes)  [offset 73]
+ *   borrow_bucket    (32 bytes)  [offset 105]
  *
  * @param {Uint8Array} data  Raw account data (must be >= KEY_STATE_SIZE).
- * @returns {{ sellBucket: object, borrowBucket: object } | null}
+ * @returns {{ sellBucket: object, borrowBucket: object, authoritySeed: PublicKey } | null}
  */
 export function parseKeyState(data) {
   if (!data || data.length < KEY_STATE_SIZE) return null;
   return {
-    sellBucket: parseBucket(data.slice(41, 73)),
-    borrowBucket: parseBucket(data.slice(73, 105)),
+    authoritySeed: new PublicKey(data.slice(8, 40)),
+    sellBucket: parseBucket(data.slice(73, 105)),
+    borrowBucket: parseBucket(data.slice(105, 137)),
   };
 }
 

@@ -189,6 +189,9 @@ impl RateBucket {
 /// PDA seeds = [b"key_state", asset].
 #[account]
 pub struct KeyState {
+    /// The position's authority_seed this key belongs to.
+    /// First field after discriminator (offset 8) for memcmp filtering.
+    pub authority_seed: Pubkey,
     /// The MPL-Core asset this state belongs to.
     pub asset: Pubkey,
     /// Bump seed for this PDA.
@@ -201,6 +204,6 @@ pub struct KeyState {
 
 impl KeyState {
     pub const SEED: &'static [u8] = b"key_state";
-    // discriminator(8) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32)
-    pub const SIZE: usize = 8 + 32 + 1 + 32 + 32;
+    // discriminator(8) + authority_seed(32) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32)
+    pub const SIZE: usize = 8 + 32 + 32 + 1 + 32 + 32;
 }

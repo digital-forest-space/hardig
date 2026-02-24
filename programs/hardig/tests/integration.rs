@@ -1463,15 +1463,20 @@ fn test_multiple_keys_per_position() {
     let (mut svm, _) = setup();
     let h = full_setup(&mut svm);
 
-    // All delegated keys should have KeyState PDAs
+    // All delegated keys should have KeyState PDAs with correct authority_seed
+    let authority_seed = h.admin_asset.pubkey();
+
     let op_ks = read_key_state(&svm, &h.operator_key_state);
     assert_eq!(op_ks.asset, h.operator_asset);
+    assert_eq!(op_ks.authority_seed, authority_seed);
 
     let dep_ks = read_key_state(&svm, &h.depositor_key_state);
     assert_eq!(dep_ks.asset, h.depositor_asset);
+    assert_eq!(dep_ks.authority_seed, authority_seed);
 
     let keep_ks = read_key_state(&svm, &h.keeper_key_state);
     assert_eq!(keep_ks.asset, h.keeper_asset);
+    assert_eq!(keep_ks.authority_seed, authority_seed);
 }
 
 #[test]
@@ -3837,10 +3842,11 @@ fn test_claim_promo_key() {
     assert_eq!(receipt.claimer, claimer.pubkey());
     assert_eq!(receipt.promo, pda);
 
-    // Verify KeyState PDA was created with correct rate limits
+    // Verify KeyState PDA was created with correct rate limits and authority_seed
     let (ks_pda, _) = key_state_pda(&key_asset.pubkey());
     let ks = read_key_state(&svm, &ks_pda);
     assert_eq!(ks.asset, key_asset.pubkey());
+    assert_eq!(ks.authority_seed, authority_seed);
     assert_eq!(ks.borrow_bucket.capacity, borrow_capacity);
     assert_eq!(ks.borrow_bucket.refill_period, borrow_refill_period);
     assert_eq!(ks.borrow_bucket.level, borrow_capacity); // starts full

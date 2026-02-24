@@ -149,14 +149,15 @@ export async function discoverPosition(connection, wallet) {
     }),
   ]);
 
-  // Parse KeyState accounts: extract asset pubkey and rate-limit buckets
+  // Parse KeyState accounts: extract asset pubkey, rate-limit buckets, and authority_seed
+  // Layout: discriminator(8) + authority_seed(32) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32)
   const keyStates = [];
   for (const { pubkey, account } of keyStateAccounts) {
     const data = account.data;
     if (data.length < KEY_STATE_SIZE) continue;
-    const asset = new PublicKey(data.slice(8, 40));
+    const asset = new PublicKey(data.slice(40, 72));
     const buckets = parseKeyState(data);
-    keyStates.push({ pubkey, asset, buckets });
+    keyStates.push({ pubkey, asset, buckets, authoritySeed: buckets?.authoritySeed });
   }
 
   // Parse all PositionNFT accounts to get admin_asset pubkeys
@@ -357,33 +358,31 @@ export async function discoverPosition(connection, wallet) {
       });
     }
 
-    // Delegated keys: load all KeyState assets, check position binding
-    for (const ks of keyStates) {
-      let info;
-      // Reuse already-loaded data if this key was loaded above (i.e., wallet held it)
-      const delegIdx = keyStates.indexOf(ks);
-      // We need to load it — delegated infos were only loaded in step 2 if bestPos wasn't found via admin.
-      // Safest: just load them now.
-      try {
-        info = await connection.getAccountInfo(ks.asset);
-      } catch { continue; }
-      if (!info) continue;
+    // Delegated keys: filter by authority_seed (on-chain field), then batch-load MPL-Core assets
+    const positionKeyStates = keyStates.filter(
+      (ks) => ks.authoritySeed && ks.authoritySeed.equals(posAdminAsset)
+    );
+    if (positionKeyStates.length > 0) {
+      const delegatedPks = positionKeyStates.map((ks) => ks.asset);
+      const delegatedInfos = await connection.getMultipleAccountsInfo(delegatedPks);
+      for (let i = 0; i < positionKeyStates.length; i++) {
+        const info = delegatedInfos[i];
+        if (!info) continue;
 
-      const permissions = readPermissionsFromAssetData(info.data);
-      if (permissions === null) continue;
-      const binding = readPositionBindingFromAssetData(info.data);
-      if (binding !== adminAssetStr) continue;
+        const permissions = readPermissionsFromAssetData(info.data);
+        if (permissions === null) continue;
 
-      const parsed = parseMplCoreAsset(info.data);
-      const held = parsed && parsed.owner.equals(wallet);
+        const parsed = parseMplCoreAsset(info.data);
+        const held = parsed && parsed.owner.equals(wallet);
 
-      posKeys.push({
-        pda: null,
-        mint: ks.asset,
-        permissions,
-        heldBySigner: !!held,
-        ...attachBuckets(ks.asset),
-      });
+        posKeys.push({
+          pda: null,
+          mint: delegatedPks[i],
+          permissions,
+          heldBySigner: !!held,
+          ...attachBuckets(delegatedPks[i]),
+        });
+      }
     }
   }
   keyring.value = posKeys;

@@ -391,13 +391,14 @@ There are two types of keys to discover: admin keys (one per position) and deleg
 
 ### Step 1: Scan Hardig Program Accounts
 
-Fetch all `PositionNFT` accounts (132 bytes) and `KeyState` accounts (105 bytes) from the Hardig program using size filters:
+Fetch all `PositionNFT` accounts (132 bytes) and `KeyState` accounts (137 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 105) to avoid fetching all keys protocol-wide:
 
 ```js
 const PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
 const POSITION_SIZE = 132;
-const KEY_STATE_SIZE = 105;
+const KEY_STATE_SIZE = 137;
 
+// Discover all positions and keys (initial wallet scan)
 const [positionAccounts, keyStateAccounts] = await Promise.all([
   connection.getProgramAccounts(PROGRAM_ID, {
     filters: [{ dataSize: POSITION_SIZE }],
@@ -408,6 +409,16 @@ const [positionAccounts, keyStateAccounts] = await Promise.all([
     commitment: 'confirmed',
   }),
 ]);
+
+// Or: discover keys for a specific position only (much faster at scale)
+// authority_seed is the first field after the discriminator (offset 8)
+const positionKeyStates = await connection.getProgramAccounts(PROGRAM_ID, {
+  filters: [
+    { dataSize: KEY_STATE_SIZE },
+    { memcmp: { offset: 8, bytes: authoritySeed.toBase58() } },
+  ],
+  commitment: 'confirmed',
+});
 ```
 
 ### Step 2: Check Admin Keys

@@ -211,6 +211,7 @@ pub fn handler(
     let key_state = &mut ctx.accounts.key_state;
     key_state.asset = ctx.accounts.new_key_asset.key();
     key_state.bump = ctx.bumps.key_state;
+    key_state.authority_seed = ctx.accounts.position.authority_seed;
 
     if permissions & PERM_LIMITED_SELL != 0 {
         key_state.sell_bucket = RateBucket {
