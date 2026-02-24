@@ -9,7 +9,7 @@ use mpl_core::{
 };
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, ProtocolConfig, PERM_MANAGE_KEYS};
+use crate::state::{PositionState, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::validate_key::validate_key;
 use super::metadata_uri;
 
@@ -24,7 +24,7 @@ pub struct ConfigureRecovery<'info> {
 
     /// The position to configure recovery for.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The new MPL-Core asset for the recovery key. Created by MPL-Core CPI.
     #[account(mut)]

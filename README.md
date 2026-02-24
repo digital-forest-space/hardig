@@ -185,7 +185,7 @@ npm run preview   # preview the production build
 programs/hardig/              # On-chain program
   src/lib.rs                  # Program entrypoint
   src/errors.rs               # HardigError enum
-  src/state.rs                # ProtocolConfig, PositionNFT, KeyAuthorization, KeyRole, MarketConfig
+  src/state.rs                # ProtocolConfig, PositionState, KeyAuthorization, KeyRole, MarketConfig
   src/instructions/           # One file per instruction + validate_key helper
   src/mayflower/              # Nirvana CPI builders, constants, floor price reader
   tests/integration.rs        # LiteSVM unit tests (60 tests)

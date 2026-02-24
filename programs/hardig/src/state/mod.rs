@@ -25,7 +25,7 @@ impl ProtocolConfig {
 /// A navSOL position controlled by an NFT keyring.
 /// PDA seeds = [b"position", authority_seed].
 #[account]
-pub struct PositionNFT {
+pub struct PositionState {
     /// Permanent PDA seed (first admin asset pubkey). Never changes after creation.
     pub authority_seed: Pubkey,
     /// The Mayflower PersonalPosition PDA owned by this program.
@@ -55,7 +55,7 @@ pub struct PositionNFT {
     pub recovery_config_locked: bool,
 }
 
-impl PositionNFT {
+impl PositionState {
     pub const SEED: &'static [u8] = b"position";
     // discriminator(8) + authority_seed(32) + position_pda(32) + market_config(32)
     // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)

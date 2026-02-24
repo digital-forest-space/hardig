@@ -132,11 +132,11 @@ function readPositionBindingFromAssetData(data) {
 export async function discoverPosition(connection, wallet) {
   resetPositionState();
 
-  // Discovery strategy: scan PositionNFT and KeyState accounts from the hardig program
+  // Discovery strategy: scan PositionState and KeyState accounts from the hardig program
   // (small account set), then load specific MPL-Core assets by pubkey.
   // This avoids getProgramAccounts on MPL Core which most RPC providers reject.
 
-  const POSITION_SIZE = 205; // PositionNFT account size (8+32+32+32+8+8+2+8+1+1+32+32+8+1)
+  const POSITION_SIZE = 205; // PositionState account size (8+32+32+32+8+8+2+8+1+1+32+32+8+1)
 
   const [positionAccounts, keyStateAccounts] = await Promise.all([
     connection.getProgramAccounts(PROGRAM_ID, {
@@ -160,7 +160,7 @@ export async function discoverPosition(connection, wallet) {
     keyStates.push({ pubkey, asset, buckets, authoritySeed: buckets?.authoritySeed });
   }
 
-  // Parse all PositionNFT accounts to get admin_asset pubkeys
+  // Parse all PositionState accounts to get admin_asset pubkeys
   const positions = []; // { posPda, adminAsset }
   for (const { pubkey, account } of positionAccounts) {
     const data = account.data;
@@ -267,7 +267,7 @@ export async function discoverPosition(connection, wallet) {
     const posInfo = await connection.getAccountInfo(bestPos);
     if (posInfo) {
       const data = posInfo.data;
-      // Parse PositionNFT: discriminator(8) + admin_asset(32) + position_pda(32) + market_config(32)
+      // Parse PositionState: discriminator(8) + admin_asset(32) + position_pda(32) + market_config(32)
       // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
       // + last_admin_activity(8) + bump(1) + authority_bump(1)
       const view = new DataView(data.buffer, data.byteOffset);

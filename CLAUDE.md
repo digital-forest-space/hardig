@@ -8,7 +8,7 @@ Solana program (Anchor 0.32.1) implementing an NFT keyring model for managing na
 programs/hardig/          # On-chain program (crate: hardig)
   src/lib.rs              # Program entrypoint, declare_id!, #[program] mod hardig
   src/errors.rs           # HardigError enum
-  src/state.rs            # ProtocolConfig, PositionNFT, KeyAuthorization, KeyRole
+  src/state.rs            # ProtocolConfig, PositionState, KeyAuthorization, KeyRole
   src/instructions/       # One file per instruction + validate_key helper + mod.rs with glob re-exports
   src/mayflower/          # Mayflower CPI builders, constants, floor price reader
   tests/integration.rs    # LiteSVM unit tests (permission matrix, lifecycle, theft recovery)
@@ -44,7 +44,7 @@ Anchor.toml               # Program ID: 4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThk
 | Reinvest   | Y     | Y        |           | Y      |
 | Auth/Revoke| Y     |          |           |        |
 
-**Mayflower CPI**: Buy, sell, borrow, repay, and reinvest instructions forward to the Mayflower protocol via `invoke_signed` using named Anchor accounts. Each position has its own authority PDA (`seeds = [b"authority", admin_nft_mint]`) that owns a separate Mayflower PersonalPosition, ensuring complete fund isolation between positions. `PositionNFT` stores `authority_bump` to avoid recomputing the PDA bump on every instruction.
+**Mayflower CPI**: Buy, sell, borrow, repay, and reinvest instructions forward to the Mayflower protocol via `invoke_signed` using named Anchor accounts. Each position has its own authority PDA (`seeds = [b"authority", admin_nft_mint]`) that owns a separate Mayflower PersonalPosition, ensuring complete fund isolation between positions. `PositionState` stores `authority_bump` to avoid recomputing the PDA bump on every instruction.
 
 **Borrow capacity**: Read from on-chain Mayflower `PersonalPosition` (deposited shares, debt) and `Market` (floor price). Not tracked in hardig accounting — Mayflower is source of truth.
 

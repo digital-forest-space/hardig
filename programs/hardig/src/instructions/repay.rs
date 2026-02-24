@@ -5,7 +5,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{MarketConfig, PositionNFT, ProtocolConfig, PERM_REPAY};
+use crate::state::{MarketConfig, PositionState, ProtocolConfig, PERM_REPAY};
 
 use super::validate_key::validate_key;
 
@@ -20,7 +20,7 @@ pub struct Repay<'info> {
 
     /// The position to repay debt for.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// Protocol config PDA — provides collection pubkey for key validation.
     #[account(

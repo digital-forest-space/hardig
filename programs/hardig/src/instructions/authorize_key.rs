@@ -12,7 +12,7 @@ use mpl_core::{
 
 use crate::errors::HardigError;
 use crate::state::{
-    KeyCreatorOrigin, KeyState, PositionNFT, ProtocolConfig, RateBucket,
+    KeyCreatorOrigin, KeyState, PositionState, ProtocolConfig, RateBucket,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS,
 };
 
@@ -30,7 +30,7 @@ pub struct AuthorizeKey<'info> {
 
     /// The position to authorize a key for. Mutable to update last_admin_activity.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The MPL-Core asset for the new key NFT. Created by MPL-Core CPI.
     #[account(mut)]

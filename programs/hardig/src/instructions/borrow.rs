@@ -6,7 +6,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{KeyState, MarketConfig, PositionNFT, ProtocolConfig, PERM_BORROW, PERM_LIMITED_BORROW};
+use crate::state::{KeyState, MarketConfig, PositionState, ProtocolConfig, PERM_BORROW, PERM_LIMITED_BORROW};
 
 use super::consume_rate_limit::consume_rate_limit;
 use super::validate_key::validate_key;
@@ -26,7 +26,7 @@ pub struct Borrow<'info> {
 
     /// The position to borrow against.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// Protocol config PDA — provides collection pubkey for key validation.
     #[account(

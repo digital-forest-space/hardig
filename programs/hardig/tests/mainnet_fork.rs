@@ -26,7 +26,7 @@ use solana_sdk::{
 };
 
 use hardig::mayflower;
-use hardig::state::{KeyState, MarketConfig, PositionNFT, ProtocolConfig, PRESET_OPERATOR};
+use hardig::state::{KeyState, MarketConfig, PositionState, ProtocolConfig, PRESET_OPERATOR};
 
 const RPC_URL: &str = "http://127.0.0.1:8899";
 
@@ -91,9 +91,9 @@ fn send_and_confirm(
         .map_err(|e| format!("{:?}", e))
 }
 
-fn get_position(client: &RpcClient, pda: &Pubkey) -> PositionNFT {
+fn get_position(client: &RpcClient, pda: &Pubkey) -> PositionState {
     let data = client.get_account_data(pda).unwrap();
-    PositionNFT::try_deserialize(&mut data.as_slice()).unwrap()
+    PositionState::try_deserialize(&mut data.as_slice()).unwrap()
 }
 
 #[allow(dead_code)]
@@ -107,7 +107,7 @@ fn get_key_state(client: &RpcClient, pda: &Pubkey) -> KeyState {
 // ---------------------------------------------------------------------------
 
 fn position_pda(asset: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id())
+    Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &program_id())
 }
 
 fn key_state_pda(asset: &Pubkey) -> (Pubkey, u8) {
@@ -194,7 +194,7 @@ fn ix_create_collection(admin: &Pubkey) -> (Instruction, Keypair) {
 
 fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16, collection: &Pubkey) -> Instruction {
     let (pos_pda, _) =
-        Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
+        Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &program_id());
     let (prog_pda, _) = authority_pda(asset);
     let (config_pda, _) = config_pda();
     let (mc_pda, _) = market_config_pda(&mayflower::DEFAULT_NAV_SOL_MINT);
@@ -241,7 +241,7 @@ fn ix_authorize_key(
     borrow_refill_period_slots: u64,
 ) -> Instruction {
     let (pos_pda, _) =
-        Pubkey::find_program_address(&[PositionNFT::SEED, admin_asset.as_ref()], &program_id());
+        Pubkey::find_program_address(&[PositionState::SEED, admin_asset.as_ref()], &program_id());
     let (prog_pda, _) = authority_pda(admin_asset);
     let (ks_pda, _) = key_state_pda(new_asset);
 

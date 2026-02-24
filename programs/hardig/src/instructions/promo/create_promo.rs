@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::HardigError;
-use crate::state::{KeyCreatorOrigin, PositionNFT, PromoConfig, ProtocolConfig, PERM_MANAGE_KEYS};
+use crate::state::{KeyCreatorOrigin, PositionState, PromoConfig, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::super::validate_key::validate_key;
 use super::super::validate_delegated_permissions;
 
@@ -16,7 +16,7 @@ pub struct CreatePromo<'info> {
     pub admin_key_asset: UncheckedAccount<'info>,
 
     /// The position this promo is for.
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The PromoConfig PDA to create. Seeds include name_suffix to allow multiple promos per position.
     #[account(

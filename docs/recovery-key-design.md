@@ -19,7 +19,7 @@ The on-chain program only enforces the inactivity threshold. Grace periods, aler
 
 ## State Changes
 
-### PositionNFT (modified)
+### PositionState (modified)
 
 | Field | Change | Type | Notes |
 |---|---|---|---|
@@ -58,7 +58,7 @@ This is a deliberate subset of `validate_key()` -- permissions are irrelevant fo
 **Accounts**:
 - `admin` (signer, mut) -- the admin wallet
 - `admin_key_asset` (unchecked) -- admin's MPL-Core key NFT, validated via `validate_key()`
-- `position` (mut) -- the PositionNFT account (may need realloc)
+- `position` (mut) -- the PositionState account (may need realloc)
 - `recovery_asset` (signer) -- new MPL-Core asset to create for the recovery key
 - `target_wallet` (unchecked) -- wallet that will hold the recovery key
 - `config` -- ProtocolConfig PDA (for collection address)
@@ -90,7 +90,7 @@ This is a deliberate subset of `validate_key()` -- permissions are irrelevant fo
 **Accounts**:
 - `recovery_holder` (signer, mut) -- the recovery key holder's wallet
 - `recovery_key_asset` (unchecked) -- the recovery MPL-Core asset, validated directly
-- `position` (mut) -- the PositionNFT account
+- `position` (mut) -- the PositionState account
 - `old_admin_asset` (mut, unchecked) -- the old admin's MPL-Core asset (to burn)
 - `new_admin_asset` (signer) -- new MPL-Core asset to create for the new admin key
 - `config` -- ProtocolConfig PDA (for collection address + signing)
@@ -137,7 +137,7 @@ This is a deliberate subset of `validate_key()` -- permissions are irrelevant fo
 **Accounts**:
 - `admin` (signer) -- the admin wallet
 - `admin_key_asset` (unchecked) -- admin's MPL-Core key NFT
-- `position` (mut) -- the PositionNFT account
+- `position` (mut) -- the PositionState account
 
 **Behavior**:
 - Validates admin key via `validate_key()` with `PERM_MANAGE_KEYS`.
@@ -146,7 +146,7 @@ This is a deliberate subset of `validate_key()` -- permissions are irrelevant fo
 
 ## Rename: admin_asset -> authority_seed
 
-The field `admin_asset` in `PositionNFT` is renamed to `authority_seed` to reflect its true purpose: a permanent PDA seed, not a pointer to the current admin NFT. A new `current_admin_asset` field is added to track the current admin key.
+The field `admin_asset` in `PositionState` is renamed to `authority_seed` to reflect its true purpose: a permanent PDA seed, not a pointer to the current admin NFT. A new `current_admin_asset` field is added to track the current admin key.
 
 This rename is a **field rename only**. Borsh serialization is positional, not named. The on-chain byte layout is unchanged for existing fields. No data migration is needed for the rename itself (only realloc for the new fields).
 
@@ -160,7 +160,7 @@ This rename is a **field rename only**. Borsh serialization is positional, not n
 - `revoke_key.rs` -- `CannotRevokeAdminKey` guard changes from `position.admin_asset` to `position.current_admin_asset`
 
 **Clients (TUI + web-lite):**
-- References to `admin_asset` in PositionNFT deserialization change to `authority_seed`
+- References to `admin_asset` in PositionState deserialization change to `authority_seed`
 - New `current_admin_asset` field for admin identity checks
 - Discovery logic: match both `authority_seed` and `current_admin_asset` where needed
 
@@ -174,7 +174,7 @@ seeds = [b"authority", position.authority_seed.as_ref()]
 
 `authority_seed` is set once at position creation (to the first admin MPL-Core asset pubkey) and never changes. This ensures the Mayflower `PersonalPosition` remains accessible through any number of admin rotations.
 
-Similarly, the PositionNFT PDA remains stable:
+Similarly, the PositionState PDA remains stable:
 
 ```
 seeds = [b"position", authority_seed.as_ref()]
@@ -182,7 +182,7 @@ seeds = [b"position", authority_seed.as_ref()]
 
 ## Migration Path
 
-**Existing positions**: A dedicated `migrate_position` instruction uses Anchor's `realloc` to expand PositionNFT from 132 to 205 bytes. It copies `authority_seed` (formerly `admin_asset`) into `current_admin_asset`, and zero-initializes recovery fields. The payer (admin) covers the additional rent (~0.001 SOL).
+**Existing positions**: A dedicated `migrate_position` instruction uses Anchor's `realloc` to expand PositionState from 132 to 205 bytes. It copies `authority_seed` (formerly `admin_asset`) into `current_admin_asset`, and zero-initializes recovery fields. The payer (admin) covers the additional rent (~0.001 SOL).
 
 Alternatively, `configure_recovery` itself can perform the realloc if the account is undersized. This avoids a separate migration instruction but adds complexity to one handler.
 
@@ -196,7 +196,7 @@ Alternatively, `configure_recovery` itself can perform the realloc if the accoun
 | Inactivity timer resets on every admin action | Already implemented: `last_admin_activity` updated in buy, sell, borrow, repay, reinvest |
 | Old admin NFT is dead after recovery | Burned via `BurnV1CpiBuilder` (MPL-Core PermanentBurnDelegate) |
 | Recovery key is dead after recovery | Burned via `BurnV1CpiBuilder`, `recovery_asset` reset to default |
-| One recovery key per position | Stored directly in PositionNFT (not a separate PDA) |
+| One recovery key per position | Stored directly in PositionState (not a separate PDA) |
 | Config lock prevents attacker disabling recovery | `recovery_config_locked` flag, only settable when recovery IS configured |
 | Delegated keys survive recovery | Their `position` attribute matches `authority_seed` (permanent) |
 | No dual-admin window | Single atomic Solana instruction |

@@ -31,7 +31,7 @@ Singleton global configuration. One per deployment.
 
 **Source:** `ProtocolConfig` in `programs/hardig/src/state.rs`
 
-### PositionNFT
+### PositionState
 
 Represents a navSOL position controlled by an NFT keyring. One per admin key.
 
@@ -50,7 +50,7 @@ Represents a navSOL position controlled by an NFT keyring. One per admin key.
 
 **Total size:** 132 bytes
 
-**Source:** `PositionNFT` in `programs/hardig/src/state.rs`
+**Source:** `PositionState` in `programs/hardig/src/state.rs`
 
 ### MarketConfig
 
@@ -107,7 +107,7 @@ All PDAs use the Hardig program ID (`4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21
 | PDA | Seeds | Account Type |
 |-----|-------|--------------|
 | Protocol config | `["config"]` | `ProtocolConfig` |
-| Position | `["position", admin_asset]` | `PositionNFT` |
+| Position | `["position", admin_asset]` | `PositionState` |
 | Per-position authority | `["authority", admin_asset]` | (no account data; signer PDA) |
 | Key state | `["key_state", asset]` | `KeyState` |
 | Market config | `["market_config", nav_mint]` | `MarketConfig` |
@@ -126,7 +126,7 @@ const [configPda] = PublicKey.findProgramAddressSync(
   PROGRAM_ID
 );
 
-// PositionNFT (adminAsset is a PublicKey)
+// PositionState (adminAsset is a PublicKey)
 const [positionPda] = PublicKey.findProgramAddressSync(
   [Buffer.from('position'), adminAsset.toBuffer()],
   PROGRAM_ID
@@ -237,7 +237,7 @@ The `withdraw` and `borrow` instructions additionally support rate-limited keys.
 
 ## Reading Position Data
 
-### Fetching a PositionNFT
+### Fetching a PositionState
 
 ```js
 const positionInfo = await connection.getAccountInfo(positionPda);
@@ -391,7 +391,7 @@ There are two types of keys to discover: admin keys (one per position) and deleg
 
 ### Step 1: Scan Hardig Program Accounts
 
-Fetch all `PositionNFT` accounts (132 bytes) and `KeyState` accounts (137 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 105) to avoid fetching all keys protocol-wide:
+Fetch all `PositionState` accounts (132 bytes) and `KeyState` accounts (137 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 105) to avoid fetching all keys protocol-wide:
 
 ```js
 const PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
@@ -423,10 +423,10 @@ const positionKeyStates = await connection.getProgramAccounts(PROGRAM_ID, {
 
 ### Step 2: Check Admin Keys
 
-Each `PositionNFT` stores `admin_asset` at bytes 8..40. Load the MPL-Core asset account for each admin asset and check if the owner matches the target wallet:
+Each `PositionState` stores `admin_asset` at bytes 8..40. Load the MPL-Core asset account for each admin asset and check if the owner matches the target wallet:
 
 ```js
-// Parse admin_asset from each PositionNFT
+// Parse admin_asset from each PositionState
 const positions = positionAccounts.map(({ pubkey, account }) => ({
   posPda: pubkey,
   adminAsset: new PublicKey(account.data.slice(8, 40)),
@@ -454,7 +454,7 @@ Each `KeyState` stores `asset` at bytes 8..40. Load those MPL-Core asset account
 
 1. Check the `owner` field (bytes 1..33) matches the target wallet.
 2. Read the `position` attribute from the Attributes plugin to find which `admin_asset` this key is bound to.
-3. Look up the corresponding `PositionNFT` via the admin asset.
+3. Look up the corresponding `PositionState` via the admin asset.
 
 ```js
 // Parse asset pubkey from each KeyState
@@ -477,7 +477,7 @@ for (let i = 0; i < keyStates.length; i++) {
   // Read "position" attribute from the Attributes plugin to find the bound admin_asset
   const positionBinding = readAttributeFromAssetData(info.data, 'position');
   // positionBinding is the admin_asset pubkey as a string
-  // Use it to look up the corresponding PositionNFT PDA
+  // Use it to look up the corresponding PositionState PDA
 }
 ```
 

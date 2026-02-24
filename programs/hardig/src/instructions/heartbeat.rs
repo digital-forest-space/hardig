@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, ProtocolConfig, PERM_MANAGE_KEYS};
+use crate::state::{PositionState, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -14,7 +14,7 @@ pub struct Heartbeat<'info> {
 
     /// The position to update activity for.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// Protocol config PDA — provides collection pubkey for key validation.
     #[account(

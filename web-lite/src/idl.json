@@ -220,7 +220,7 @@
               {
                 "kind": "account",
                 "path": "position.admin_asset",
-                "account": "PositionNFT"
+                "account": "PositionState"
               }
             ]
           }
@@ -354,7 +354,7 @@
               {
                 "kind": "account",
                 "path": "position.admin_asset",
-                "account": "PositionNFT"
+                "account": "PositionState"
               }
             ]
           }
@@ -712,7 +712,7 @@
           "name": "program_pda",
           "docs": [
             "Per-position authority PDA. Used for Mayflower CPI signing;",
-            "bump stored in PositionNFT.authority_bump."
+            "bump stored in PositionState.authority_bump."
           ],
           "pda": {
             "seeds": [
@@ -999,7 +999,7 @@
               {
                 "kind": "account",
                 "path": "position.admin_asset",
-                "account": "PositionNFT"
+                "account": "PositionState"
               }
             ]
           }
@@ -1151,7 +1151,7 @@
               {
                 "kind": "account",
                 "path": "position.admin_asset",
-                "account": "PositionNFT"
+                "account": "PositionState"
               }
             ]
           }
@@ -1415,7 +1415,7 @@
               {
                 "kind": "account",
                 "path": "position.admin_asset",
-                "account": "PositionNFT"
+                "account": "PositionState"
               }
             ]
           }
@@ -1520,7 +1520,7 @@
       ]
     },
     {
-      "name": "PositionNFT",
+      "name": "PositionState",
       "discriminator": [
         110,
         231,
@@ -1788,7 +1788,7 @@
       }
     },
     {
-      "name": "PositionNFT",
+      "name": "PositionState",
       "docs": [
         "A navSOL position controlled by an NFT keyring.",
         "PDA seeds = [b\"position\", admin_asset]."

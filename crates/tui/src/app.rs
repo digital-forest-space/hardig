@@ -17,7 +17,7 @@ use solana_sdk::{
 };
 
 use hardig::state::{
-    KeyState, MarketConfig, PositionNFT, PromoConfig, ProtocolConfig, RateBucket, PERM_BORROW,
+    KeyState, MarketConfig, PositionState, PromoConfig, ProtocolConfig, RateBucket, PERM_BORROW,
     PERM_BUY, PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
     PERM_SELL, PRESET_ADMIN, PRESET_OPERATOR,
 };
@@ -163,7 +163,7 @@ pub struct App {
 
     // Position state (single position mode)
     pub position_pda: Option<Pubkey>,
-    pub position: Option<PositionNFT>,
+    pub position: Option<PositionState>,
     pub my_permissions: Option<u8>,
     pub my_key_state_pda: Option<Pubkey>,
     pub my_asset: Option<Pubkey>,
@@ -1226,7 +1226,7 @@ impl App {
         let asset = asset_kp.pubkey();
         let admin = self.keypair.pubkey();
         let (position_pda, _) =
-            Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &hardig::ID);
+            Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &hardig::ID);
         let (prog_pda, _) =
             Pubkey::find_program_address(&[b"authority", asset.as_ref()], &hardig::ID);
         let (config_pda, _) =
@@ -2632,10 +2632,10 @@ impl App {
     /// Re-select a position after refresh (re-fetches position/key_state data).
     pub fn reselect_position(&mut self, index: usize) {
         // We need the raw account data for select_active_position.
-        // Re-fetch PositionNFT and KeyState accounts.
+        // Re-fetch PositionState and KeyState accounts.
         let pos_config = RpcProgramAccountsConfig {
             filters: Some(vec![RpcFilterType::DataSize(
-                PositionNFT::SIZE as u64,
+                PositionState::SIZE as u64,
             )]),
             account_config: RpcAccountInfoConfig {
                 encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
@@ -2696,10 +2696,10 @@ impl App {
         self.market_config = None;
         self.discovered_positions.clear();
 
-        // Step 1: Get all PositionNFT accounts from the program
+        // Step 1: Get all PositionState accounts from the program
         let pos_config = RpcProgramAccountsConfig {
             filters: Some(vec![RpcFilterType::DataSize(
-                PositionNFT::SIZE as u64,
+                PositionState::SIZE as u64,
             )]),
             account_config: RpcAccountInfoConfig {
                 encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
@@ -2739,7 +2739,7 @@ impl App {
 
         // Step 3: Check admin keys — for each position, check if signer owns the admin asset
         for (pos_pda, pos_acc) in &positions {
-            let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+            let pos = match PositionState::try_deserialize(&mut pos_acc.data.as_slice()) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
@@ -2784,7 +2784,7 @@ impl App {
                 if seen_positions.contains(pos_pda) {
                     continue;
                 }
-                let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+                let pos = match PositionState::try_deserialize(&mut pos_acc.data.as_slice()) {
                     Ok(p) => p,
                     Err(_) => continue,
                 };
@@ -2815,7 +2815,7 @@ impl App {
             if seen_positions.contains(pos_pda) {
                 continue;
             }
-            let pos = match PositionNFT::try_deserialize(&mut pos_acc.data.as_slice()) {
+            let pos = match PositionState::try_deserialize(&mut pos_acc.data.as_slice()) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
@@ -2875,9 +2875,9 @@ impl App {
         let pos_pda = dp.position_pda;
         let admin_asset = dp.admin_asset;
 
-        // Find the full PositionNFT data
+        // Find the full PositionState data
         let pos = match positions.iter().find(|(pda, _)| *pda == pos_pda) {
-            Some((_, acc)) => match PositionNFT::try_deserialize(&mut acc.data.as_slice()) {
+            Some((_, acc)) => match PositionState::try_deserialize(&mut acc.data.as_slice()) {
                 Ok(p) => p,
                 Err(_) => return,
             },

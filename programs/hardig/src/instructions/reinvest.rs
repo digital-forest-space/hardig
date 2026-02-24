@@ -5,7 +5,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{MarketConfig, PositionNFT, ProtocolConfig, PERM_REINVEST};
+use crate::state::{MarketConfig, PositionState, ProtocolConfig, PERM_REINVEST};
 
 use super::validate_key::validate_key;
 
@@ -20,7 +20,7 @@ pub struct Reinvest<'info> {
 
     /// The position to reinvest for.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The MarketConfig for this position's market.
     #[account(

@@ -12,7 +12,7 @@ use mpl_core::{
 };
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, ProtocolConfig, PRESET_ADMIN};
+use crate::state::{PositionState, ProtocolConfig, PRESET_ADMIN};
 use super::{permission_attributes, metadata_uri};
 
 #[derive(Accounts)]
@@ -27,7 +27,7 @@ pub struct ExecuteRecovery<'info> {
 
     /// The position to recover.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The old admin's MPL-Core asset (to burn).
     /// CHECK: Validated in handler against position.current_admin_asset.

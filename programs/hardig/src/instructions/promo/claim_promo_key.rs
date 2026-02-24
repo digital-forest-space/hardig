@@ -13,7 +13,7 @@ use mpl_core::{
 use crate::errors::HardigError;
 use crate::mayflower;
 use crate::state::{
-    ClaimReceipt, KeyState, MarketConfig, PositionNFT, PromoConfig, ProtocolConfig, RateBucket,
+    ClaimReceipt, KeyState, MarketConfig, PositionState, PromoConfig, ProtocolConfig, RateBucket,
     PERM_LIMITED_BORROW, PERM_LIMITED_SELL,
 };
 use super::super::{format_sol_amount, metadata_uri, permission_attributes, slots_to_duration};
@@ -45,7 +45,7 @@ pub struct ClaimPromoKey<'info> {
 
     /// The position this promo is for. Mutable because deposited_nav updates.
     #[account(mut)]
-    pub position: Box<Account<'info, PositionNFT>>,
+    pub position: Box<Account<'info, PositionState>>,
 
     /// The new MPL-Core asset for the key NFT.
     #[account(mut)]

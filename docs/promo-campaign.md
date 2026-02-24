@@ -118,7 +118,7 @@ Promo code lives inside the Härdig program but is isolated for future extractio
 
 ```
 programs/hardig/src/
-  state.rs                    # core state (PositionNFT, ProtocolConfig, etc.)
+  state.rs                    # core state (PositionState, ProtocolConfig, etc.)
   state/promo.rs              # PromoConfig, ClaimReceipt (promo-only state)
   instructions/
     mod.rs                    # core instruction re-exports
@@ -198,7 +198,7 @@ Accounts:
 claimer (signer, mut)       — pays rent for ClaimReceipt + KeyState
 promo (PromoConfig, mut)    — read params, increment claims_count
 claim_receipt (init PDA)    — one-per-wallet guard
-position (PositionNFT)      — for key binding attributes
+position (PositionState)      — for key binding attributes
 key_asset (signer, mut)     — new MPL-Core asset
 key_state (init PDA)        — rate limit state
 config (ProtocolConfig)     — collection address + CPI signer

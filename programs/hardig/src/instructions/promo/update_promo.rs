@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::HardigError;
-use crate::state::{PositionNFT, PromoConfig, ProtocolConfig, PERM_MANAGE_KEYS};
+use crate::state::{PositionState, PromoConfig, ProtocolConfig, PERM_MANAGE_KEYS};
 use super::super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -14,7 +14,7 @@ pub struct UpdatePromo<'info> {
     pub admin_key_asset: UncheckedAccount<'info>,
 
     /// The position this promo belongs to.
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The PromoConfig PDA to update.
     #[account(

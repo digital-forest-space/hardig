@@ -16,7 +16,7 @@ use hardig::mayflower::{
     MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, PP_DISCRIMINATOR,
 };
 use hardig::state::{
-    ClaimReceipt, KeyState, MarketConfig, PositionNFT, PromoConfig, ProtocolConfig,
+    ClaimReceipt, KeyState, MarketConfig, PositionState, PromoConfig, ProtocolConfig,
     PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST,
     PERM_LIMITED_SELL, PERM_LIMITED_BORROW,
     PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
@@ -272,7 +272,7 @@ fn ix_create_position_with_market(
     market_name: &str,
 ) -> Instruction {
     let (position_pda, _) =
-        Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id());
+        Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &program_id());
     let (program_pda, _) =
         Pubkey::find_program_address(&[b"authority", asset.as_ref()], &program_id());
     let (config_pda, _) = config_pda();
@@ -347,7 +347,7 @@ fn ix_authorize_key(
     collection: &Pubkey,
 ) -> Instruction {
     let (pos_pda, _) =
-        Pubkey::find_program_address(&[PositionNFT::SEED, admin_asset.as_ref()], &program_id());
+        Pubkey::find_program_address(&[PositionState::SEED, admin_asset.as_ref()], &program_id());
     let (key_state_pda, _) =
         Pubkey::find_program_address(&[KeyState::SEED, new_asset.as_ref()], &program_id());
     let (cfg_pda, _) = config_pda();
@@ -387,7 +387,7 @@ fn ix_revoke_key(
     collection: &Pubkey,
 ) -> Instruction {
     let (pos_pda, _) =
-        Pubkey::find_program_address(&[PositionNFT::SEED, admin_asset.as_ref()], &program_id());
+        Pubkey::find_program_address(&[PositionState::SEED, admin_asset.as_ref()], &program_id());
     let (cfg_pda, _) = config_pda();
 
     Instruction::new_with_bytes(
@@ -649,7 +649,7 @@ fn ix_reinvest(
 // ---------------------------------------------------------------------------
 
 fn position_pda(asset: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[PositionNFT::SEED, asset.as_ref()], &program_id())
+    Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &program_id())
 }
 
 fn key_state_pda(asset: &Pubkey) -> (Pubkey, u8) {
@@ -659,9 +659,9 @@ fn key_state_pda(asset: &Pubkey) -> (Pubkey, u8) {
     )
 }
 
-fn read_position(svm: &LiteSVM, pda: &Pubkey) -> PositionNFT {
+fn read_position(svm: &LiteSVM, pda: &Pubkey) -> PositionState {
     let account = svm.get_account(pda).unwrap();
-    PositionNFT::try_deserialize(&mut account.data.as_slice()).unwrap()
+    PositionState::try_deserialize(&mut account.data.as_slice()).unwrap()
 }
 
 fn read_key_state(svm: &LiteSVM, pda: &Pubkey) -> KeyState {

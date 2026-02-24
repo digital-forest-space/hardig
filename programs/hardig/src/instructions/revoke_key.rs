@@ -8,7 +8,7 @@ use mpl_core::{
 };
 
 use crate::errors::HardigError;
-use crate::state::{KeyState, PositionNFT, ProtocolConfig, PERM_MANAGE_KEYS};
+use crate::state::{KeyState, PositionState, ProtocolConfig, PERM_MANAGE_KEYS};
 
 use super::validate_key::validate_key;
 
@@ -23,7 +23,7 @@ pub struct RevokeKey<'info> {
 
     /// The position. Mutable to update last_admin_activity.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// The target key asset to revoke and burn.
     /// CHECK: Validated in handler (position attribute check via KeyState).

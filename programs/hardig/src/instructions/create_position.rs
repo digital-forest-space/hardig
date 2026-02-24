@@ -11,7 +11,7 @@ use mpl_core::{
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{MarketConfig, PositionNFT, ProtocolConfig, PRESET_ADMIN};
+use crate::state::{MarketConfig, PositionState, ProtocolConfig, PRESET_ADMIN};
 use super::{metadata_uri, permission_attributes};
 
 #[derive(Accounts)]
@@ -27,14 +27,14 @@ pub struct CreatePosition<'info> {
     #[account(
         init,
         payer = admin,
-        space = PositionNFT::SIZE,
-        seeds = [PositionNFT::SEED, admin_asset.key().as_ref()],
+        space = PositionState::SIZE,
+        seeds = [PositionState::SEED, admin_asset.key().as_ref()],
         bump,
     )]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// Per-position authority PDA. Used for Mayflower CPI signing;
-    /// bump stored in PositionNFT.authority_bump.
+    /// bump stored in PositionState.authority_bump.
     /// CHECK: PDA derived from program, not read.
     #[account(
         seeds = [b"authority", admin_asset.key().as_ref()],

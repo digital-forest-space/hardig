@@ -5,7 +5,7 @@ use anchor_spl::token::Token;
 
 use crate::errors::HardigError;
 use crate::mayflower;
-use crate::state::{MarketConfig, PositionNFT, ProtocolConfig, PERM_BUY};
+use crate::state::{MarketConfig, PositionState, ProtocolConfig, PERM_BUY};
 
 use super::validate_key::validate_key;
 
@@ -20,7 +20,7 @@ pub struct Buy<'info> {
 
     /// The position to buy navSOL for.
     #[account(mut)]
-    pub position: Account<'info, PositionNFT>,
+    pub position: Account<'info, PositionState>,
 
     /// Protocol config PDA — provides collection pubkey for key validation.
     #[account(
