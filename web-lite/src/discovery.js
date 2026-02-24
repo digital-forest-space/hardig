@@ -136,7 +136,7 @@ export async function discoverPosition(connection, wallet) {
   // (small account set), then load specific MPL-Core assets by pubkey.
   // This avoids getProgramAccounts on MPL Core which most RPC providers reject.
 
-  const POSITION_SIZE = 205; // PositionState account size (8+32+32+32+8+8+2+8+1+1+32+32+8+1)
+  const POSITION_SIZE = 238; // PositionState account size (8+32+32+32+8+8+2+8+1+1+32+32+8+1+33)
 
   const [positionAccounts, keyStateAccounts] = await Promise.all([
     connection.getProgramAccounts(PROGRAM_ID, {

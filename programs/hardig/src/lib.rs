@@ -34,8 +34,9 @@ pub mod hardig {
         max_reinvest_spread_bps: u16,
         name: Option<String>,
         market_name: String,
+        artwork_id: Option<Pubkey>,
     ) -> Result<()> {
-        instructions::create_position::handler(ctx, max_reinvest_spread_bps, name, market_name)
+        instructions::create_position::handler(ctx, max_reinvest_spread_bps, name, market_name, artwork_id)
     }
 
     /// Authorize a new key NFT for a position (admin only).

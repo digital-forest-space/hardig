@@ -297,6 +297,8 @@ fn ix_create_position_with_market(
     // market_name: String
     data.extend_from_slice(&(market_name.len() as u32).to_le_bytes());
     data.extend_from_slice(market_name.as_bytes());
+    // artwork_id: Option<Pubkey> = None
+    data.push(0);
 
     Instruction::new_with_bytes(
         program_id(),

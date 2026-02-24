@@ -1258,6 +1258,8 @@ impl App {
         let market_name_bytes = market_name.as_bytes();
         data.extend_from_slice(&(market_name_bytes.len() as u32).to_le_bytes());
         data.extend_from_slice(market_name_bytes);
+        // artwork_id: Option<Pubkey> = None
+        data.push(0);
 
         let accounts = vec![
             AccountMeta::new(admin, true),                              // admin

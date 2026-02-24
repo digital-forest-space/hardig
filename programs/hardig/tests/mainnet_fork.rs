@@ -204,6 +204,14 @@ fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16, collectio
 
     let mut data = sighash("create_position");
     data.extend_from_slice(&spread_bps.to_le_bytes());
+    // name: Option<String> = None
+    data.push(0);
+    // market_name: String = "navSOL"
+    let market_name = b"navSOL";
+    data.extend_from_slice(&(market_name.len() as u32).to_le_bytes());
+    data.extend_from_slice(market_name);
+    // artwork_id: Option<Pubkey> = None
+    data.push(0);
 
     Instruction::new_with_bytes(
         program_id(),

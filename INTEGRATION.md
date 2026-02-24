@@ -25,11 +25,12 @@ Singleton global configuration. One per deployment.
 | 0 | 8 | discriminator | Anchor account discriminator |
 | 8 | 32 | `admin` | Protocol admin pubkey |
 | 40 | 32 | `collection` | MPL-Core collection for key NFTs (`Pubkey::default()` if not yet created) |
-| 72 | 1 | `bump` | PDA bump seed |
+| 72 | 32 | `pending_admin` | Pending admin for two-step transfer (`Pubkey::default()` = no pending transfer) |
+| 104 | 1 | `bump` | PDA bump seed |
 
-**Total size:** 73 bytes
+**Total size:** 105 bytes
 
-**Source:** `ProtocolConfig` in `programs/hardig/src/state.rs`
+**Source:** `ProtocolConfig` in `programs/hardig/src/state/mod.rs`
 
 ### PositionState
 
@@ -38,7 +39,7 @@ Represents a navSOL position controlled by an NFT keyring. One per admin key.
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | 8 | discriminator | Anchor account discriminator |
-| 8 | 32 | `admin_asset` | MPL-Core asset pubkey of the admin key NFT |
+| 8 | 32 | `authority_seed` | Permanent PDA seed (first admin asset pubkey). Never changes after creation |
 | 40 | 32 | `position_pda` | Mayflower PersonalPosition PDA owned by this position |
 | 72 | 32 | `market_config` | MarketConfig PDA this position is bound to |
 | 104 | 8 | `deposited_nav` | navSOL deposited (local tracking; Mayflower is source of truth) |
@@ -47,10 +48,15 @@ Represents a navSOL position controlled by an NFT keyring. One per admin key.
 | 122 | 8 | `last_admin_activity` | Unix timestamp of last admin-signed instruction |
 | 130 | 1 | `bump` | PDA bump seed |
 | 131 | 1 | `authority_bump` | Bump for the per-position authority PDA |
+| 132 | 32 | `current_admin_asset` | Current admin key NFT (MPL-Core asset). Updated on recovery |
+| 164 | 32 | `recovery_asset` | Recovery key NFT (`Pubkey::default()` = no recovery configured) |
+| 196 | 8 | `recovery_lockout_secs` | Inactivity threshold in seconds before recovery can execute |
+| 204 | 1 | `recovery_config_locked` | If true, recovery config cannot be changed |
+| 205 | 33 | `artwork_id` | Optional artwork set ID for custom key visuals (`Option<Pubkey>`: 1 byte tag + 32 byte pubkey) |
 
-**Total size:** 132 bytes
+**Total size:** 238 bytes
 
-**Source:** `PositionState` in `programs/hardig/src/state.rs`
+**Source:** `PositionState` in `programs/hardig/src/state/mod.rs`
 
 ### MarketConfig
 
@@ -80,12 +86,13 @@ Mutable state for a delegated key NFT. Tracks rate-limit token buckets. Created 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | 8 | discriminator | Anchor account discriminator |
-| 8 | 32 | `asset` | MPL-Core asset pubkey this state belongs to |
-| 40 | 1 | `bump` | PDA bump seed |
-| 41 | 32 | `sell_bucket` | RateBucket for `PERM_LIMITED_SELL` |
-| 73 | 32 | `borrow_bucket` | RateBucket for `PERM_LIMITED_BORROW` |
+| 8 | 32 | `authority_seed` | Position's authority_seed this key belongs to (for memcmp filtering) |
+| 40 | 32 | `asset` | MPL-Core asset pubkey this state belongs to |
+| 72 | 1 | `bump` | PDA bump seed |
+| 73 | 32 | `sell_bucket` | RateBucket for `PERM_LIMITED_SELL` |
+| 105 | 32 | `borrow_bucket` | RateBucket for `PERM_LIMITED_BORROW` |
 
-**Total size:** 105 bytes
+**Total size:** 137 bytes
 
 Each **RateBucket** (32 bytes, all little-endian u64):
 
@@ -107,10 +114,12 @@ All PDAs use the Hardig program ID (`4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21
 | PDA | Seeds | Account Type |
 |-----|-------|--------------|
 | Protocol config | `["config"]` | `ProtocolConfig` |
-| Position | `["position", admin_asset]` | `PositionState` |
-| Per-position authority | `["authority", admin_asset]` | (no account data; signer PDA) |
+| Position | `["position", authority_seed]` | `PositionState` |
+| Per-position authority | `["authority", authority_seed]` | (no account data; signer PDA) |
 | Key state | `["key_state", asset]` | `KeyState` |
 | Market config | `["market_config", nav_mint]` | `MarketConfig` |
+| Promo config | `["promo", authority_seed, name_suffix]` | `PromoConfig` |
+| Claim receipt | `["claim_receipt", promo, claimer]` | `ClaimReceipt` |
 
 ### JavaScript (using `@solana/web3.js`)
 
@@ -222,7 +231,14 @@ Permissions are stored as a single `u8` bitmask on each key NFT's MPL-Core `Attr
 | `borrow` | `PERM_BORROW` or `PERM_LIMITED_BORROW` | `amount: u64` | Borrow SOL against nav-token floor |
 | `repay` | `PERM_REPAY` | `amount: u64` | Repay borrowed SOL |
 | `reinvest` | `PERM_REINVEST` | `min_out: u64` | Borrow available capacity and buy more nav tokens |
+| `heartbeat` | `PERM_MANAGE_KEYS` | -- | No-op liveness proof; resets recovery lockout |
+| `configure_recovery` | `PERM_MANAGE_KEYS` | `lockout_secs: i64`, `lock_config: bool` | Set or replace the dead-man's switch recovery key |
+| `execute_recovery` | Recovery key holder | -- | Claim admin control after lockout expires |
 | `transfer_admin` | Protocol admin | `new_admin: Pubkey` | Transfer protocol admin rights |
+| `accept_admin` | Pending admin | -- | Accept a pending protocol admin transfer |
+| `create_promo` | `PERM_MANAGE_KEYS` | permissions, rate-limit params, deposit, max claims | Create a promotional campaign for a position |
+| `update_promo` | `PERM_MANAGE_KEYS` | `active: Option<bool>`, `max_claims: Option<u32>` | Toggle promo active state or update max claims |
+| `claim_promo_key` | Any signer | `amount: u64`, `min_out: u64` | Claim a promo key NFT (deposits SOL via Mayflower buy) |
 | `migrate_config` | Protocol admin | -- | Migrate ProtocolConfig from v0 to v1 |
 
 ### Key Validation
@@ -244,15 +260,21 @@ const positionInfo = await connection.getAccountInfo(positionPda);
 const data = positionInfo.data;
 const view = new DataView(data.buffer, data.byteOffset);
 
-const adminAsset      = new PublicKey(data.slice(8, 40));
-const mfPositionPda   = new PublicKey(data.slice(40, 72));
-const marketConfigPda = new PublicKey(data.slice(72, 104));
-const depositedNav    = Number(view.getBigUint64(104, true));
-const userDebt        = Number(view.getBigUint64(112, true));
-const spreadBps       = view.getUint16(120, true);
-const lastAdmin       = Number(view.getBigInt64(122, true));
-const bump            = data[130];
-const authorityBump   = data[131];
+const authoritySeed       = new PublicKey(data.slice(8, 40));
+const mfPositionPda       = new PublicKey(data.slice(40, 72));
+const marketConfigPda     = new PublicKey(data.slice(72, 104));
+const depositedNav        = Number(view.getBigUint64(104, true));
+const userDebt            = Number(view.getBigUint64(112, true));
+const spreadBps           = view.getUint16(120, true);
+const lastAdmin           = Number(view.getBigInt64(122, true));
+const bump                = data[130];
+const authorityBump       = data[131];
+const currentAdminAsset   = new PublicKey(data.slice(132, 164));
+const recoveryAsset       = new PublicKey(data.slice(164, 196));
+const recoveryLockoutSecs = Number(view.getBigInt64(196, true));
+const recoveryConfigLocked = data[204] !== 0;
+const hasArtwork          = data[205] !== 0;
+const artworkId           = hasArtwork ? new PublicKey(data.slice(206, 238)) : null;
 ```
 
 ### Computing Borrow Capacity
@@ -391,11 +413,11 @@ There are two types of keys to discover: admin keys (one per position) and deleg
 
 ### Step 1: Scan Hardig Program Accounts
 
-Fetch all `PositionState` accounts (132 bytes) and `KeyState` accounts (137 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 105) to avoid fetching all keys protocol-wide:
+Fetch all `PositionState` accounts (238 bytes) and `KeyState` accounts (137 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 8) to avoid fetching all keys protocol-wide:
 
 ```js
 const PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
-const POSITION_SIZE = 132;
+const POSITION_SIZE = 238;
 const KEY_STATE_SIZE = 137;
 
 // Discover all positions and keys (initial wallet scan)
@@ -423,18 +445,19 @@ const positionKeyStates = await connection.getProgramAccounts(PROGRAM_ID, {
 
 ### Step 2: Check Admin Keys
 
-Each `PositionState` stores `admin_asset` at bytes 8..40. Load the MPL-Core asset account for each admin asset and check if the owner matches the target wallet:
+Each `PositionState` stores `authority_seed` at bytes 8..40 (the original admin asset pubkey). The current admin key is at `current_admin_asset` (bytes 132..164). Load the MPL-Core asset account for each current admin asset and check if the owner matches the target wallet:
 
 ```js
-// Parse admin_asset from each PositionState
+// Parse current_admin_asset from each PositionState
 const positions = positionAccounts.map(({ pubkey, account }) => ({
   posPda: pubkey,
-  adminAsset: new PublicKey(account.data.slice(8, 40)),
+  authoritySeed: new PublicKey(account.data.slice(8, 40)),
+  currentAdminAsset: new PublicKey(account.data.slice(132, 164)),
 }));
 
 // Batch-fetch the MPL-Core asset accounts
 const assetInfos = await connection.getMultipleAccountsInfo(
-  positions.map(p => p.adminAsset)
+  positions.map(p => p.currentAdminAsset)
 );
 
 // MPL-Core AssetV1: byte 0 = Key enum (1 = AssetV1), bytes 1..33 = owner
@@ -450,17 +473,18 @@ for (let i = 0; i < positions.length; i++) {
 
 ### Step 3: Check Delegated Keys
 
-Each `KeyState` stores `asset` at bytes 8..40. Load those MPL-Core asset accounts and:
+Each `KeyState` stores `authority_seed` at bytes 8..40 and `asset` at bytes 40..72. Load those MPL-Core asset accounts and:
 
 1. Check the `owner` field (bytes 1..33) matches the target wallet.
 2. Read the `position` attribute from the Attributes plugin to find which `admin_asset` this key is bound to.
 3. Look up the corresponding `PositionState` via the admin asset.
 
 ```js
-// Parse asset pubkey from each KeyState
+// Parse asset pubkey from each KeyState (authority_seed at 8..40, asset at 40..72)
 const keyStates = keyStateAccounts.map(({ pubkey, account }) => ({
   keyStatePda: pubkey,
-  asset: new PublicKey(account.data.slice(8, 40)),
+  authoritySeed: new PublicKey(account.data.slice(8, 40)),
+  asset: new PublicKey(account.data.slice(40, 72)),
 }));
 
 // Batch-fetch the MPL-Core asset accounts

@@ -53,6 +53,8 @@ pub struct PositionState {
     pub recovery_lockout_secs: i64,
     /// If true, recovery config cannot be changed.
     pub recovery_config_locked: bool,
+    /// Optional artwork set ID for custom key visuals. None = default artwork.
+    pub artwork_id: Option<Pubkey>,
 }
 
 impl PositionState {
@@ -61,8 +63,8 @@ impl PositionState {
     // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
     // + last_admin_activity(8) + bump(1) + authority_bump(1)
     // + current_admin_asset(32) + recovery_asset(32) + recovery_lockout_secs(8)
-    // + recovery_config_locked(1)
-    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1 + 32 + 32 + 8 + 1;
+    // + recovery_config_locked(1) + artwork_id(1+32)
+    pub const SIZE: usize = 8 + 32 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1 + 32 + 32 + 8 + 1 + 33;
 }
 
 /// On-chain configuration for a Mayflower market.
