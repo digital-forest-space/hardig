@@ -6,6 +6,8 @@ Solana program implementing an NFT keyring model for delegated management of pos
 
 Each position is controlled by a set of NFT keys with different permission levels (Admin, Operator, Depositor, Keeper). Keys are standard SPL tokens held in wallets — transfer the NFT and you transfer the permission. Mint authority is permanently disabled after minting each key NFT, guaranteeing a supply of exactly 1. Freeze authority is held by the program PDA, enabling account freezing for theft recovery.
 
+**Website:** [hardig.app](https://hardig.app) | **X:** [@hardig_app](https://x.com/hardig_app)
+
 **Program ID:** `4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p`
 
 ## Permission Matrix
