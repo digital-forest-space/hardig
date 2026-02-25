@@ -151,6 +151,15 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
     // Validate market_name length
     require!(market_name.len() <= 32, HardigError::NameTooLong);
 
+    // --- Validate artwork receipt if present ---
+    let image_override = crate::artwork::validate_artwork_receipt(
+        &artwork_id,
+        ctx.remaining_accounts,
+        &ctx.accounts.admin_asset.key(),
+        ctx.program_id,
+        true, // read admin_image_uri
+    )?;
+
     let mut attrs = permission_attributes(PRESET_ADMIN);
     attrs.push(Attribute {
         key: "position".to_string(),
@@ -169,7 +178,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
         .owner(Some(&ctx.accounts.admin.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name(nft_name.clone())
-        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None, Some(&market_name), None, None))
+        .uri(metadata_uri(&nft_name, PRESET_ADMIN, None, None, Some(&market_name), None, image_override.as_deref()))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

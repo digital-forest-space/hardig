@@ -123,6 +123,15 @@ pub fn handler(
         .map(|a| a.value.clone())
         .unwrap_or_default();
 
+    // --- Validate artwork receipt if present on the position ---
+    let image_override = crate::artwork::validate_artwork_receipt(
+        &ctx.accounts.position.artwork_id,
+        ctx.remaining_accounts,
+        &ctx.accounts.position.authority_seed,
+        ctx.program_id,
+        false, // read delegate_image_uri
+    )?;
+
     // Build attribute list with human-readable permissions + position binding
     let mut attrs = permission_attributes(permissions);
     attrs.push(Attribute {
@@ -181,7 +190,7 @@ pub fn handler(
             borrow_limit_str.as_deref(),
             Some(&admin_market),
             Some(&admin_asset_name),
-            None,
+            image_override.as_deref(),
         ))
         .plugins(vec![
             PluginAuthorityPair {

@@ -93,4 +93,12 @@ pub enum HardigError {
     PromoInactive,
     #[msg("Promo has reached maximum claims")]
     PromoMaxClaimsReached,
+
+    // Artwork / trusted provider errors
+    #[msg("Invalid artwork receipt account (bad discriminator, length, or data)")]
+    InvalidArtworkReceipt,
+    #[msg("Artwork receipt is not owned by a trusted provider program")]
+    UntrustedProvider,
+    #[msg("Artwork receipt position_seed does not match this position")]
+    ArtworkReceiptPositionMismatch,
 }

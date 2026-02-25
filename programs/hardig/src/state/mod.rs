@@ -97,6 +97,26 @@ impl MarketConfig {
     pub const SIZE: usize = 8 + 32 * 8 + 1;
 }
 
+/// Marker PDA for a trusted artwork provider program.
+/// PDA seeds = [b"trusted_provider", program_id].
+#[account]
+pub struct TrustedProvider {
+    /// The trusted provider program ID.
+    pub program_id: Pubkey,
+    /// Protocol admin who added it.
+    pub added_by: Pubkey,
+    /// Can be deactivated without deleting.
+    pub active: bool,
+    /// PDA bump seed.
+    pub bump: u8,
+}
+
+impl TrustedProvider {
+    pub const SEED: &'static [u8] = b"trusted_provider";
+    // discriminator(8) + program_id(32) + added_by(32) + active(1) + bump(1)
+    pub const SIZE: usize = 8 + 32 + 32 + 1 + 1; // 74
+}
+
 // ---------------------------------------------------------------------------
 // Permission bitmask constants
 // ---------------------------------------------------------------------------

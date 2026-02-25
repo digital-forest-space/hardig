@@ -1,4 +1,5 @@
 pub mod accept_admin;
+pub mod add_trusted_provider;
 pub mod authorize_key;
 pub mod borrow;
 pub mod buy;
@@ -13,14 +14,17 @@ pub mod initialize_protocol;
 pub mod migrate_config;
 pub mod promo;
 pub mod reinvest;
+pub mod remove_trusted_provider;
 pub mod repay;
 pub mod revoke_key;
+pub mod set_position_artwork;
 pub mod transfer_admin;
 pub mod validate_key;
 pub mod withdraw;
 
 #[allow(ambiguous_glob_reexports)]
 pub use accept_admin::*;
+pub use add_trusted_provider::*;
 pub use authorize_key::*;
 pub use borrow::*;
 pub use buy::*;
@@ -34,8 +38,10 @@ pub use initialize_protocol::*;
 pub use migrate_config::*;
 pub use promo::*;
 pub use reinvest::*;
+pub use remove_trusted_provider::*;
 pub use repay::*;
 pub use revoke_key::*;
+pub use set_position_artwork::*;
 pub use transfer_admin::*;
 pub use withdraw::*;
 

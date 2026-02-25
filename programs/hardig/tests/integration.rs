@@ -15,8 +15,10 @@ use hardig::mayflower::{
     DEFAULT_MARKET_NAV_VAULT, DEFAULT_MAYFLOWER_MARKET, DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT,
     MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, PP_DISCRIMINATOR,
 };
+use hardig::artwork::ARTWORK_RECEIPT_DISCRIMINATOR;
 use hardig::state::{
     ClaimReceipt, KeyState, MarketConfig, PositionState, PromoConfig, ProtocolConfig,
+    TrustedProvider,
     PERM_BUY, PERM_SELL, PERM_MANAGE_KEYS, PERM_REINVEST,
     PERM_LIMITED_SELL, PERM_LIMITED_BORROW,
     PRESET_ADMIN, PRESET_DEPOSITOR, PRESET_KEEPER, PRESET_OPERATOR,
@@ -4386,4 +4388,495 @@ fn test_create_promo_invalid_permissions_rejected() {
     );
     let result = send_tx(&mut svm, &[ix], &[&admin]);
     assert!(result.is_err(), "creating promo with PERM_SELL should fail (not in Promo allowed set)");
+}
+
+// ===========================================================================
+// Trusted Provider & Artwork Receipt tests
+// ===========================================================================
+
+fn trusted_provider_pda(provider_program_id: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[TrustedProvider::SEED, provider_program_id.as_ref()],
+        &program_id(),
+    )
+}
+
+fn ix_add_trusted_provider(admin: &Pubkey, provider_program_id: &Pubkey) -> Instruction {
+    let (config_pda, _) = config_pda();
+    let (tp_pda, _) = trusted_provider_pda(provider_program_id);
+
+    let mut data = sighash("add_trusted_provider");
+    data.extend_from_slice(provider_program_id.as_ref());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(tp_pda, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ],
+    )
+}
+
+fn ix_remove_trusted_provider(admin: &Pubkey, provider_program_id: &Pubkey) -> Instruction {
+    let (config_pda, _) = config_pda();
+    let (tp_pda, _) = trusted_provider_pda(provider_program_id);
+
+    let data = sighash("remove_trusted_provider");
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new_readonly(*admin, true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(tp_pda, false),
+        ],
+    )
+}
+
+fn ix_set_position_artwork(
+    admin: &Pubkey,
+    admin_asset: &Pubkey,
+    artwork_id: Option<Pubkey>,
+    _collection: &Pubkey,
+    remaining: Vec<AccountMeta>,
+) -> Instruction {
+    let (pos_pda, _) = position_pda(admin_asset);
+    let (config_pda, _) = config_pda();
+
+    let mut data = sighash("set_position_artwork");
+    match artwork_id {
+        Some(pk) => {
+            data.push(1);
+            data.extend_from_slice(pk.as_ref());
+        }
+        None => data.push(0),
+    }
+
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*admin, true),
+        AccountMeta::new_readonly(*admin_asset, false),
+        AccountMeta::new(pos_pda, false),
+        AccountMeta::new_readonly(config_pda, false),
+    ];
+    accounts.extend(remaining);
+
+    Instruction::new_with_bytes(program_id(), &data, accounts)
+}
+
+/// Build a fake ArtworkReceipt account data blob compatible with artwork.rs byte readers.
+fn build_fake_receipt_data(position_seed: &Pubkey, admin_image: &str, delegate_image: &str) -> Vec<u8> {
+    let mut data = Vec::new();
+    // discriminator (8)
+    data.extend_from_slice(&ARTWORK_RECEIPT_DISCRIMINATOR);
+    // artwork_set (32)
+    data.extend_from_slice(&[0u8; 32]);
+    // position_seed (32)
+    data.extend_from_slice(position_seed.as_ref());
+    // buyer (32)
+    data.extend_from_slice(&[0u8; 32]);
+    // purchased_at (8)
+    data.extend_from_slice(&0i64.to_le_bytes());
+    // admin_image_uri (4 + len)
+    data.extend_from_slice(&(admin_image.len() as u32).to_le_bytes());
+    data.extend_from_slice(admin_image.as_bytes());
+    // delegate_image_uri (4 + len)
+    data.extend_from_slice(&(delegate_image.len() as u32).to_le_bytes());
+    data.extend_from_slice(delegate_image.as_bytes());
+    data
+}
+
+/// Plant a fake ArtworkReceipt account at a given address, owned by provider_program_id.
+fn plant_fake_receipt(
+    svm: &mut LiteSVM,
+    receipt_address: &Pubkey,
+    provider_program_id: &Pubkey,
+    position_seed: &Pubkey,
+    admin_image: &str,
+    delegate_image: &str,
+) {
+    let data = build_fake_receipt_data(position_seed, admin_image, delegate_image);
+    let account = Account {
+        lamports: 1_000_000_000,
+        data,
+        owner: *provider_program_id,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(*receipt_address, account).unwrap();
+}
+
+/// Build a create_position instruction with artwork_id and remaining_accounts for receipt validation.
+fn ix_create_position_with_artwork(
+    admin: &Pubkey,
+    asset: &Pubkey,
+    spread_bps: u16,
+    collection: &Pubkey,
+    artwork_id: &Pubkey,
+    receipt: &Pubkey,
+    trusted_provider_pda_addr: &Pubkey,
+) -> Instruction {
+    let (position_pda, _) =
+        Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &program_id());
+    let (program_pda, _) =
+        Pubkey::find_program_address(&[b"authority", asset.as_ref()], &program_id());
+    let (config_pda, _) = config_pda();
+    let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
+    let (pp_pda, _) = mayflower::derive_personal_position(&program_pda, &DEFAULT_MARKET_META);
+    let (escrow_pda, _) = mayflower::derive_personal_position_escrow(&pp_pda);
+    let (log_pda, _) = mayflower::derive_log_account();
+
+    let mut data = sighash("create_position");
+    data.extend_from_slice(&spread_bps.to_le_bytes());
+    // name: Option<String> = None
+    data.push(0);
+    // market_name: String = "navSOL"
+    let market_name = b"navSOL";
+    data.extend_from_slice(&(market_name.len() as u32).to_le_bytes());
+    data.extend_from_slice(market_name);
+    // artwork_id: Option<Pubkey> = Some(artwork_id)
+    data.push(1);
+    data.extend_from_slice(artwork_id.as_ref());
+
+    Instruction::new_with_bytes(
+        program_id(),
+        &data,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new(*asset, true),
+            AccountMeta::new(position_pda, false),
+            AccountMeta::new_readonly(program_pda, false),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(*collection, false),
+            AccountMeta::new_readonly(mc_pda, false),
+            AccountMeta::new_readonly(MPL_CORE_ID, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            AccountMeta::new_readonly(SPL_TOKEN_ID, false),
+            AccountMeta::new(pp_pda, false),
+            AccountMeta::new(escrow_pda, false),
+            AccountMeta::new_readonly(DEFAULT_MARKET_META, false),
+            AccountMeta::new_readonly(DEFAULT_NAV_SOL_MINT, false),
+            AccountMeta::new(log_pda, false),
+            AccountMeta::new_readonly(MAYFLOWER_PROGRAM_ID, false),
+            // remaining_accounts for artwork validation
+            AccountMeta::new_readonly(*receipt, false),
+            AccountMeta::new_readonly(*trusted_provider_pda_addr, false),
+        ],
+    )
+}
+
+// ---------------------------------------------------------------------------
+// 17. test_add_trusted_provider
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_add_trusted_provider() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let fake_program = Pubkey::new_unique();
+    let ix = ix_add_trusted_provider(&admin.pubkey(), &fake_program);
+    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
+
+    // Verify the TrustedProvider account was created correctly
+    let (tp_pda, _) = trusted_provider_pda(&fake_program);
+    let tp_account = svm.get_account(&tp_pda).unwrap();
+    let tp: TrustedProvider =
+        TrustedProvider::try_deserialize(&mut tp_account.data.as_slice()).unwrap();
+    assert_eq!(tp.program_id, fake_program);
+    assert_eq!(tp.added_by, admin.pubkey());
+    assert!(tp.active);
+}
+
+// ---------------------------------------------------------------------------
+// 18. test_remove_trusted_provider
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_remove_trusted_provider() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let fake_program = Pubkey::new_unique();
+    send_tx(&mut svm, &[ix_add_trusted_provider(&admin.pubkey(), &fake_program)], &[&admin]).unwrap();
+
+    // Remove (deactivate)
+    send_tx(&mut svm, &[ix_remove_trusted_provider(&admin.pubkey(), &fake_program)], &[&admin]).unwrap();
+
+    let (tp_pda, _) = trusted_provider_pda(&fake_program);
+    let tp_account = svm.get_account(&tp_pda).unwrap();
+    let tp: TrustedProvider =
+        TrustedProvider::try_deserialize(&mut tp_account.data.as_slice()).unwrap();
+    assert!(!tp.active);
+}
+
+// ---------------------------------------------------------------------------
+// 19. test_add_trusted_provider_non_admin_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_add_trusted_provider_non_admin_rejected() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+
+    let impostor = Keypair::new();
+    svm.airdrop(&impostor.pubkey(), 5_000_000_000).unwrap();
+
+    let fake_program = Pubkey::new_unique();
+    let ix = ix_add_trusted_provider(&impostor.pubkey(), &fake_program);
+    let result = send_tx(&mut svm, &[ix], &[&impostor]);
+    assert!(result.is_err(), "non-admin should not be able to add trusted provider");
+}
+
+// ---------------------------------------------------------------------------
+// 20. test_create_position_with_artwork_receipt
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_position_with_artwork_receipt() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Register a fake artwork provider program
+    let fake_provider = Pubkey::new_unique();
+    send_tx(&mut svm, &[ix_add_trusted_provider(&admin.pubkey(), &fake_provider)], &[&admin]).unwrap();
+
+    // Plant fake receipt owned by the provider
+    let admin_asset = Keypair::new();
+    let receipt_address = Pubkey::new_unique();
+    plant_fake_receipt(
+        &mut svm,
+        &receipt_address,
+        &fake_provider,
+        &admin_asset.pubkey(), // position_seed = admin_asset at creation time
+        "https://example.com/custom-admin.png",
+        "https://example.com/custom-delegate.png",
+    );
+
+    // Plant Mayflower stubs
+    plant_position_stubs(&mut svm, &admin_asset.pubkey());
+
+    // Create position with artwork
+    let (tp_pda, _) = trusted_provider_pda(&fake_provider);
+    let ix = ix_create_position_with_artwork(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        500,
+        &collection,
+        &receipt_address,
+        &receipt_address,
+        &tp_pda,
+    );
+    send_tx(&mut svm, &[ix], &[&admin, &admin_asset]).unwrap();
+
+    // Verify artwork_id was stored
+    let (pos_pda, _) = position_pda(&admin_asset.pubkey());
+    let pos_account = svm.get_account(&pos_pda).unwrap();
+    let pos: PositionState =
+        PositionState::try_deserialize(&mut pos_account.data.as_slice()).unwrap();
+    assert_eq!(pos.artwork_id, Some(receipt_address));
+}
+
+// ---------------------------------------------------------------------------
+// 21. test_create_position_with_fake_receipt_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_position_with_fake_receipt_rejected() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    // Register a trusted provider
+    let trusted_provider_id = Pubkey::new_unique();
+    send_tx(&mut svm, &[ix_add_trusted_provider(&admin.pubkey(), &trusted_provider_id)], &[&admin]).unwrap();
+
+    // Plant receipt owned by a DIFFERENT program (not the trusted one)
+    let untrusted_program = Pubkey::new_unique();
+    let admin_asset = Keypair::new();
+    let receipt_address = Pubkey::new_unique();
+    plant_fake_receipt(
+        &mut svm,
+        &receipt_address,
+        &untrusted_program, // wrong owner
+        &admin_asset.pubkey(),
+        "https://example.com/fake.png",
+        "https://example.com/fake.png",
+    );
+
+    plant_position_stubs(&mut svm, &admin_asset.pubkey());
+
+    let (tp_pda, _) = trusted_provider_pda(&trusted_provider_id);
+    let ix = ix_create_position_with_artwork(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        500,
+        &collection,
+        &receipt_address,
+        &receipt_address,
+        &tp_pda,
+    );
+    let result = send_tx(&mut svm, &[ix], &[&admin, &admin_asset]);
+    assert!(result.is_err(), "receipt owned by untrusted program should be rejected");
+}
+
+// ---------------------------------------------------------------------------
+// 22. test_create_position_with_wrong_position_seed_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_position_with_wrong_position_seed_rejected() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    let fake_provider = Pubkey::new_unique();
+    send_tx(&mut svm, &[ix_add_trusted_provider(&admin.pubkey(), &fake_provider)], &[&admin]).unwrap();
+
+    let admin_asset = Keypair::new();
+    let wrong_seed = Pubkey::new_unique(); // different from admin_asset
+    let receipt_address = Pubkey::new_unique();
+    plant_fake_receipt(
+        &mut svm,
+        &receipt_address,
+        &fake_provider,
+        &wrong_seed, // wrong position seed
+        "https://example.com/custom.png",
+        "https://example.com/custom.png",
+    );
+
+    plant_position_stubs(&mut svm, &admin_asset.pubkey());
+
+    let (tp_pda, _) = trusted_provider_pda(&fake_provider);
+    let ix = ix_create_position_with_artwork(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        500,
+        &collection,
+        &receipt_address,
+        &receipt_address,
+        &tp_pda,
+    );
+    let result = send_tx(&mut svm, &[ix], &[&admin, &admin_asset]);
+    assert!(result.is_err(), "receipt with wrong position_seed should be rejected");
+}
+
+// ---------------------------------------------------------------------------
+// 23. test_create_position_with_deactivated_provider_rejected
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_create_position_with_deactivated_provider_rejected() {
+    let (mut svm, admin) = setup();
+    send_tx(&mut svm, &[ix_init_protocol(&admin.pubkey())], &[&admin]).unwrap();
+    let (coll_ix, coll_kp) = ix_create_collection(&admin.pubkey());
+    send_tx(&mut svm, &[coll_ix], &[&admin, &coll_kp]).unwrap();
+    let collection = coll_kp.pubkey();
+    send_tx(&mut svm, &[ix_create_market_config(&admin.pubkey())], &[&admin]).unwrap();
+
+    let fake_provider = Pubkey::new_unique();
+    send_tx(&mut svm, &[ix_add_trusted_provider(&admin.pubkey(), &fake_provider)], &[&admin]).unwrap();
+    // Deactivate
+    send_tx(&mut svm, &[ix_remove_trusted_provider(&admin.pubkey(), &fake_provider)], &[&admin]).unwrap();
+
+    let admin_asset = Keypair::new();
+    let receipt_address = Pubkey::new_unique();
+    plant_fake_receipt(
+        &mut svm,
+        &receipt_address,
+        &fake_provider,
+        &admin_asset.pubkey(),
+        "https://example.com/custom.png",
+        "https://example.com/custom.png",
+    );
+
+    plant_position_stubs(&mut svm, &admin_asset.pubkey());
+
+    let (tp_pda, _) = trusted_provider_pda(&fake_provider);
+    let ix = ix_create_position_with_artwork(
+        &admin.pubkey(),
+        &admin_asset.pubkey(),
+        500,
+        &collection,
+        &receipt_address,
+        &receipt_address,
+        &tp_pda,
+    );
+    let result = send_tx(&mut svm, &[ix], &[&admin, &admin_asset]);
+    assert!(result.is_err(), "deactivated provider should be rejected");
+}
+
+// ---------------------------------------------------------------------------
+// 24. test_set_position_artwork
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_position_artwork() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+
+    // Register a fake provider
+    let fake_provider = Pubkey::new_unique();
+    send_tx(&mut svm, &[ix_add_trusted_provider(&h.admin.pubkey(), &fake_provider)], &[&h.admin]).unwrap();
+
+    // Plant receipt for this position
+    let receipt_address = Pubkey::new_unique();
+    plant_fake_receipt(
+        &mut svm,
+        &receipt_address,
+        &fake_provider,
+        &h.admin_asset.pubkey(), // authority_seed
+        "https://example.com/new-admin.png",
+        "https://example.com/new-delegate.png",
+    );
+
+    let (tp_pda, _) = trusted_provider_pda(&fake_provider);
+
+    // Set artwork
+    let ix = ix_set_position_artwork(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        Some(receipt_address),
+        &h.collection,
+        vec![
+            AccountMeta::new_readonly(receipt_address, false),
+            AccountMeta::new_readonly(tp_pda, false),
+        ],
+    );
+    send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
+
+    // Verify artwork_id was stored
+    let (pos_pda, _) = position_pda(&h.admin_asset.pubkey());
+    let pos_account = svm.get_account(&pos_pda).unwrap();
+    let pos: PositionState =
+        PositionState::try_deserialize(&mut pos_account.data.as_slice()).unwrap();
+    assert_eq!(pos.artwork_id, Some(receipt_address));
+
+    // Clear artwork
+    let ix_clear = ix_set_position_artwork(
+        &h.admin.pubkey(),
+        &h.admin_asset.pubkey(),
+        None,
+        &h.collection,
+        vec![],
+    );
+    send_tx(&mut svm, &[ix_clear], &[&h.admin]).unwrap();
+
+    let pos_account = svm.get_account(&pos_pda).unwrap();
+    let pos: PositionState =
+        PositionState::try_deserialize(&mut pos_account.data.as_slice()).unwrap();
+    assert_eq!(pos.artwork_id, None);
 }

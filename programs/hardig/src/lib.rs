@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+pub mod artwork;
 pub mod errors;
 pub mod instructions;
 pub mod mayflower;
@@ -154,6 +155,22 @@ pub mod hardig {
     /// `min_out`: minimum navSOL shares to receive (slippage protection, 0 = no check).
     pub fn claim_promo_key(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result<()> {
         instructions::claim_promo_key::handler(ctx, amount, min_out)
+    }
+
+    /// Register a trusted artwork provider program (protocol admin only).
+    pub fn add_trusted_provider(ctx: Context<AddTrustedProvider>, program_id: Pubkey) -> Result<()> {
+        instructions::add_trusted_provider::handler(ctx, program_id)
+    }
+
+    /// Deactivate a trusted artwork provider program (protocol admin only).
+    pub fn remove_trusted_provider(ctx: Context<RemoveTrustedProvider>) -> Result<()> {
+        instructions::remove_trusted_provider::handler(ctx)
+    }
+
+    /// Set or clear custom artwork on a position (admin key required).
+    /// When setting, pass receipt + TrustedProvider PDA as remaining_accounts.
+    pub fn set_position_artwork(ctx: Context<SetPositionArtwork>, artwork_id: Option<Pubkey>) -> Result<()> {
+        instructions::set_position_artwork::handler(ctx, artwork_id)
     }
 
     /// Create a MarketConfig PDA for a Mayflower market (protocol admin only).
