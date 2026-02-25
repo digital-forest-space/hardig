@@ -39,7 +39,8 @@ pub fn handler(ctx: Context<SetPositionArtwork>, artwork_id: Option<Pubkey>) -> 
             ctx.remaining_accounts,
             &ctx.accounts.position.authority_seed,
             ctx.program_id,
-            true, // read admin image (just to validate the receipt is well-formed)
+            true,  // read admin image (just to validate the receipt is well-formed)
+            false, // no graceful fallback — setting artwork requires valid receipt
         )?;
     }
 

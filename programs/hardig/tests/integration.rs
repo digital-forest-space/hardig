@@ -4430,7 +4430,7 @@ fn ix_remove_trusted_provider(admin: &Pubkey, provider_program_id: &Pubkey) -> I
         program_id(),
         &data,
         vec![
-            AccountMeta::new_readonly(*admin, true),
+            AccountMeta::new(*admin, true),
             AccountMeta::new_readonly(config_pda, false),
             AccountMeta::new(tp_pda, false),
         ],
@@ -4603,14 +4603,12 @@ fn test_remove_trusted_provider() {
     let fake_program = Pubkey::new_unique();
     send_tx(&mut svm, &[ix_add_trusted_provider(&admin.pubkey(), &fake_program)], &[&admin]).unwrap();
 
-    // Remove (deactivate)
+    // Remove (closes the account, rent returned to admin)
     send_tx(&mut svm, &[ix_remove_trusted_provider(&admin.pubkey(), &fake_program)], &[&admin]).unwrap();
 
     let (tp_pda, _) = trusted_provider_pda(&fake_program);
-    let tp_account = svm.get_account(&tp_pda).unwrap();
-    let tp: TrustedProvider =
-        TrustedProvider::try_deserialize(&mut tp_account.data.as_slice()).unwrap();
-    assert!(!tp.active);
+    let tp_account = svm.get_account(&tp_pda);
+    assert!(tp_account.is_none(), "trusted provider account should be closed");
 }
 
 // ---------------------------------------------------------------------------

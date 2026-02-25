@@ -157,7 +157,8 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
         ctx.remaining_accounts,
         &ctx.accounts.admin_asset.key(),
         ctx.program_id,
-        true, // read admin_image_uri
+        true,  // read admin_image_uri
+        false, // no graceful fallback — creating position requires valid receipt
     )?;
 
     let mut attrs = permission_attributes(PRESET_ADMIN);

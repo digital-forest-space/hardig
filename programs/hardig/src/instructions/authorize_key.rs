@@ -124,12 +124,15 @@ pub fn handler(
         .unwrap_or_default();
 
     // --- Validate artwork receipt if present on the position ---
+    // Graceful fallback: if the receipt was closed, fall back to default image
+    // rather than blocking key management.
     let image_override = crate::artwork::validate_artwork_receipt(
         &ctx.accounts.position.artwork_id,
         ctx.remaining_accounts,
         &ctx.accounts.position.authority_seed,
         ctx.program_id,
         false, // read delegate_image_uri
+        true,  // graceful fallback — don't brick authorize_key if receipt is closed
     )?;
 
     // Build attribute list with human-readable permissions + position binding

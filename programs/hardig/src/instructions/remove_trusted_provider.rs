@@ -6,6 +6,7 @@ use crate::state::{ProtocolConfig, TrustedProvider};
 #[derive(Accounts)]
 pub struct RemoveTrustedProvider<'info> {
     #[account(
+        mut,
         constraint = admin.key() == config.admin @ HardigError::Unauthorized,
     )]
     pub admin: Signer<'info>,
@@ -18,13 +19,16 @@ pub struct RemoveTrustedProvider<'info> {
 
     #[account(
         mut,
+        close = admin,
         seeds = [TrustedProvider::SEED, trusted_provider.program_id.as_ref()],
         bump = trusted_provider.bump,
     )]
     pub trusted_provider: Account<'info, TrustedProvider>,
 }
 
-pub fn handler(ctx: Context<RemoveTrustedProvider>) -> Result<()> {
-    ctx.accounts.trusted_provider.active = false;
+pub fn handler(_ctx: Context<RemoveTrustedProvider>) -> Result<()> {
+    // Account is closed by Anchor's `close = admin` constraint.
+    // Rent is returned to the admin. The provider can be re-added later
+    // via `add_trusted_provider`.
     Ok(())
 }

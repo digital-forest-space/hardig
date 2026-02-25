@@ -47,6 +47,7 @@ pub fn read_delegate_image(data: &[u8]) -> Result<String> {
     let admin_len = u32::from_le_bytes(
         data[ADMIN_IMAGE_URI_OFFSET..ADMIN_IMAGE_URI_OFFSET + 4].try_into().unwrap()
     ) as usize;
+    require!(admin_len <= 128, HardigError::InvalidArtworkReceipt);
     let delegate_offset = ADMIN_IMAGE_URI_OFFSET + 4 + admin_len;
     read_borsh_string(data, delegate_offset)
 }
@@ -67,19 +68,30 @@ fn read_borsh_string(data: &[u8], offset: usize) -> Result<String> {
 ///
 /// Expects `remaining_accounts[0]` = ArtworkReceipt, `remaining_accounts[1]` = TrustedProvider PDA.
 /// Returns `Some(image_uri)` if artwork is present, `None` if no artwork_id.
+///
+/// When `graceful_fallback` is true and the receipt/trusted-provider accounts are missing
+/// or the receipt has been closed, returns `Ok(None)` instead of erroring. This is used
+/// by `authorize_key` so that a closed receipt doesn't brick key management.
 pub fn validate_artwork_receipt<'info>(
     artwork_id: &Option<Pubkey>,
     remaining_accounts: &[AccountInfo<'info>],
     position_authority_seed: &Pubkey,
     program_id: &Pubkey,
     read_admin_image_uri: bool,
+    graceful_fallback: bool,
 ) -> Result<Option<String>> {
     let receipt_pubkey = match artwork_id {
         Some(pk) => pk,
         None => return Ok(None),
     };
 
-    require!(remaining_accounts.len() >= 2, HardigError::InvalidArtworkReceipt);
+    // If remaining_accounts are missing, either error or fall back gracefully
+    if remaining_accounts.len() < 2 {
+        if graceful_fallback {
+            return Ok(None);
+        }
+        return Err(error!(HardigError::InvalidArtworkReceipt));
+    }
 
     let receipt_info = &remaining_accounts[0];
     let trusted_info = &remaining_accounts[1];
@@ -89,6 +101,11 @@ pub fn validate_artwork_receipt<'info>(
         receipt_info.key() == *receipt_pubkey,
         HardigError::InvalidArtworkReceipt
     );
+
+    // If the receipt account has been closed (zero data/lamports), fall back gracefully
+    if graceful_fallback && receipt_info.data_len() == 0 {
+        return Ok(None);
+    }
 
     // Deserialize and validate the TrustedProvider PDA
     let trusted_data = trusted_info.try_borrow_data()?;
@@ -107,6 +124,12 @@ pub fn validate_artwork_receipt<'info>(
     drop(trusted_data);
 
     require!(active, HardigError::UntrustedProvider);
+
+    // Verify the TrustedProvider PDA is owned by this program (defense-in-depth)
+    require!(
+        *trusted_info.owner == *program_id,
+        HardigError::UntrustedProvider
+    );
 
     // Verify the TrustedProvider PDA is correctly derived
     let (expected_trusted_pda, _) = Pubkey::find_program_address(
