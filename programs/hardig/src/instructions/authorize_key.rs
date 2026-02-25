@@ -131,8 +131,8 @@ pub fn handler(
         ctx.remaining_accounts,
         &ctx.accounts.position.authority_seed,
         ctx.program_id,
-        false, // read delegate_image_uri
-        true,  // graceful fallback — don't brick authorize_key if receipt is closed
+        Some((1, permissions)), // delegate ArtworkImage: key_type=1, permissions=bitmask
+        true,                   // graceful fallback — don't brick authorize_key if receipt is closed
     )?;
 
     // Build attribute list with human-readable permissions + position binding
