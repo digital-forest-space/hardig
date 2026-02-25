@@ -287,9 +287,9 @@ Small marker PDAs that the protocol admin creates to whitelist artwork programs.
 
 ```rust
 /// Marker PDA for a trusted artwork program.
-/// PDA seeds = [b"trusted_artwork", program_id].
+/// PDA seeds = [b"trusted_provider", program_id].
 #[account]
-pub struct TrustedArtworkProgram {
+pub struct TrustedProvider {
     /// The trusted artwork program ID.
     pub program_id: Pubkey,
     /// Protocol admin who added it.
@@ -300,14 +300,14 @@ pub struct TrustedArtworkProgram {
     pub bump: u8,
 }
 
-impl TrustedArtworkProgram {
-    pub const SEED: &'static [u8] = b"trusted_artwork";
+impl TrustedProvider {
+    pub const SEED: &'static [u8] = b"trusted_provider";
     // discriminator(8) + program_id(32) + added_by(32) + active(1) + bump(1)
     pub const SIZE: usize = 8 + 32 + 32 + 1 + 1; // 74
 }
 ```
 
-**PDA seeds:** `[b"trusted_artwork", program_id.as_ref()]`
+**PDA seeds:** `[b"trusted_provider", program_id.as_ref()]`
 
 #### Byte Layout
 
@@ -323,26 +323,26 @@ impl TrustedArtworkProgram {
 
 #### New Instructions on Hardig
 
-**`add_trusted_artwork_program`**
+**`add_trusted_provider_program`**
 
 | # | Account | Signer | Mut | Description |
 |---|---------|--------|-----|-------------|
 | 0 | `admin` | yes | yes | Protocol admin (payer) |
 | 1 | `config` | no | no | ProtocolConfig PDA (validates admin) |
-| 2 | `trusted_artwork` | no | yes | TrustedArtworkProgram PDA (init) |
+| 2 | `trusted_provider` | no | yes | TrustedProvider PDA (init) |
 | 3 | `system_program` | no | no | System program |
 
 Args: `program_id: Pubkey`
 
 Requires: `admin.key() == config.admin`
 
-**`remove_trusted_artwork_program`**
+**`remove_trusted_provider_program`**
 
 | # | Account | Signer | Mut | Description |
 |---|---------|--------|-----|-------------|
 | 0 | `admin` | yes | no | Protocol admin |
 | 1 | `config` | no | no | ProtocolConfig PDA (validates admin) |
-| 2 | `trusted_artwork` | no | yes | TrustedArtworkProgram PDA |
+| 2 | `trusted_provider` | no | yes | TrustedProvider PDA |
 
 Args: none. Sets `active = false`.
 
@@ -422,10 +422,10 @@ When `create_position` or `authorize_key` receives an artwork receipt:
 // 1. The receipt account is passed as a remaining_account
 let receipt_info = &ctx.remaining_accounts[0];
 
-// 2. The TrustedArtworkProgram PDA is passed as a remaining_account
+// 2. The TrustedProvider PDA is passed as a remaining_account
 let trusted_info = &ctx.remaining_accounts[1];
 
-// 3. Deserialize the TrustedArtworkProgram and validate
+// 3. Deserialize the TrustedProvider and validate
 let trusted_data = trusted_info.try_borrow_data()?;
 // ... check discriminator, check active == true ...
 let trusted_program_id = Pubkey::try_from(&trusted_data[8..40]).unwrap();
@@ -436,9 +436,9 @@ require!(
     HardigError::UntrustedArtworkProgram
 );
 
-// 5. Verify the TrustedArtworkProgram PDA is valid
+// 5. Verify the TrustedProvider PDA is valid
 let (expected_trusted_pda, _) = Pubkey::find_program_address(
-    &[TrustedArtworkProgram::SEED, receipt_info.owner.as_ref()],
+    &[TrustedProvider::SEED, receipt_info.owner.as_ref()],
     &crate::ID,
 );
 require!(
@@ -463,7 +463,7 @@ let image_uri = artwork::read_admin_image(&receipt_data)?;
 
 **`create_position`** -- when `artwork_id` is `Some(receipt_pubkey)`:
 1. Receipt account passed as `remaining_accounts[0]`
-2. TrustedArtworkProgram PDA passed as `remaining_accounts[1]`
+2. TrustedProvider PDA passed as `remaining_accounts[1]`
 3. Validate: `receipt.owner == trusted_program.program_id`, `trusted_program.active`, receipt PDA is valid, `receipt.position_seed == admin_asset.key()`
 4. Read `admin_image_uri` from receipt
 5. Pass as `image_override` to `metadata_uri()`
@@ -584,9 +584,9 @@ const [receiptPda] = PublicKey.findProgramAddressSync(
 ```js
 const HARDIG_PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
 
-// TrustedArtworkProgram
+// TrustedProvider
 const [trustedPda] = PublicKey.findProgramAddressSync(
-  [Buffer.from('trusted_artwork'), artworkProgramId.toBuffer()],
+  [Buffer.from('trusted_provider'), artworkProgramId.toBuffer()],
   HARDIG_PROGRAM_ID
 );
 ```
@@ -616,7 +616,7 @@ Image URIs from receipts are passed through `json_escape()` in `metadata_uri()`,
 
 ### Artwork program upgrades
 
-Hardig reads raw bytes at fixed offsets, not via CPI. If the artwork program upgrades and changes its account layout, old receipts keep their old layout on-chain. A new program version with a different discriminator would need a new TrustedArtworkProgram whitelist entry.
+Hardig reads raw bytes at fixed offsets, not via CPI. If the artwork program upgrades and changes its account layout, old receipts keep their old layout on-chain. A new program version with a different discriminator would need a new TrustedProvider whitelist entry.
 
 ### Both images in one receipt
 
@@ -632,7 +632,7 @@ The artwork program should validate that `artist.key() == artwork_set.artist` in
 |---------|------|------|---------|-------------|
 | ArtworkSet | 354 bytes | ~0.003 SOL | Artist | Yes (via closing) |
 | ArtworkReceipt | 377 bytes | ~0.003 SOL | Buyer | Yes (via `close_receipt`) |
-| TrustedArtworkProgram | 74 bytes | ~0.001 SOL | Protocol admin | Yes (via closing) |
+| TrustedProvider | 74 bytes | ~0.001 SOL | Protocol admin | Yes (via closing) |
 
 ## Testing Strategy
 
@@ -664,7 +664,7 @@ Test in Hardig's integration test suite:
 ## Implementation Phases
 
 1. **Design & build artwork program** (separate repo)
-2. **Add TrustedArtworkProgram state + admin instructions to Hardig**
+2. **Add TrustedProvider state + admin instructions to Hardig**
 3. **Add artwork reader module to Hardig** (`src/artwork/mod.rs`, pattern from `mayflower/floor.rs`)
 4. **Wire into create_position** (remaining_accounts, validation, image_override)
 5. **Wire into authorize_key** (read position.artwork_id, pass delegate image)
@@ -687,13 +687,13 @@ Test in Hardig's integration test suite:
 
 | File | Change |
 |------|--------|
-| `programs/hardig/src/state/mod.rs` | Add `TrustedArtworkProgram` account type |
+| `programs/hardig/src/state/mod.rs` | Add `TrustedProvider` account type |
 | `programs/hardig/src/errors.rs` | Add artwork error variants |
 | `programs/hardig/src/artwork/mod.rs` | New module: raw byte reader for receipt accounts |
 | `programs/hardig/src/lib.rs` | Add `pub mod artwork;`, new instruction dispatches |
 | `programs/hardig/src/instructions/create_position.rs` | Accept optional receipt in remaining_accounts |
 | `programs/hardig/src/instructions/authorize_key.rs` | Read `artwork_id`, pass delegate image |
 | `programs/hardig/src/instructions/set_position_artwork.rs` | New instruction |
-| `programs/hardig/src/instructions/add_trusted_artwork_program.rs` | New instruction |
-| `programs/hardig/src/instructions/remove_trusted_artwork_program.rs` | New instruction |
+| `programs/hardig/src/instructions/add_trusted_provider_program.rs` | New instruction |
+| `programs/hardig/src/instructions/remove_trusted_provider_program.rs` | New instruction |
 | `programs/hardig/tests/integration.rs` | Artwork integration tests |
