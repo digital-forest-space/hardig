@@ -28,6 +28,10 @@ pub struct PromoConfig {
     pub claims_count: u32,
     /// Admin can pause/resume claiming.
     pub active: bool,
+    /// Optional lifetime borrow cap for claimed keys (0 = no cap). Units: lamports.
+    pub total_borrow_limit: u64,
+    /// Optional lifetime sell cap for claimed keys (0 = no cap). Units: navSOL shares.
+    pub total_sell_limit: u64,
     /// NFT name suffix (e.g. "Promo Borrow").
     pub name_suffix: String,
     /// Custom NFT image URL (max 128 bytes).
@@ -47,11 +51,13 @@ impl PromoConfig {
     // + borrow_capacity(8) + borrow_refill_period(8)
     // + sell_capacity(8) + sell_refill_period(8) + min_deposit_lamports(8)
     // + max_claims(4) + claims_count(4) + active(1)
+    // + total_borrow_limit(8) + total_sell_limit(8)
     // + name_suffix(4 + 64) + image_uri(4 + 128) + market_name(4 + 32) + bump(1)
     pub const SIZE: usize = 8 + 32 + 1
         + 8 + 8
         + 8 + 8 + 8
         + 4 + 4 + 1
+        + 8 + 8
         + (4 + 64) + (4 + Self::MAX_IMAGE_URI_LEN) + (4 + Self::MAX_MARKET_NAME_LEN) + 1;
 }
 

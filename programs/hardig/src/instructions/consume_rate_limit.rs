@@ -26,3 +26,19 @@ pub fn consume_rate_limit(bucket: &mut RateBucket, amount: u64, current_slot: u6
     bucket.level -= amount;
     Ok(())
 }
+
+/// Consume `amount` from a total (lifetime) limit accumulator.
+///
+/// If `limit` is 0, the cap is disabled (unlimited). Otherwise, `used` must not
+/// exceed `limit` after adding `amount`.
+pub fn consume_total_limit(used: &mut u64, limit: u64, amount: u64) -> Result<()> {
+    if limit == 0 {
+        return Ok(());
+    }
+    let new_total = used
+        .checked_add(amount)
+        .ok_or(error!(HardigError::TotalLimitExceeded))?;
+    require!(new_total <= limit, HardigError::TotalLimitExceeded);
+    *used = new_total;
+    Ok(())
+}

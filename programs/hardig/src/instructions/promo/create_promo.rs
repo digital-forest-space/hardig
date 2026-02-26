@@ -46,6 +46,8 @@ pub fn handler(
     borrow_refill_period: u64,
     sell_capacity: u64,
     sell_refill_period: u64,
+    total_borrow_limit: u64,
+    total_sell_limit: u64,
     min_deposit_lamports: u64,
     max_claims: u32,
     image_uri: String,
@@ -83,6 +85,8 @@ pub fn handler(
         sell_refill_period,
         borrow_capacity,
         borrow_refill_period,
+        total_sell_limit,
+        total_borrow_limit,
     )?;
 
     // Populate the PromoConfig
@@ -97,6 +101,8 @@ pub fn handler(
     promo.max_claims = max_claims;
     promo.claims_count = 0;
     promo.active = true;
+    promo.total_borrow_limit = total_borrow_limit;
+    promo.total_sell_limit = total_sell_limit;
     promo.name_suffix = name_suffix;
     promo.image_uri = image_uri;
     promo.market_name = market_name;

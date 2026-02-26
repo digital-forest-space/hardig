@@ -348,6 +348,8 @@ fn ix_authorize_key(
     sell_refill_period_slots: u64,
     borrow_bucket_capacity: u64,
     borrow_refill_period_slots: u64,
+    total_sell_limit: u64,
+    total_borrow_limit: u64,
     collection: &Pubkey,
 ) -> Instruction {
     let (pos_pda, _) =
@@ -362,6 +364,8 @@ fn ix_authorize_key(
     data.extend_from_slice(&sell_refill_period_slots.to_le_bytes());
     data.extend_from_slice(&borrow_bucket_capacity.to_le_bytes());
     data.extend_from_slice(&borrow_refill_period_slots.to_le_bytes());
+    data.extend_from_slice(&total_sell_limit.to_le_bytes());
+    data.extend_from_slice(&total_borrow_limit.to_le_bytes());
     // name: Option<String> = None
     data.push(0);
 
@@ -755,7 +759,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &op_asset.pubkey(),
             &operator.pubkey(),
             PRESET_OPERATOR,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &collection,
         )],
         &[&admin, &op_asset],
@@ -776,7 +780,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &dep_asset.pubkey(),
             &depositor.pubkey(),
             PRESET_DEPOSITOR,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &collection,
         )],
         &[&admin, &dep_asset],
@@ -797,7 +801,7 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
             &keep_asset.pubkey(),
             &keeper.pubkey(),
             PRESET_KEEPER,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &collection,
         )],
         &[&admin, &keep_asset],
@@ -1274,7 +1278,7 @@ fn test_authorize_operator_denied() {
         &new_asset.pubkey(),
         &random_wallet.pubkey(),
         PRESET_DEPOSITOR,
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
         &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.operator, &new_asset]).is_err());
@@ -1309,7 +1313,7 @@ fn test_cannot_create_second_admin() {
         &new_asset.pubkey(),
         &random_wallet.pubkey(),
         PRESET_ADMIN, // Has PERM_MANAGE_KEYS -> rejected
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
         &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
@@ -1496,7 +1500,7 @@ fn test_zero_permissions_rejected() {
         &new_asset.pubkey(),
         &target.pubkey(),
         0x00, // Zero permissions
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
         &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
@@ -1516,7 +1520,7 @@ fn test_limited_sell_requires_rate_params() {
         &new_asset.pubkey(),
         &target.pubkey(),
         PERM_LIMITED_SELL,
-        0, 0, 0, 0, // missing capacity/refill
+        0, 0, 0, 0, 0, 0, // missing capacity/refill
         &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
@@ -1535,7 +1539,7 @@ fn test_manage_keys_permission_rejected() {
         &new_asset.pubkey(),
         &target.pubkey(),
         PERM_MANAGE_KEYS, // PERM_MANAGE_KEYS alone -> rejected
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
         &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
@@ -1560,7 +1564,7 @@ fn test_custom_bitmask_buy_reinvest() {
             &custom_asset.pubkey(),
             &custom_user.pubkey(),
             custom_perms,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &custom_asset],
@@ -1682,7 +1686,7 @@ fn test_theft_recovery_operator_key_stolen() {
         &new_op_asset.pubkey(),
         &h.operator.pubkey(),
         PRESET_OPERATOR,
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
         &h.collection,
     );
     send_tx(&mut svm, &[ix], &[&h.admin, &new_op_asset]).unwrap();
@@ -1742,7 +1746,7 @@ fn test_theft_recovery_mass_revoke_and_reissue() {
             &new_op_asset.pubkey(),
             &new_operator.pubkey(),
             1,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &new_op_asset],
@@ -1810,7 +1814,7 @@ fn test_authorize_limited_sell_key() {
             PERM_BUY | PERM_LIMITED_SELL,
             1_000_000_000, // 1 SOL capacity
             500_000,       // ~500k slots refill period
-            0, 0,
+            0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -1847,7 +1851,7 @@ fn test_limited_sell_within_capacity() {
             PERM_LIMITED_SELL,
             2_000_000_000, // 2 SOL capacity
             1_000_000,
-            0, 0,
+            0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -1889,7 +1893,7 @@ fn test_limited_sell_exceeds_capacity() {
             PERM_LIMITED_SELL,
             500_000_000, // 0.5 SOL capacity
             1_000_000,
-            0, 0,
+            0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -1928,7 +1932,7 @@ fn test_limited_sell_drains_then_rejects() {
             PERM_LIMITED_SELL,
             1_000_000_000, // 1 SOL capacity
             1_000_000,
-            0, 0,
+            0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -1975,7 +1979,7 @@ fn test_limited_sell_refills_over_slots() {
             PERM_LIMITED_SELL,
             1_000_000_000, // 1 SOL capacity
             1_000_000,     // 1M slots for full refill
-            0, 0,
+            0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -2032,7 +2036,7 @@ fn test_unlimited_sell_overrides_limited() {
             PERM_SELL | PERM_LIMITED_SELL,
             100, // tiny capacity — would block if enforced
             1,
-            0, 0,
+            0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -2062,7 +2066,7 @@ fn test_non_limited_rejects_rate_params() {
         &new_asset.pubkey(),
         &target.pubkey(),
         PERM_BUY,
-        1_000_000, 500_000, 0, 0,
+        1_000_000, 500_000, 0, 0, 0, 0,
         &h.collection,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).is_err());
@@ -2088,6 +2092,7 @@ fn test_limited_borrow_within_capacity() {
             0, 0,              // sell: zero (no limited sell)
             2_000_000_000,     // borrow capacity
             1_000_000,         // borrow refill
+            0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -2124,6 +2129,7 @@ fn test_limited_borrow_exceeds_capacity() {
             0, 0,
             500_000_000, // 0.5 SOL borrow capacity
             1_000_000,
+            0, 0,
             &h.collection,
         )],
         &[&h.admin, &asset],
@@ -2136,6 +2142,291 @@ fn test_limited_borrow_exceeds_capacity() {
         Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1_000_000_000,
     );
     assert!(send_tx(&mut svm, &[borrow_ix], &[&user]).is_err());
+}
+
+// ===========================================================================
+// Total (lifetime) limit tests
+// ===========================================================================
+
+#[test]
+fn test_total_sell_limit_enforced() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    // Deposit 5 SOL worth of navSOL
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let asset = Keypair::new();
+    // Limited sell: 5 SOL rate bucket (very large so rate limit doesn't interfere),
+    // total_sell_limit = 2 SOL
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_asset.pubkey(),
+            &h.position_pda,
+            &asset.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            5_000_000_000, // 5 SOL rate capacity
+            1_000_000,     // refill period
+            0, 0,          // borrow rate params
+            2_000_000_000, // total_sell_limit = 2 SOL
+            0,             // total_borrow_limit
+            &h.collection,
+        )],
+        &[&h.admin, &asset],
+    )
+    .unwrap();
+    let (ks_pda, _) = key_state_pda(&asset.pubkey());
+
+    // Verify KeyState initialization
+    let ks = read_key_state(&svm, &ks_pda);
+    assert_eq!(ks.total_sell_limit, 2_000_000_000);
+    assert_eq!(ks.total_sold, 0);
+
+    // Sell 1 SOL — should succeed (total_sold = 1 SOL, limit = 2 SOL)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    let ks = read_key_state(&svm, &ks_pda);
+    assert_eq!(ks.total_sold, 1_000_000_000);
+
+    // Expire blockhash to avoid AlreadyProcessed (identical tx data in LiteSVM)
+    svm.expire_blockhash();
+
+    // Sell 1 SOL more — should succeed (total_sold = 2 SOL, at limit)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    let ks = read_key_state(&svm, &ks_pda);
+    assert_eq!(ks.total_sold, 2_000_000_000);
+
+    svm.expire_blockhash();
+
+    // Sell 1 lamport more — should fail (TotalLimitExceeded)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1,
+    );
+    assert!(send_tx(&mut svm, &[sell_ix], &[&user]).is_err());
+}
+
+#[test]
+fn test_total_borrow_limit_enforced() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    // Deposit so there's collateral to borrow against
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let asset = Keypair::new();
+    // Limited borrow: 5 SOL rate bucket, total_borrow_limit = 1.5 SOL
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_asset.pubkey(),
+            &h.position_pda,
+            &asset.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_BORROW,
+            0, 0,              // sell rate params
+            5_000_000_000,     // 5 SOL borrow rate capacity
+            1_000_000,         // refill period
+            0,                 // total_sell_limit
+            1_500_000_000,     // total_borrow_limit = 1.5 SOL
+            &h.collection,
+        )],
+        &[&h.admin, &asset],
+    )
+    .unwrap();
+    let (ks_pda, _) = key_state_pda(&asset.pubkey());
+
+    let ks = read_key_state(&svm, &ks_pda);
+    assert_eq!(ks.total_borrow_limit, 1_500_000_000);
+    assert_eq!(ks.total_borrowed, 0);
+
+    // Borrow 1 SOL — should succeed
+    let borrow_ix = ix_borrow(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[borrow_ix], &[&user]).unwrap();
+
+    svm.expire_blockhash();
+
+    // Borrow 0.5 SOL — should succeed (at limit)
+    let borrow_ix = ix_borrow(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 500_000_000,
+    );
+    send_tx(&mut svm, &[borrow_ix], &[&user]).unwrap();
+
+    svm.expire_blockhash();
+
+    // Borrow 1 lamport more — should fail
+    let borrow_ix = ix_borrow(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1,
+    );
+    assert!(send_tx(&mut svm, &[borrow_ix], &[&user]).is_err());
+}
+
+#[test]
+fn test_total_limit_zero_means_unlimited() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let asset = Keypair::new();
+    // Limited sell: rate bucket 5 SOL, total_sell_limit = 0 (unlimited)
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_asset.pubkey(),
+            &h.position_pda,
+            &asset.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            5_000_000_000,
+            1_000_000,
+            0, 0,
+            0, 0, // total limits = 0 (unlimited)
+            &h.collection,
+        )],
+        &[&h.admin, &asset],
+    )
+    .unwrap();
+    let (ks_pda, _) = key_state_pda(&asset.pubkey());
+
+    // Multiple sells should all succeed — no total cap
+    for i in 0..3 {
+        if i > 0 { svm.expire_blockhash(); }
+        let sell_ix = ix_withdraw(
+            &user.pubkey(), &asset.pubkey(),
+            Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 500_000_000,
+        );
+        send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+    }
+
+    // total_sold accumulates but no cap is enforced
+    let ks = read_key_state(&svm, &ks_pda);
+    assert_eq!(ks.total_sold, 0); // stays 0 because consume_total_limit short-circuits when limit=0
+}
+
+#[test]
+fn test_total_limit_and_rate_limit_both_enforced() {
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let buy_ix = ix_buy(
+        &h.admin.pubkey(), &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 5_000_000_000,
+    );
+    send_tx(&mut svm, &[buy_ix], &[&h.admin]).unwrap();
+
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let asset = Keypair::new();
+    // Rate: 1 SOL per period, Total: 1.5 SOL lifetime
+    send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_asset.pubkey(),
+            &h.position_pda,
+            &asset.pubkey(),
+            &user.pubkey(),
+            PERM_LIMITED_SELL,
+            1_000_000_000,  // 1 SOL rate capacity
+            100,            // short refill for testing
+            0, 0,
+            1_500_000_000, // total_sell_limit = 1.5 SOL
+            0,
+            &h.collection,
+        )],
+        &[&h.admin, &asset],
+    )
+    .unwrap();
+    let (ks_pda, _) = key_state_pda(&asset.pubkey());
+
+    // First sell: 1 SOL (rate ok, total ok → 1/1.5 used)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1_000_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    // Advance slots so rate bucket refills
+    advance_clock(&mut svm, 120);
+
+    // Second sell: 0.5 SOL (rate ok after refill, total ok → 1.5/1.5 at limit)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 500_000_000,
+    );
+    send_tx(&mut svm, &[sell_ix], &[&user]).unwrap();
+
+    // Advance again so rate bucket refills
+    advance_clock(&mut svm, 120);
+
+    // Third sell: 1 lamport (rate ok, but total exhausted → TotalLimitExceeded)
+    let sell_ix = ix_withdraw(
+        &user.pubkey(), &asset.pubkey(),
+        Some(&ks_pda), &h.position_pda, &h.admin_asset.pubkey(), 1,
+    );
+    assert!(send_tx(&mut svm, &[sell_ix], &[&user]).is_err());
+}
+
+#[test]
+fn test_total_limit_rejected_without_limited_permission() {
+    // PERM_SELL (unlimited) + total_sell_limit > 0 should be rejected
+    let (mut svm, _) = setup();
+    let h = full_setup(&mut svm);
+    let user = Keypair::new();
+    svm.airdrop(&user.pubkey(), 5_000_000_000).unwrap();
+    let asset = Keypair::new();
+    let result = send_tx(
+        &mut svm,
+        &[ix_authorize_key(
+            &h.admin.pubkey(),
+            &h.admin_asset.pubkey(),
+            &h.position_pda,
+            &asset.pubkey(),
+            &user.pubkey(),
+            PERM_SELL,          // unlimited sell, NOT limited
+            0, 0,               // no rate params (not limited)
+            0, 0,               // no borrow params
+            1_000_000_000,      // total_sell_limit > 0 — invalid!
+            0,
+            &h.collection,
+        )],
+        &[&h.admin, &asset],
+    );
+    assert!(result.is_err());
 }
 
 // ===========================================================================
@@ -2204,7 +2495,7 @@ fn test_revoke_burns_mpl_core_asset() {
             &extra_asset.pubkey(),
             &h.admin.pubkey(),
             PRESET_OPERATOR,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &h.collection,
         )],
         &[&h.admin, &extra_asset],
@@ -2483,7 +2774,7 @@ fn test_delegated_key_has_market_and_position_attributes() {
             &op_asset.pubkey(),
             &operator.pubkey(),
             PRESET_OPERATOR,
-            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
             &collection,
         )],
         &[&admin, &op_asset],
@@ -3215,7 +3506,7 @@ fn test_authorize_key_updates_last_admin_activity() {
         &new_asset.pubkey(),
         &target.pubkey(),
         PRESET_DEPOSITOR, // Depositor
-        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
         &h.collection,
     );
     send_tx(&mut svm, &[ix], &[&h.admin, &new_asset]).unwrap();
@@ -3321,6 +3612,8 @@ fn ix_create_promo(
     borrow_refill_period: u64,
     sell_capacity: u64,
     sell_refill_period: u64,
+    total_borrow_limit: u64,
+    total_sell_limit: u64,
     min_deposit_lamports: u64,
     max_claims: u32,
     image_uri: &str,
@@ -3341,6 +3634,8 @@ fn ix_create_promo(
     data.extend_from_slice(&borrow_refill_period.to_le_bytes());
     data.extend_from_slice(&sell_capacity.to_le_bytes());
     data.extend_from_slice(&sell_refill_period.to_le_bytes());
+    data.extend_from_slice(&total_borrow_limit.to_le_bytes());
+    data.extend_from_slice(&total_sell_limit.to_le_bytes());
     data.extend_from_slice(&min_deposit_lamports.to_le_bytes());
     data.extend_from_slice(&max_claims.to_le_bytes());
     // image_uri: String
@@ -3547,6 +3842,7 @@ fn test_create_promo() {
         borrow_refill_period,
         sell_capacity,
         sell_refill_period,
+        0, 0,
         min_deposit,
         max_claims,
         image_uri,
@@ -3601,6 +3897,8 @@ fn test_create_promo_non_admin_rejected() {
     data.extend_from_slice(&0u64.to_le_bytes()); // borrow_refill_period
     data.extend_from_slice(&0u64.to_le_bytes()); // sell_capacity
     data.extend_from_slice(&0u64.to_le_bytes()); // sell_refill_period
+    data.extend_from_slice(&0u64.to_le_bytes()); // total_borrow_limit
+    data.extend_from_slice(&0u64.to_le_bytes()); // total_sell_limit
     data.extend_from_slice(&0u64.to_le_bytes()); // min_deposit_lamports
     data.extend_from_slice(&10u32.to_le_bytes()); // max_claims
     let uri = "";
@@ -3642,7 +3940,7 @@ fn test_create_multiple_promos_per_position() {
         &admin_asset.pubkey(),
         "Promo A",
         PERM_BUY,
-        0, 0, 0, 0, 5_000_000, 50, "", "navSOL",
+        0, 0, 0, 0, 0, 0, 5_000_000, 50, "", "navSOL",
     );
     send_tx(&mut svm, &[ix_a], &[&admin]).unwrap();
 
@@ -3652,7 +3950,7 @@ fn test_create_multiple_promos_per_position() {
         &admin_asset.pubkey(),
         "Promo B",
         PERM_BUY | PERM_LIMITED_BORROW,
-        10_000_000, 500, 0, 0, 1_000_000, 200, "https://example.com/b.png", "navSOL",
+        10_000_000, 500, 0, 0, 0, 0, 1_000_000, 200, "https://example.com/b.png", "navSOL",
     );
     send_tx(&mut svm, &[ix_b], &[&admin]).unwrap();
 
@@ -3692,7 +3990,7 @@ fn test_update_promo() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 100, "", "",
+        0, 0, 0, 0, 0, 0, 0, 100, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3753,7 +4051,7 @@ fn test_update_promo_max_below_current_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, "", "",
+        0, 0, 0, 0, 0, 0, 0, 0, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3815,6 +4113,7 @@ fn test_claim_promo_key() {
         permissions,
         borrow_capacity,
         borrow_refill_period,
+        0, 0,
         0, 0,
         10_000_000,
         100,
@@ -3889,7 +4188,7 @@ fn test_claim_promo_key_duplicate_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, "", "",
+        0, 0, 0, 0, 0, 0, 0, 0, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3941,7 +4240,7 @@ fn test_claim_promo_key_inactive_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, "", "",
+        0, 0, 0, 0, 0, 0, 0, 0, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -3991,7 +4290,7 @@ fn test_claim_promo_key_max_claims_reached() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 1, "", "",
+        0, 0, 0, 0, 0, 0, 0, 1, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4053,6 +4352,7 @@ fn test_promo_key_can_buy() {
         20_000_000, // borrow_capacity
         1000,       // borrow_refill_period
         0, 0,       // no sell limits
+        0, 0,       // no total limits
         0,          // min_deposit_lamports = 0 (allow any amount)
         100,
         "",
@@ -4117,6 +4417,7 @@ fn test_promo_key_cannot_sell() {
         permissions,
         20_000_000,
         1000,
+        0, 0,
         0, 0,
         0,
         100,
@@ -4186,6 +4487,7 @@ fn test_claim_promo_below_min_deposit_rejected() {
         name_suffix,
         PERM_BUY,
         0, 0, 0, 0,
+        0, 0,
         min_deposit,
         100,
         "",
@@ -4231,6 +4533,7 @@ fn test_claim_promo_deposited_nav_updated() {
         name_suffix,
         PERM_BUY,
         0, 0, 0, 0,
+        0, 0,
         0, // no minimum
         100,
         "",
@@ -4287,6 +4590,7 @@ fn test_claim_promo_slippage_rejected() {
         name_suffix,
         PERM_BUY,
         0, 0, 0, 0,
+        0, 0,
         0,
         100,
         "",
@@ -4333,7 +4637,7 @@ fn test_update_promo_non_admin_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 100, "", "",
+        0, 0, 0, 0, 0, 0, 0, 100, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4384,7 +4688,7 @@ fn test_create_promo_invalid_permissions_rejected() {
         &admin_asset.pubkey(),
         "Bad Perms",
         PERM_SELL, // invalid for promo origin
-        0, 0, 0, 0, 0, 100, "", "",
+        0, 0, 0, 0, 0, 0, 0, 100, "", "",
     );
     let result = send_tx(&mut svm, &[ix], &[&admin]);
     assert!(result.is_err(), "creating promo with PERM_SELL should fail (not in Promo allowed set)");

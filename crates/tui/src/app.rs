@@ -125,6 +125,14 @@ pub struct KeyEntry {
     pub sell_bucket: Option<RateBucket>,
     /// Rate-limit bucket for borrow (populated for keys with PERM_LIMITED_BORROW).
     pub borrow_bucket: Option<RateBucket>,
+    /// Lifetime total sell limit (0 = unlimited).
+    pub total_sell_limit: u64,
+    /// Lifetime total sold so far.
+    pub total_sold: u64,
+    /// Lifetime total borrow limit (0 = unlimited).
+    pub total_borrow_limit: u64,
+    /// Lifetime total borrowed so far.
+    pub total_borrowed: u64,
 }
 
 pub struct PromoEntry {
@@ -1367,6 +1375,12 @@ impl App {
             &self.find_field_value("Borrow Refill Hours"),
             &self.find_field_value("Borrow Refill Minutes"),
         );
+        let total_sell_limit = self.find_field_value("Total Sell Limit")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let total_borrow_limit = self.find_field_value("Total Borrow Limit")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
 
         // Validate rate-limit fields: both capacity and refill must be nonzero
         if permissions_u8 & PERM_LIMITED_SELL != 0 {
@@ -1415,6 +1429,8 @@ impl App {
         data.extend_from_slice(&sell_refill.to_le_bytes());
         data.extend_from_slice(&borrow_cap.to_le_bytes());
         data.extend_from_slice(&borrow_refill.to_le_bytes());
+        data.extend_from_slice(&total_sell_limit.to_le_bytes());
+        data.extend_from_slice(&total_borrow_limit.to_le_bytes());
         data.extend_from_slice(&name_bytes);
 
         let accounts = vec![
@@ -2272,6 +2288,12 @@ impl App {
             &self.find_field_value("Sell Refill Hours"),
             &self.find_field_value("Sell Refill Minutes"),
         );
+        let total_borrow_limit = self.find_field_value("Total Borrow Limit")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
+        let total_sell_limit = self.find_field_value("Total Sell Limit")
+            .and_then(|v| parse_sol_to_lamports(&v))
+            .unwrap_or(0);
         let min_deposit = self.find_field_value("Min Deposit")
             .and_then(|v| parse_sol_to_lamports(&v))
             .unwrap_or(0);
@@ -2323,6 +2345,10 @@ impl App {
         data.extend_from_slice(&sell_capacity.to_le_bytes());
         // sell_refill_period: u64
         data.extend_from_slice(&sell_refill.to_le_bytes());
+        // total_borrow_limit: u64
+        data.extend_from_slice(&total_borrow_limit.to_le_bytes());
+        // total_sell_limit: u64
+        data.extend_from_slice(&total_sell_limit.to_le_bytes());
         // min_deposit_lamports: u64
         data.extend_from_slice(&min_deposit.to_le_bytes());
         // max_claims: u32
@@ -2957,6 +2983,10 @@ impl App {
             name: admin_name,
             sell_bucket: None,
             borrow_bucket: None,
+            total_sell_limit: 0,
+            total_sold: 0,
+            total_borrow_limit: 0,
+            total_borrowed: 0,
         });
 
         // Add delegated keys from cached key_states
@@ -2993,6 +3023,10 @@ impl App {
                 name: key_name,
                 sell_bucket,
                 borrow_bucket,
+                total_sell_limit: ks.total_sell_limit,
+                total_sold: ks.total_sold,
+                total_borrow_limit: ks.total_borrow_limit,
+                total_borrowed: ks.total_borrowed,
             });
         }
 
@@ -3009,6 +3043,10 @@ impl App {
                     name: rec_name,
                     sell_bucket: None,
                     borrow_bucket: None,
+                    total_sell_limit: 0,
+                    total_sold: 0,
+                    total_borrow_limit: 0,
+                    total_borrowed: 0,
                 });
             }
         }

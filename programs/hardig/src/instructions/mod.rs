@@ -190,6 +190,8 @@ pub fn validate_delegated_permissions(
     sell_refill_period: u64,
     borrow_capacity: u64,
     borrow_refill_period: u64,
+    total_sell_limit: u64,
+    total_borrow_limit: u64,
 ) -> Result<()> {
     require!(permissions != 0, HardigError::InvalidKeyRole);
     require!(
@@ -207,6 +209,8 @@ pub fn validate_delegated_permissions(
             sell_capacity == 0 && sell_refill_period == 0,
             HardigError::InvalidKeyRole
         );
+        // total_sell_limit only meaningful with LIMITED_SELL
+        require!(total_sell_limit == 0, HardigError::InvalidKeyRole);
     }
     if permissions & PERM_LIMITED_BORROW != 0 {
         require!(
@@ -218,6 +222,8 @@ pub fn validate_delegated_permissions(
             borrow_capacity == 0 && borrow_refill_period == 0,
             HardigError::InvalidKeyRole
         );
+        // total_borrow_limit only meaningful with LIMITED_BORROW
+        require!(total_borrow_limit == 0, HardigError::InvalidKeyRole);
     }
 
     Ok(())

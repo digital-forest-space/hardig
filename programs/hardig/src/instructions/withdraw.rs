@@ -8,7 +8,7 @@ use crate::errors::HardigError;
 use crate::mayflower;
 use crate::state::{KeyState, MarketConfig, PositionState, ProtocolConfig, PERM_LIMITED_SELL, PERM_SELL};
 
-use super::consume_rate_limit::consume_rate_limit;
+use super::consume_rate_limit::{consume_rate_limit, consume_total_limit};
 use super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -173,6 +173,11 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
             &mut key_state.sell_bucket,
             amount,
             Clock::get()?.slot,
+        )?;
+        consume_total_limit(
+            &mut key_state.total_sold,
+            key_state.total_sell_limit,
+            amount,
         )?;
     }
 

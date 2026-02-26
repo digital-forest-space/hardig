@@ -8,7 +8,7 @@ use crate::errors::HardigError;
 use crate::mayflower;
 use crate::state::{KeyState, MarketConfig, PositionState, ProtocolConfig, PERM_BORROW, PERM_LIMITED_BORROW};
 
-use super::consume_rate_limit::consume_rate_limit;
+use super::consume_rate_limit::{consume_rate_limit, consume_total_limit};
 use super::validate_key::validate_key;
 
 #[derive(Accounts)]
@@ -129,6 +129,11 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
             &mut key_state.borrow_bucket,
             amount,
             Clock::get()?.slot,
+        )?;
+        consume_total_limit(
+            &mut key_state.total_borrowed,
+            key_state.total_borrow_limit,
+            amount,
         )?;
     }
 

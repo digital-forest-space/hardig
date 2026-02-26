@@ -368,6 +368,11 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
         };
     }
 
+    key_state.total_sell_limit = promo.total_sell_limit;
+    key_state.total_sold = 0;
+    key_state.total_borrow_limit = promo.total_borrow_limit;
+    key_state.total_borrowed = 0;
+
     // 13. Increment claims_count (checked to prevent overflow)
     ctx.accounts.promo.claims_count = ctx.accounts.promo.claims_count
         .checked_add(1)

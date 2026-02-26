@@ -49,6 +49,8 @@ pub enum HardigError {
     // Rate-limit errors
     #[msg("Rate limit exceeded")]
     RateLimitExceeded,
+    #[msg("Total lifetime limit exceeded")]
+    TotalLimitExceeded,
 
     // Collection errors
     #[msg("Collection has not been created yet")]

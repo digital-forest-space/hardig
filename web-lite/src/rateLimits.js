@@ -26,13 +26,17 @@ function parseBucket(data) {
 /**
  * Parse a KeyState account into its component fields.
  *
- * KeyState layout (137 bytes):
+ * KeyState layout (169 bytes):
  *   discriminator    (8 bytes)
  *   authority_seed   (32 bytes)  [offset 8]   — memcmp filterable
  *   asset            (32 bytes)  [offset 40]
  *   bump             (1 byte)    [offset 72]
  *   sell_bucket      (32 bytes)  [offset 73]
  *   borrow_bucket    (32 bytes)  [offset 105]
+ *   total_sell_limit (8 bytes)   [offset 137]
+ *   total_sold       (8 bytes)   [offset 145]
+ *   total_borrow_limit (8 bytes) [offset 153]
+ *   total_borrowed   (8 bytes)   [offset 161]
  *
  * @param {Uint8Array} data  Raw account data (must be >= KEY_STATE_SIZE).
  * @returns {{ sellBucket: object, borrowBucket: object, authoritySeed: PublicKey } | null}
@@ -43,6 +47,10 @@ export function parseKeyState(data) {
     authoritySeed: new PublicKey(data.slice(8, 40)),
     sellBucket: parseBucket(data.slice(73, 105)),
     borrowBucket: parseBucket(data.slice(105, 137)),
+    totalSellLimit: Number(new DataView(data.buffer, data.byteOffset).getBigUint64(137, true)),
+    totalSold: Number(new DataView(data.buffer, data.byteOffset).getBigUint64(145, true)),
+    totalBorrowLimit: Number(new DataView(data.buffer, data.byteOffset).getBigUint64(153, true)),
+    totalBorrowed: Number(new DataView(data.buffer, data.byteOffset).getBigUint64(161, true)),
   };
 }
 
@@ -104,5 +112,9 @@ export async function getKeyAllowance(connection, assetPubkey) {
     borrowAvailable: bucketAvailableNow(ks.borrowBucket, currentSlot),
     borrowCapacity: ks.borrowBucket.capacity,
     borrowRefillPeriod: ks.borrowBucket.refillPeriod,
+    totalSellLimit: ks.totalSellLimit,
+    totalSold: ks.totalSold,
+    totalBorrowLimit: ks.totalBorrowLimit,
+    totalBorrowed: ks.totalBorrowed,
   };
 }

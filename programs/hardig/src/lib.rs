@@ -48,6 +48,8 @@ pub mod hardig {
         sell_refill_period_slots: u64,
         borrow_bucket_capacity: u64,
         borrow_refill_period_slots: u64,
+        total_sell_limit: u64,
+        total_borrow_limit: u64,
         name: Option<String>,
     ) -> Result<()> {
         instructions::authorize_key::handler(
@@ -57,6 +59,8 @@ pub mod hardig {
             sell_refill_period_slots,
             borrow_bucket_capacity,
             borrow_refill_period_slots,
+            total_sell_limit,
+            total_borrow_limit,
             name,
         )
     }
@@ -134,12 +138,14 @@ pub mod hardig {
         borrow_refill_period: u64,
         sell_capacity: u64,
         sell_refill_period: u64,
+        total_borrow_limit: u64,
+        total_sell_limit: u64,
         min_deposit_lamports: u64,
         max_claims: u32,
         image_uri: String,
         market_name: String,
     ) -> Result<()> {
-        instructions::create_promo::handler(ctx, name_suffix, permissions, borrow_capacity, borrow_refill_period, sell_capacity, sell_refill_period, min_deposit_lamports, max_claims, image_uri, market_name)
+        instructions::create_promo::handler(ctx, name_suffix, permissions, borrow_capacity, borrow_refill_period, sell_capacity, sell_refill_period, total_borrow_limit, total_sell_limit, min_deposit_lamports, max_claims, image_uri, market_name)
     }
 
     pub fn update_promo(

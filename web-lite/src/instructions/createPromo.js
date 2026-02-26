@@ -52,6 +52,8 @@ export async function buildCreatePromo(
   borrowRefillPeriod,
   sellCapacity,
   sellRefillPeriod,
+  totalBorrowLimit,
+  totalSellLimit,
   minDepositLamports,
   maxClaims,
   imageUri,
@@ -66,12 +68,13 @@ export async function buildCreatePromo(
   // Build instruction data:
   // discriminator(8) + name_suffix(String) + permissions(u8) + borrow_capacity(u64) +
   // borrow_refill_period(u64) + sell_capacity(u64) + sell_refill_period(u64) +
+  // total_borrow_limit(u64) + total_sell_limit(u64) +
   // min_deposit_lamports(u64) + max_claims(u32) + image_uri(String) + market_name(String)
   const nameSuffixBytes = encodeBorshString(nameSuffix);
   const imageUriBytes = encodeBorshString(imageUri);
   const marketNameBytes = encodeBorshString(marketName);
 
-  const dataLen = 8 + nameSuffixBytes.length + 1 + 8 + 8 + 8 + 8 + 8 + 4 + imageUriBytes.length + marketNameBytes.length;
+  const dataLen = 8 + nameSuffixBytes.length + 1 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 4 + imageUriBytes.length + marketNameBytes.length;
   const data = new Uint8Array(dataLen);
   let offset = 0;
 
@@ -82,6 +85,8 @@ export async function buildCreatePromo(
   data.set(encodeU64(borrowRefillPeriod), offset); offset += 8;
   data.set(encodeU64(sellCapacity), offset); offset += 8;
   data.set(encodeU64(sellRefillPeriod), offset); offset += 8;
+  data.set(encodeU64(totalBorrowLimit), offset); offset += 8;
+  data.set(encodeU64(totalSellLimit), offset); offset += 8;
   data.set(encodeU64(minDepositLamports), offset); offset += 8;
   data.set(encodeU32(maxClaims), offset); offset += 4;
   data.set(imageUriBytes, offset); offset += imageUriBytes.length;

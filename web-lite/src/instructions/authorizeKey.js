@@ -8,7 +8,7 @@ import {
 import { myKeyAsset, positionPda, collection } from '../state.js';
 import { shortPubkey, permissionsName } from '../utils.js';
 
-export async function buildAuthorizeKey(program, wallet, targetWalletStr, permissionsU8, sellCapacity = 0, sellRefillSlots = 0, borrowCapacity = 0, borrowRefillSlots = 0, name = null) {
+export async function buildAuthorizeKey(program, wallet, targetWalletStr, permissionsU8, sellCapacity = 0, sellRefillSlots = 0, borrowCapacity = 0, borrowRefillSlots = 0, totalSellLimit = 0, totalBorrowLimit = 0, name = null) {
   const targetWallet = new PublicKey(targetWalletStr);
   const posPda = positionPda.value;
   const adminKeyAsset = myKeyAsset.value;
@@ -19,7 +19,7 @@ export async function buildAuthorizeKey(program, wallet, targetWalletStr, permis
   const [keyStatePda] = deriveKeyStatePda(newKeyAsset);
 
   const ix = await program.methods
-    .authorizeKey(permissionsU8, new BN(sellCapacity), new BN(sellRefillSlots), new BN(borrowCapacity), new BN(borrowRefillSlots), name)
+    .authorizeKey(permissionsU8, new BN(sellCapacity), new BN(sellRefillSlots), new BN(borrowCapacity), new BN(borrowRefillSlots), new BN(totalSellLimit), new BN(totalBorrowLimit), name)
     .accounts({
       admin: wallet,
       adminKeyAsset: adminKeyAsset,

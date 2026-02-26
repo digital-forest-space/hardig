@@ -577,6 +577,22 @@ fn draw_keyring_panel(frame: &mut Frame, app: &App, area: Rect) {
                     hardig::instructions::slots_to_duration(bucket.refill_period),
                 )));
             }
+            if k.total_sell_limit > 0 {
+                let nav = app.market_config.as_ref().map(|mc| app::nav_token_name(&mc.nav_mint)).unwrap_or("shares");
+                rows.push(sub_row(format!(
+                    "Total Sell: {} / {} {}",
+                    hardig::instructions::format_sol_amount(k.total_sold),
+                    hardig::instructions::format_sol_amount(k.total_sell_limit),
+                    nav,
+                )));
+            }
+            if k.total_borrow_limit > 0 {
+                rows.push(sub_row(format!(
+                    "Total Borrow: {} / {} SOL",
+                    hardig::instructions::format_sol_amount(k.total_borrowed),
+                    hardig::instructions::format_sol_amount(k.total_borrow_limit),
+                )));
+            }
         }
     }
 

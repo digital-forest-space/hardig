@@ -222,10 +222,20 @@ pub struct KeyState {
     pub sell_bucket: RateBucket,
     /// Rate-limit bucket for PERM_LIMITED_BORROW.
     pub borrow_bucket: RateBucket,
+    /// Optional lifetime sell cap (0 = no cap). Units: navSOL shares.
+    pub total_sell_limit: u64,
+    /// Accumulator of total navSOL shares sold via this key.
+    pub total_sold: u64,
+    /// Optional lifetime borrow cap (0 = no cap). Units: lamports.
+    pub total_borrow_limit: u64,
+    /// Accumulator of total lamports borrowed via this key.
+    pub total_borrowed: u64,
 }
 
 impl KeyState {
     pub const SEED: &'static [u8] = b"key_state";
-    // discriminator(8) + authority_seed(32) + asset(32) + bump(1) + sell_bucket(32) + borrow_bucket(32)
-    pub const SIZE: usize = 8 + 32 + 32 + 1 + 32 + 32;
+    // discriminator(8) + authority_seed(32) + asset(32) + bump(1)
+    // + sell_bucket(32) + borrow_bucket(32)
+    // + total_sell_limit(8) + total_sold(8) + total_borrow_limit(8) + total_borrowed(8)
+    pub const SIZE: usize = 8 + 32 + 32 + 1 + 32 + 32 + 8 + 8 + 8 + 8;
 }

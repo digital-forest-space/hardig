@@ -80,6 +80,8 @@ pub fn handler(
     sell_refill_period_slots: u64,
     borrow_bucket_capacity: u64,
     borrow_refill_period_slots: u64,
+    total_sell_limit: u64,
+    total_borrow_limit: u64,
     name: Option<String>,
 ) -> Result<()> {
     // Validate the admin holds their key
@@ -99,6 +101,8 @@ pub fn handler(
         sell_refill_period_slots,
         borrow_bucket_capacity,
         borrow_refill_period_slots,
+        total_sell_limit,
+        total_borrow_limit,
     )?;
 
     // --- Read admin asset's name and market attribute ---
@@ -152,6 +156,9 @@ pub fn handler(
     let sell_limit_str = if permissions & PERM_LIMITED_SELL != 0 {
         let v = format!("{} navSOL / {}", format_sol_amount(sell_bucket_capacity), slots_to_duration(sell_refill_period_slots));
         attrs.push(Attribute { key: "limited_sell".to_string(), value: v.clone() });
+        if total_sell_limit > 0 {
+            attrs.push(Attribute { key: "total_sell_limit".to_string(), value: format!("{} navSOL", format_sol_amount(total_sell_limit)) });
+        }
         Some(v)
     } else {
         None
@@ -159,6 +166,9 @@ pub fn handler(
     let borrow_limit_str = if permissions & PERM_LIMITED_BORROW != 0 {
         let v = format!("{} SOL / {}", format_sol_amount(borrow_bucket_capacity), slots_to_duration(borrow_refill_period_slots));
         attrs.push(Attribute { key: "limited_borrow".to_string(), value: v.clone() });
+        if total_borrow_limit > 0 {
+            attrs.push(Attribute { key: "total_borrow_limit".to_string(), value: format!("{} SOL", format_sol_amount(total_borrow_limit)) });
+        }
         Some(v)
     } else {
         None
@@ -241,6 +251,11 @@ pub fn handler(
             last_update: current_slot,
         };
     }
+
+    key_state.total_sell_limit = total_sell_limit;
+    key_state.total_sold = 0;
+    key_state.total_borrow_limit = total_borrow_limit;
+    key_state.total_borrowed = 0;
 
     Ok(())
 }
