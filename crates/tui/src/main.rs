@@ -158,6 +158,18 @@ enum Action {
         #[arg(long)]
         new_admin: String,
     },
+    /// Register a trusted artwork provider program (protocol admin only)
+    AddTrustedProvider {
+        /// The artwork provider program ID to trust
+        #[arg(long)]
+        program_id: String,
+    },
+    /// Remove a trusted artwork provider program (protocol admin only)
+    RemoveTrustedProvider {
+        /// The artwork provider program ID to remove
+        #[arg(long)]
+        program_id: String,
+    },
     /// Create a MarketConfig PDA (protocol admin only)
     CreateMarketConfig {
         /// Market name shorthand (e.g. navSOL) — fetches addresses from API or --markets-file
@@ -654,6 +666,8 @@ fn action_to_name(action: &Action) -> String {
         Action::ExecuteRecovery => "execute-recovery".into(),
         Action::Balances => "balances".into(),
         Action::TransferAdmin { .. } => "transfer-admin".into(),
+        Action::AddTrustedProvider { .. } => "add-trusted-provider".into(),
+        Action::RemoveTrustedProvider { .. } => "remove-trusted-provider".into(),
         Action::CreateMarketConfig { .. } => "create-market-config".into(),
     }
 }
@@ -821,6 +835,34 @@ fn populate_and_build(app: &mut app::App, action: &Action, markets_file: Option<
                     return Some(CliOutput::Error {
                         action: "transfer-admin".into(),
                         error: format!("Invalid pubkey: {}", new_admin),
+                    });
+                }
+            }
+        }
+        Action::AddTrustedProvider { program_id } => {
+            use std::str::FromStr;
+            match solana_sdk::pubkey::Pubkey::from_str(program_id) {
+                Ok(pk) => {
+                    app.build_add_trusted_provider(pk);
+                }
+                Err(_) => {
+                    return Some(CliOutput::Error {
+                        action: "add-trusted-provider".into(),
+                        error: format!("Invalid pubkey: {}", program_id),
+                    });
+                }
+            }
+        }
+        Action::RemoveTrustedProvider { program_id } => {
+            use std::str::FromStr;
+            match solana_sdk::pubkey::Pubkey::from_str(program_id) {
+                Ok(pk) => {
+                    app.build_remove_trusted_provider(pk);
+                }
+                Err(_) => {
+                    return Some(CliOutput::Error {
+                        action: "remove-trusted-provider".into(),
+                        error: format!("Invalid pubkey: {}", program_id),
                     });
                 }
             }

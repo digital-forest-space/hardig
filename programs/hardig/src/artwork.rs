@@ -21,8 +21,8 @@ const ARTWORK_SET_OFFSET: usize = 8;
 const POSITION_SEED_OFFSET: usize = 40;
 
 // Fixed offset to image_uri in ArtworkImage account data.
-// Layout: disc(8) + artwork_set(32) + artist(32) + key_type(1) + permissions(1) + image_uri(4+N) + bump(1)
-const ARTWORK_IMAGE_URI_OFFSET: usize = 74;
+// Layout: disc(8) + artwork_set(32) + artist(32) + key_type(1) + permissions(1) + bump(1) + image_uri(4+N)
+const ARTWORK_IMAGE_URI_OFFSET: usize = 75;
 
 /// Read and validate the position_seed from an ArtworkReceipt.
 pub fn read_receipt_position_seed(data: &[u8]) -> Result<Pubkey> {
@@ -281,11 +281,11 @@ mod tests {
         data.push(0);
         // permissions (1)
         data.push(0);
+        // bump (1)
+        data.push(0);
         // image_uri borsh string (4 + N)
         data.extend_from_slice(&(uri.len() as u32).to_le_bytes());
         data.extend_from_slice(uri.as_bytes());
-        // bump (1)
-        data.push(0);
 
         let result = read_artwork_image_uri(&data).unwrap();
         assert_eq!(result, uri);

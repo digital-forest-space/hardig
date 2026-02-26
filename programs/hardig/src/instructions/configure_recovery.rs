@@ -108,6 +108,16 @@ pub fn handler(
             .invoke_signed(&[config_seeds])?;
     }
 
+    // Validate artwork receipt if present on the position (graceful fallback)
+    let image_override = crate::artwork::validate_artwork_receipt(
+        &ctx.accounts.position.artwork_id,
+        ctx.remaining_accounts,
+        &ctx.accounts.position.authority_seed,
+        ctx.program_id,
+        Some((2, 0)), // recovery ArtworkImage: key_type=2, permissions=0
+        true,          // graceful fallback — don't brick recovery config if receipt is closed
+    )?;
+
     // Build NFT name
     let base_name = "H\u{00e4}rdig Recovery Key";
     let nft_name = match &name {
@@ -157,7 +167,7 @@ pub fn handler(
         .owner(Some(&ctx.accounts.target_wallet.to_account_info()))
         .system_program(&ctx.accounts.system_program.to_account_info())
         .name(nft_name.clone())
-        .uri(metadata_uri(&nft_name, 0, None, None, None, None, None))
+        .uri(metadata_uri(&nft_name, 0, None, None, None, None, image_override.as_deref()))
         .plugins(vec![
             PluginAuthorityPair {
                 plugin: Plugin::Attributes(Attributes {

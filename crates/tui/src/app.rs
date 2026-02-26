@@ -17,9 +17,9 @@ use solana_sdk::{
 };
 
 use hardig::state::{
-    KeyState, MarketConfig, PositionState, PromoConfig, ProtocolConfig, RateBucket, PERM_BORROW,
-    PERM_BUY, PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS, PERM_REINVEST, PERM_REPAY,
-    PERM_SELL, PRESET_ADMIN, PRESET_OPERATOR,
+    KeyState, MarketConfig, PositionState, PromoConfig, ProtocolConfig, RateBucket, TrustedProvider,
+    PERM_BORROW, PERM_BUY, PERM_LIMITED_BORROW, PERM_LIMITED_SELL, PERM_MANAGE_KEYS,
+    PERM_REINVEST, PERM_REPAY, PERM_SELL, PRESET_ADMIN, PRESET_OPERATOR,
 };
 
 // Mayflower constants and helpers
@@ -2570,6 +2570,63 @@ impl App {
                 "Create Market Config".into(),
                 format!("Nav Mint: {}", nav_mint),
                 format!("MarketConfig PDA: {}", mc_pda),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
+    pub fn build_add_trusted_provider(&mut self, program_id: Pubkey) {
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+        let (tp_pda, _) = Pubkey::find_program_address(
+            &[TrustedProvider::SEED, program_id.as_ref()],
+            &hardig::ID,
+        );
+
+        let mut data = sighash("add_trusted_provider");
+        data.extend_from_slice(program_id.as_ref());
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(tp_pda, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Add Trusted Provider".into(),
+                format!("Program ID: {}", program_id),
+                format!("TrustedProvider PDA: {}", tp_pda),
+            ],
+            instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
+            extra_signers: vec![],
+        });
+    }
+
+    pub fn build_remove_trusted_provider(&mut self, program_id: Pubkey) {
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+        let (tp_pda, _) = Pubkey::find_program_address(
+            &[TrustedProvider::SEED, program_id.as_ref()],
+            &hardig::ID,
+        );
+
+        let data = sighash("remove_trusted_provider");
+
+        let accounts = vec![
+            AccountMeta::new(self.keypair.pubkey(), true),
+            AccountMeta::new_readonly(config_pda, false),
+            AccountMeta::new(tp_pda, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+        ];
+
+        self.goto_confirm(PendingAction {
+            description: vec![
+                "Remove Trusted Provider".into(),
+                format!("Program ID: {}", program_id),
+                format!("TrustedProvider PDA: {}", tp_pda),
             ],
             instructions: vec![Instruction::new_with_bytes(hardig::ID, &data, accounts)],
             extra_signers: vec![],
