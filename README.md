@@ -1,6 +1,6 @@
 # Härdig
 
-*Swedish — hardy, resilient; able to endure difficult conditions.*
+*Swedish — hardy, resilient; able to endure difficult conditions.* — [hardig.app](https://www.hardig.app/)
 
 Solana program implementing an NFT keyring model for delegated management of positions on the Nirvana protocol. Supports multiple nav-token markets (navSOL, navJUP, etc.) via on-chain MarketConfig PDAs.
 
