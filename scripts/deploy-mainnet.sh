@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy Härdig to mainnet.
 #
-# Usage: ./scripts/deploy-mainnet.sh <KEYPAIR_PATH>
+# Usage: ./scripts/deploy-mainnet.sh [--dry-run] <KEYPAIR_PATH>
 #
 # Environment:
 #   SOLANA_RPC_URL  — mainnet RPC endpoint (required)
@@ -28,13 +28,27 @@ PROGRAM_ID="4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p"
 
 # --- Args ---
 
+DRY_RUN=false
+
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <KEYPAIR_PATH>"
+    echo "Usage: $0 [--dry-run] <KEYPAIR_PATH>"
     echo ""
+    echo "  --dry-run     Run all checks without deploying or closing buffers"
     echo "  KEYPAIR_PATH  Path to the payer keypair JSON file"
     echo ""
     echo "Environment:"
     echo "  SOLANA_RPC_URL  Mainnet RPC endpoint (required)"
+    exit 1
+fi
+
+if [ "$1" = "--dry-run" ]; then
+    DRY_RUN=true
+    shift
+fi
+
+if [ $# -lt 1 ]; then
+    echo "Error: KEYPAIR_PATH is required"
+    echo "Usage: $0 [--dry-run] <KEYPAIR_PATH>"
     exit 1
 fi
 
@@ -66,10 +80,12 @@ if [ -n "$STALE_FILES" ]; then
     echo ""
     echo "  Run 'anchor build' first to avoid deploying stale code."
     echo ""
-    read -rp "Deploy anyway? [y/N] " STALE_CONFIRM
-    if [[ ! "$STALE_CONFIRM" =~ ^[Yy]$ ]]; then
-        echo "Aborted. Run 'anchor build' and try again."
-        exit 0
+    if [ "$DRY_RUN" = false ]; then
+        read -rp "Deploy anyway? [y/N] " STALE_CONFIRM
+        if [[ ! "$STALE_CONFIRM" =~ ^[Yy]$ ]]; then
+            echo "Aborted. Run 'anchor build' and try again."
+            exit 0
+        fi
     fi
 fi
 
@@ -100,13 +116,45 @@ fi
 
 # --- Pre-flight ---
 
-echo "=== Härdig Mainnet Deployment ==="
+if [ "$DRY_RUN" = true ]; then
+    echo "=== Härdig Mainnet Deployment (DRY RUN) ==="
+else
+    echo "=== Härdig Mainnet Deployment ==="
+fi
 echo ""
 echo "  RPC:        $SOLANA_RPC_URL"
 echo "  Payer:      $(solana-keygen pubkey "$PAYER_KP")"
 echo "  Program ID: $PROGRAM_ID"
 echo "  Binary:     $BPF_SO ($(du -h "$BPF_SO" | cut -f1 | xargs))"
 echo ""
+
+# Check for orphaned buffer accounts
+BUFFERS=$(solana program show --buffers --keypair "$PAYER_KP" --url "$SOLANA_RPC_URL" 2>/dev/null | grep -E '^\s*[1-9A-HJ-NP-Za-km-z]{32,44}\s' || true)
+if [ -n "$BUFFERS" ]; then
+    BUFFER_COUNT=$(echo "$BUFFERS" | wc -l | xargs)
+    BUFFER_TOTAL=$(echo "$BUFFERS" | awk '{sum += $5} END {printf "%.9f", sum}')
+    echo "  WARNING: Found $BUFFER_COUNT orphaned buffer account(s) holding $BUFFER_TOTAL SOL"
+    echo ""
+    echo "$BUFFERS" | while IFS='|' read -r addr auth bal; do
+        echo "    $(echo "$addr" | xargs)  $(echo "$bal" | xargs)"
+    done
+    echo ""
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY RUN] Would prompt to close orphaned buffers"
+    else
+        read -rp "  Close orphaned buffers to reclaim SOL? [y/N] " CLOSE_BUFFERS
+        if [[ "$CLOSE_BUFFERS" =~ ^[Yy]$ ]]; then
+            echo "$BUFFERS" | while IFS='|' read -r addr auth bal; do
+                ADDR=$(echo "$addr" | xargs)
+                echo "  Closing $ADDR..."
+                solana program close "$ADDR" \
+                    --keypair "$PAYER_KP" \
+                    --url "$SOLANA_RPC_URL"
+            done
+            echo ""
+        fi
+    fi
+fi
 
 # Check payer balance
 BALANCE=$(solana balance --keypair "$PAYER_KP" --url "$SOLANA_RPC_URL" 2>/dev/null | awk '{print $1}')
@@ -122,6 +170,18 @@ else
 fi
 
 echo ""
+
+if [ "$DRY_RUN" = true ]; then
+    if [ "$UPGRADE" = true ]; then
+        echo "  [DRY RUN] Would upgrade program"
+    else
+        echo "  [DRY RUN] Would perform initial deployment"
+    fi
+    echo ""
+    echo "Dry run complete. No transactions were sent."
+    exit 0
+fi
+
 read -rp "Proceed? [y/N] " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo "Aborted."
