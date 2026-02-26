@@ -77,7 +77,7 @@ On-chain configuration for a Mayflower market (e.g., navSOL, navJUP). Created by
 
 **Total size:** 265 bytes
 
-**Source:** `MarketConfig` in `programs/hardig/src/state.rs`
+**Source:** `MarketConfig` in `programs/hardig/src/state/mod.rs`
 
 ### KeyState
 
@@ -91,8 +91,12 @@ Mutable state for a delegated key NFT. Tracks rate-limit token buckets. Created 
 | 72 | 1 | `bump` | PDA bump seed |
 | 73 | 32 | `sell_bucket` | RateBucket for `PERM_LIMITED_SELL` |
 | 105 | 32 | `borrow_bucket` | RateBucket for `PERM_LIMITED_BORROW` |
+| 137 | 8 | `total_sell_limit` | Optional lifetime sell cap in navSOL shares (0 = no cap) |
+| 145 | 8 | `total_sold` | Accumulator of total navSOL shares sold via this key |
+| 153 | 8 | `total_borrow_limit` | Optional lifetime borrow cap in lamports (0 = no cap) |
+| 161 | 8 | `total_borrowed` | Accumulator of total lamports borrowed via this key |
 
-**Total size:** 137 bytes
+**Total size:** 169 bytes
 
 Each **RateBucket** (32 bytes, all little-endian u64):
 
@@ -103,7 +107,55 @@ Each **RateBucket** (32 bytes, all little-endian u64):
 | 16 | 8 | `level` | Tokens remaining at last update |
 | 24 | 8 | `last_update` | Slot of last update |
 
-**Source:** `KeyState`, `RateBucket` in `programs/hardig/src/state.rs`
+**Source:** `KeyState`, `RateBucket` in `programs/hardig/src/state/mod.rs`
+
+### PromoConfig
+
+Per-position promotional campaign configuration. Allows permissionless key claiming with a required deposit.
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 8 | discriminator | Anchor account discriminator |
+| 8 | 32 | `authority_seed` | Position's authority_seed this promo belongs to |
+| 40 | 1 | `permissions` | Key permissions bitmask granted to claimed keys |
+| 41 | 8 | `borrow_capacity` | LimitedBorrow bucket capacity (lamports) |
+| 49 | 8 | `borrow_refill_period` | LimitedBorrow refill period (slots) |
+| 57 | 8 | `sell_capacity` | LimitedSell bucket capacity (0 if N/A) |
+| 65 | 8 | `sell_refill_period` | LimitedSell refill period (0 if N/A) |
+| 73 | 8 | `min_deposit_lamports` | Required deposit amount in lamports |
+| 81 | 4 | `max_claims` | Max total keys claimable (0 = unlimited) |
+| 85 | 4 | `claims_count` | Number of keys claimed so far |
+| 89 | 1 | `active` | Whether claiming is enabled |
+| 90 | 8 | `total_borrow_limit` | Lifetime borrow cap for claimed keys in lamports (0 = no cap) |
+| 98 | 8 | `total_sell_limit` | Lifetime sell cap for claimed keys in navSOL shares (0 = no cap) |
+| 106 | 4+N | `name_suffix` | NFT name suffix (Borsh string: 4-byte LE length + UTF-8, max 64 bytes content) |
+| ... | 4+N | `image_uri` | Custom NFT image URL (Borsh string, max 128 bytes content) |
+| ... | 4+N | `market_name` | Market name for NFT metadata (Borsh string, max 32 bytes content) |
+| ... | 1 | `bump` | PDA bump seed |
+
+**Max size:** 345 bytes (with max-length strings)
+
+**PDA seeds:** `["promo", authority_seed, name_suffix_bytes]`
+
+**Source:** `PromoConfig` in `programs/hardig/src/state/promo.rs`
+
+### TrustedProvider
+
+Marker PDA for a trusted artwork provider program. Created by the protocol admin.
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 8 | discriminator | Anchor account discriminator |
+| 8 | 32 | `program_id` | The trusted provider program ID |
+| 40 | 32 | `added_by` | Protocol admin who registered it |
+| 72 | 1 | `active` | Whether the provider is active |
+| 73 | 1 | `bump` | PDA bump seed |
+
+**Total size:** 74 bytes
+
+**PDA seeds:** `["trusted_provider", program_id]`
+
+**Source:** `TrustedProvider` in `programs/hardig/src/state/mod.rs`
 
 ## PDA Derivation
 
@@ -120,6 +172,7 @@ All PDAs use the Hardig program ID (`4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21
 | Market config | `["market_config", nav_mint]` | `MarketConfig` |
 | Promo config | `["promo", authority_seed, name_suffix]` | `PromoConfig` |
 | Claim receipt | `["claim_receipt", promo, claimer]` | `ClaimReceipt` |
+| Trusted provider | `["trusted_provider", program_id]` | `TrustedProvider` |
 
 ### JavaScript (using `@solana/web3.js`)
 
@@ -223,8 +276,8 @@ Permissions are stored as a single `u8` bitmask on each key NFT's MPL-Core `Attr
 | `initialize_protocol` | Protocol deployer (first call) | -- | Create global ProtocolConfig PDA |
 | `create_collection` | Protocol admin | `uri: String` | Create MPL-Core collection for key NFTs |
 | `create_market_config` | Protocol admin | 8 Mayflower market pubkeys | Register a Mayflower market |
-| `create_position` | Any signer | `max_reinvest_spread_bps: u16` | Mint admin key NFT and create position |
-| `authorize_key` | `PERM_MANAGE_KEYS` | `permissions: u8`, rate-limit params | Mint a delegated key NFT to a target wallet |
+| `create_position` | Any signer | `max_reinvest_spread_bps: u16`, `name: Option<String>`, `market_name: String`, `artwork_id: Option<Pubkey>` | Mint admin key NFT and create position |
+| `authorize_key` | `PERM_MANAGE_KEYS` | `permissions: u8`, rate-limit params, `total_sell_limit: u64`, `total_borrow_limit: u64`, `name: Option<String>` | Mint a delegated key NFT to a target wallet |
 | `revoke_key` | `PERM_MANAGE_KEYS` | -- | Close key authorization; burn NFT if admin holds it |
 | `buy` | `PERM_BUY` | `amount: u64`, `min_out: u64` | Deposit SOL to buy nav tokens via Mayflower CPI |
 | `withdraw` | `PERM_SELL` or `PERM_LIMITED_SELL` | `amount: u64`, `min_out: u64` | Sell nav tokens to withdraw SOL |
@@ -232,13 +285,16 @@ Permissions are stored as a single `u8` bitmask on each key NFT's MPL-Core `Attr
 | `repay` | `PERM_REPAY` | `amount: u64` | Repay borrowed SOL |
 | `reinvest` | `PERM_REINVEST` | `min_out: u64` | Borrow available capacity and buy more nav tokens |
 | `heartbeat` | `PERM_MANAGE_KEYS` | -- | No-op liveness proof; resets recovery lockout |
-| `configure_recovery` | `PERM_MANAGE_KEYS` | `lockout_secs: i64`, `lock_config: bool` | Set or replace the dead-man's switch recovery key |
+| `configure_recovery` | `PERM_MANAGE_KEYS` | `lockout_secs: i64`, `lock_config: bool`, `name: Option<String>` | Set or replace the dead-man's switch recovery key |
 | `execute_recovery` | Recovery key holder | -- | Claim admin control after lockout expires |
 | `transfer_admin` | Protocol admin | `new_admin: Pubkey` | Transfer protocol admin rights |
 | `accept_admin` | Pending admin | -- | Accept a pending protocol admin transfer |
-| `create_promo` | `PERM_MANAGE_KEYS` | permissions, rate-limit params, deposit, max claims | Create a promotional campaign for a position |
+| `create_promo` | `PERM_MANAGE_KEYS` | `name_suffix`, `permissions`, rate-limit params, `total_borrow_limit`, `total_sell_limit`, `min_deposit_lamports`, `max_claims`, `image_uri`, `market_name` | Create a promotional campaign for a position |
 | `update_promo` | `PERM_MANAGE_KEYS` | `active: Option<bool>`, `max_claims: Option<u32>` | Toggle promo active state or update max claims |
 | `claim_promo_key` | Any signer | `amount: u64`, `min_out: u64` | Claim a promo key NFT (deposits SOL via Mayflower buy) |
+| `add_trusted_provider` | Protocol admin | `program_id: Pubkey` | Register a trusted artwork provider program |
+| `remove_trusted_provider` | Protocol admin | -- | Deactivate a trusted artwork provider (closes PDA) |
+| `set_position_artwork` | `PERM_MANAGE_KEYS` | `artwork_id: Option<Pubkey>` | Set or clear custom artwork on a position (affects future keys) |
 | `migrate_config` | Protocol admin | -- | Migrate ProtocolConfig from v0 to v1 |
 
 ### Key Validation
@@ -249,7 +305,7 @@ Every position-modifying instruction validates the signer's key via `validate_ke
 2. Reads the `position` attribute from the asset's Attributes plugin and verifies it matches the position's `admin_asset`.
 3. Reads the `permissions` attribute and checks the required permission bit is set.
 
-The `withdraw` and `borrow` instructions additionally support rate-limited keys. If the key has `PERM_LIMITED_SELL` or `PERM_LIMITED_BORROW` (instead of the unrestricted `PERM_SELL`/`PERM_BORROW`), the instruction consumes from the corresponding `RateBucket` in the key's `KeyState` PDA.
+The `withdraw` and `borrow` instructions additionally support rate-limited keys. If the key has `PERM_LIMITED_SELL` or `PERM_LIMITED_BORROW` (instead of the unrestricted `PERM_SELL`/`PERM_BORROW`), the instruction consumes from the corresponding `RateBucket` in the key's `KeyState` PDA. Rate-limited keys may also have optional lifetime caps (`total_sell_limit`, `total_borrow_limit`). When nonzero, the accumulator fields (`total_sold`, `total_borrowed`) are checked after each operation and the transaction fails with `TotalLimitExceeded` if the lifetime cap would be exceeded.
 
 ## Reading Position Data
 
@@ -401,10 +457,23 @@ let available_sell = key_state.sell_bucket.available_now(current_slot);
 let available_borrow = key_state.borrow_bucket.available_now(current_slot);
 ```
 
+### Total Lifetime Limits
+
+In addition to rate buckets, keys may have optional lifetime caps:
+
+- **`total_sell_limit`** (offset 137 in KeyState): Max navSOL shares this key can ever sell. 0 = no cap.
+- **`total_sold`** (offset 145): Accumulator of shares sold so far.
+- **`total_borrow_limit`** (offset 153): Max lamports this key can ever borrow. 0 = no cap.
+- **`total_borrowed`** (offset 161): Accumulator of lamports borrowed so far.
+
+When a lifetime limit is nonzero and the accumulator would exceed it, the transaction fails with `TotalLimitExceeded`. Both rate-bucket and total-limit checks are enforced post-CPI using the actual delta (not the requested amount).
+
 ### Units
 
 - **Sell bucket:** capacity and level are in navSOL shares (9 decimals, same as SPL token amounts).
 - **Borrow bucket:** capacity and level are in lamports.
+- **Total sell limit/sold:** navSOL shares (same as sell bucket).
+- **Total borrow limit/borrowed:** lamports (same as borrow bucket).
 - **Refill period:** measured in Solana slots (~400ms each).
 
 ## Discovery
@@ -413,12 +482,12 @@ There are two types of keys to discover: admin keys (one per position) and deleg
 
 ### Step 1: Scan Hardig Program Accounts
 
-Fetch all `PositionState` accounts (238 bytes) and `KeyState` accounts (137 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 8) to avoid fetching all keys protocol-wide:
+Fetch all `PositionState` accounts (238 bytes) and `KeyState` accounts (169 bytes) from the Hardig program using size filters. When discovering keys for a specific position, add a `memcmp` filter on `authority_seed` (offset 8) to avoid fetching all keys protocol-wide:
 
 ```js
 const PROGRAM_ID = new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p');
 const POSITION_SIZE = 238;
-const KEY_STATE_SIZE = 137;
+const KEY_STATE_SIZE = 169;
 
 // Discover all positions and keys (initial wallet scan)
 const [positionAccounts, keyStateAccounts] = await Promise.all([
@@ -524,6 +593,7 @@ The `HardigError` enum defines all program errors. The Anchor IDL maps these to 
 | `KeyNotHeld` | Signer does not own the key NFT |
 | `WrongPosition` | Key's `position` attribute does not match the target position |
 | `RateLimitExceeded` | Rate-limited key has insufficient bucket tokens |
+| `TotalLimitExceeded` | Lifetime cap on sell or borrow exceeded |
 | `BorrowCapacityExceeded` | Borrow amount exceeds available capacity |
 | `SlippageExceeded` | Output amount below `min_out` parameter |
 | `InsufficientFunds` | Not enough funds for the operation |

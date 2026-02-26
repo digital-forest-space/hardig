@@ -121,22 +121,6 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
 
     require!(amount > 0, HardigError::InsufficientFunds);
 
-    // Enforce rate limit for PERM_LIMITED_BORROW (skipped if unlimited PERM_BORROW is set)
-    if permissions & PERM_BORROW == 0 && permissions & PERM_LIMITED_BORROW != 0 {
-        let key_state = ctx.accounts.key_state.as_deref_mut()
-            .ok_or(error!(HardigError::RateLimitExceeded))?;
-        consume_rate_limit(
-            &mut key_state.borrow_bucket,
-            amount,
-            Clock::get()?.slot,
-        )?;
-        consume_total_limit(
-            &mut key_state.total_borrowed,
-            key_state.total_borrow_limit,
-            amount,
-        )?;
-    }
-
     let mc = &ctx.accounts.market_config;
 
     // Validate PDA-derived accounts
@@ -217,6 +201,22 @@ pub fn handler(ctx: Context<Borrow>, amount: u64) -> Result<()> {
     let actual_borrowed = debt_after
         .checked_sub(debt_before)
         .ok_or(HardigError::BorrowCapacityExceeded)?;
+
+    // Enforce rate + total limits using actual borrowed amount (not requested amount)
+    if permissions & PERM_BORROW == 0 && permissions & PERM_LIMITED_BORROW != 0 {
+        let key_state = ctx.accounts.key_state.as_deref_mut()
+            .ok_or(error!(HardigError::RateLimitExceeded))?;
+        consume_rate_limit(
+            &mut key_state.borrow_bucket,
+            actual_borrowed,
+            Clock::get()?.slot,
+        )?;
+        consume_total_limit(
+            &mut key_state.total_borrowed,
+            key_state.total_borrow_limit,
+            actual_borrowed,
+        )?;
+    }
 
     // Close PDA's wSOL ATA — returns borrowed wSOL + rent as native SOL to signer
     // Only attempt if the account is an initialized SPL token account (state byte at offset 108)

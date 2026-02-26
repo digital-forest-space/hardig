@@ -165,22 +165,6 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
         HardigError::InsufficientFunds
     );
 
-    // Enforce rate limit for PERM_LIMITED_SELL (skipped if unlimited PERM_SELL is set)
-    if permissions & PERM_SELL == 0 && permissions & PERM_LIMITED_SELL != 0 {
-        let key_state = ctx.accounts.key_state.as_deref_mut()
-            .ok_or(error!(HardigError::RateLimitExceeded))?;
-        consume_rate_limit(
-            &mut key_state.sell_bucket,
-            amount,
-            Clock::get()?.slot,
-        )?;
-        consume_total_limit(
-            &mut key_state.total_sold,
-            key_state.total_sell_limit,
-            amount,
-        )?;
-    }
-
     if ctx.accounts.key_asset.key() == ctx.accounts.position.current_admin_asset {
         ctx.accounts.position.last_admin_activity = Clock::get()?.unix_timestamp;
     }
@@ -262,6 +246,22 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64, min_out: u64) -> Result<()> 
     let shares_sold = shares_before
         .checked_sub(shares_after)
         .ok_or(HardigError::InsufficientFunds)?;
+
+    // Enforce rate + total limits using actual shares sold (not requested amount)
+    if permissions & PERM_SELL == 0 && permissions & PERM_LIMITED_SELL != 0 {
+        let key_state = ctx.accounts.key_state.as_deref_mut()
+            .ok_or(error!(HardigError::RateLimitExceeded))?;
+        consume_rate_limit(
+            &mut key_state.sell_bucket,
+            shares_sold,
+            Clock::get()?.slot,
+        )?;
+        consume_total_limit(
+            &mut key_state.total_sold,
+            key_state.total_sell_limit,
+            shares_sold,
+        )?;
+    }
 
     // Slippage check: verify SOL received >= min_out
     let wsol_after = {
