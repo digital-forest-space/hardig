@@ -457,8 +457,8 @@ export async function selectActivePosition(index, connection) {
  * PromoConfig layout (343 bytes total):
  *   discriminator(8) + authority_seed(32) + permissions(1) + borrow_capacity(8) +
  *   borrow_refill_period(8) + sell_capacity(8) + sell_refill_period(8) +
+ *   min_deposit_lamports(8) + max_claims(4) + claims_count(4) + active(1) +
  *   total_borrow_limit(8) + total_sell_limit(8) +
- *   min_deposit_lamports(8) + claims_count(4) + max_claims(4) + active(1) +
  *   name_suffix: String(4+max64) + image_uri: String(4+max128) + market_name: String(4+max32) + bump(1)
  */
 const PROMO_CONFIG_SIZE = 343;
@@ -515,23 +515,23 @@ export async function discoverPromos(connection) {
       const sellRefillPeriod = Number(view.getBigUint64(offset, true));
       offset += 8;
 
+      const minDepositLamports = Number(view.getBigUint64(offset, true));
+      offset += 8;
+
+      const maxClaims = view.getUint32(offset, true);
+      offset += 4;
+
+      const claimsCount = view.getUint32(offset, true);
+      offset += 4;
+
+      const active = data[offset] !== 0;
+      offset += 1;
+
       const totalBorrowLimit = Number(view.getBigUint64(offset, true));
       offset += 8;
 
       const totalSellLimit = Number(view.getBigUint64(offset, true));
       offset += 8;
-
-      const minDepositLamports = Number(view.getBigUint64(offset, true));
-      offset += 8;
-
-      const claimsCount = view.getUint32(offset, true);
-      offset += 4;
-
-      const maxClaims = view.getUint32(offset, true);
-      offset += 4;
-
-      const active = data[offset] !== 0;
-      offset += 1;
 
       const nameSuffixResult = parseBorshString(data, offset);
       const nameSuffix = nameSuffixResult.value;

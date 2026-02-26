@@ -62,8 +62,8 @@ pub fn handler(
         &ctx.accounts.config.collection,
     )?;
 
-    // Validate name_suffix length
-    require!(name_suffix.len() <= 64, HardigError::NameTooLong);
+    // Validate name_suffix length (Solana PDA seeds are max 32 bytes each)
+    require!(name_suffix.len() <= 32, HardigError::NameTooLong);
 
     // Validate image_uri length
     require!(
