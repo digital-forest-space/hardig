@@ -476,6 +476,59 @@ When a lifetime limit is nonzero and the accumulator would exceed it, the transa
 - **Total borrow limit/borrowed:** lamports (same as borrow bucket).
 - **Refill period:** measured in Solana slots (~400ms each).
 
+## Artwork (Custom Key Visuals)
+
+Positions can optionally bind to an artwork set from a trusted third-party provider. When artwork is configured (`artwork_id` on PositionState), newly minted key NFTs receive a custom image URI from an **ArtworkImage** PDA owned by the trusted provider program.
+
+### Trust Chain
+
+Three accounts are validated via `remaining_accounts` when minting a key with artwork:
+
+1. **ArtworkReceipt** (index 0) — Proves the position purchased the artwork set. Owned by the trusted provider program. Contains `artwork_set`, `position_seed`, and `buyer`.
+2. **TrustedProvider PDA** (index 1) — Härdig-owned PDA at `["trusted_provider", provider_program_id]`. Must be active. Registered by the protocol admin via `add_trusted_provider`.
+3. **ArtworkImage PDA** (index 2) — Owned by the trusted provider program. Contains the `image_uri` for a specific key type and permissions combination.
+
+### ArtworkImage PDA Derivation (with Fallback)
+
+The ArtworkImage PDA is derived from the trusted provider program:
+
+```js
+// Seeds: ["artwork_image", artwork_set, key_type, permissions]
+const [artworkImagePda] = PublicKey.findProgramAddressSync(
+  [Buffer.from('artwork_image'), artworkSet.toBuffer(), Buffer.from([keyType]), Buffer.from([permissions])],
+  trustedProviderProgramId
+);
+```
+
+**Key types:** `0` = admin, `1` = delegate, `2` = recovery.
+
+Since delegates can have many permission bitmask combinations, the on-chain validation supports a **fallback**: if no exact-match ArtworkImage exists for `(key_type, permissions)`, it accepts the catch-all PDA derived with `permissions = 0`.
+
+**Client-side resolution:**
+
+```js
+// 1. Try exact match
+const [exactPda] = PublicKey.findProgramAddressSync(
+  [Buffer.from('artwork_image'), artworkSet.toBuffer(), Buffer.from([1]), Buffer.from([permissions])],
+  trustedProviderProgramId
+);
+const exactInfo = await connection.getAccountInfo(exactPda);
+
+// 2. If exact match doesn't exist, use catch-all (permissions=0)
+let artworkImagePda = exactPda;
+if (!exactInfo || exactInfo.data.length === 0) {
+  const [fallbackPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('artwork_image'), artworkSet.toBuffer(), Buffer.from([1]), Buffer.from([0])],
+    trustedProviderProgramId
+  );
+  artworkImagePda = fallbackPda;
+}
+
+// 3. Pass as remaining_accounts[2] in authorize_key / configure_recovery
+```
+
+Artwork is optional — all key-minting instructions use graceful fallback. If the remaining accounts are omitted or the receipt/image accounts are closed, the key is minted with the default metadata (no custom image).
+
 ## Discovery
 
 There are two types of keys to discover: admin keys (one per position) and delegated keys (created via `authorize_key`). The discovery approach avoids `getProgramAccounts` on the MPL-Core program (which most RPC providers reject due to the massive account set).

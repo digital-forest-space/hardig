@@ -73,6 +73,11 @@ fn read_borsh_string(data: &[u8], offset: usize) -> Result<String> {
 /// When `image_key_type` is `Some((key_type, permissions))`, also expects
 /// `remaining_accounts[2]` = ArtworkImage PDA, and returns the image URI from it.
 ///
+/// The ArtworkImage PDA is first matched against the exact `(key_type, permissions)` seeds.
+/// If that doesn't match and `permissions != 0`, it falls back to `(key_type, 0)` —
+/// a catch-all artwork for that key type. This lets artwork providers create one default
+/// delegate image without needing an account for every permissions bitmask combination.
+///
 /// Returns `Some(image_uri)` if artwork is present and image was requested/found,
 /// `None` if no artwork_id or image was not requested.
 ///
@@ -182,15 +187,25 @@ pub fn validate_artwork_receipt<'info>(
 
     let image_info = &remaining_accounts[2];
 
-    // Derive ArtworkImage PDA from trusted program
+    // Derive ArtworkImage PDA from trusted program — try exact match first,
+    // then fall back to permissions=0 (catch-all artwork for this key_type).
     let (expected_image_pda, _) = Pubkey::find_program_address(
         &[b"artwork_image", artwork_set.as_ref(), &[key_type], &[permissions]],
         &trusted_program_id,
     );
-    require!(
-        image_info.key() == expected_image_pda,
-        HardigError::InvalidArtworkReceipt
-    );
+    let pda_match = if image_info.key() == expected_image_pda {
+        true
+    } else if permissions != 0 {
+        // Fallback: try the catch-all PDA with permissions=0
+        let (fallback_pda, _) = Pubkey::find_program_address(
+            &[b"artwork_image", artwork_set.as_ref(), &[key_type], &[0u8]],
+            &trusted_program_id,
+        );
+        image_info.key() == fallback_pda
+    } else {
+        false
+    };
+    require!(pda_match, HardigError::InvalidArtworkReceipt);
 
     // Verify ArtworkImage is owned by the trusted program
     require!(
