@@ -142,10 +142,11 @@ pub mod hardig {
         total_sell_limit: u64,
         min_deposit_lamports: u64,
         max_claims: u32,
+        initial_fill_bps: u16,
         image_uri: String,
         market_name: String,
     ) -> Result<()> {
-        instructions::create_promo::handler(ctx, name_suffix, permissions, borrow_capacity, borrow_refill_period, sell_capacity, sell_refill_period, total_borrow_limit, total_sell_limit, min_deposit_lamports, max_claims, image_uri, market_name)
+        instructions::create_promo::handler(ctx, name_suffix, permissions, borrow_capacity, borrow_refill_period, sell_capacity, sell_refill_period, total_borrow_limit, total_sell_limit, min_deposit_lamports, max_claims, initial_fill_bps, image_uri, market_name)
     }
 
     pub fn update_promo(

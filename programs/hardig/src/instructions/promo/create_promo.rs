@@ -50,6 +50,7 @@ pub fn handler(
     total_sell_limit: u64,
     min_deposit_lamports: u64,
     max_claims: u32,
+    initial_fill_bps: u16,
     image_uri: String,
     market_name: String,
 ) -> Result<()> {
@@ -89,6 +90,9 @@ pub fn handler(
         total_borrow_limit,
     )?;
 
+    // Validate initial fill basis points
+    require!(initial_fill_bps <= 10_000, HardigError::InvalidInitialFill);
+
     // Populate the PromoConfig
     let promo = &mut ctx.accounts.promo;
     promo.authority_seed = ctx.accounts.position.authority_seed;
@@ -103,6 +107,7 @@ pub fn handler(
     promo.active = true;
     promo.total_borrow_limit = total_borrow_limit;
     promo.total_sell_limit = total_sell_limit;
+    promo.initial_fill_bps = initial_fill_bps;
     promo.name_suffix = name_suffix;
     promo.image_uri = image_uri;
     promo.market_name = market_name;

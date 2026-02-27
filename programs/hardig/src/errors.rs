@@ -95,6 +95,8 @@ pub enum HardigError {
     PromoInactive,
     #[msg("Promo has reached maximum claims")]
     PromoMaxClaimsReached,
+    #[msg("Initial fill must be 0-10000 basis points")]
+    InvalidInitialFill,
 
     // Artwork / trusted provider errors
     #[msg("Invalid artwork receipt account (bad discriminator, length, or data)")]

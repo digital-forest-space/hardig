@@ -351,11 +351,16 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
     key_state.bump = ctx.bumps.key_state;
     key_state.authority_seed = ctx.accounts.position.authority_seed;
 
+    // Compute initial bucket level from basis points (0 = empty, 10000 = full)
+    let initial_level = |capacity: u64| -> u64 {
+        (capacity as u128 * promo.initial_fill_bps as u128 / 10_000) as u64
+    };
+
     if permissions & PERM_LIMITED_SELL != 0 {
         key_state.sell_bucket = RateBucket {
             capacity: promo.sell_capacity,
             refill_period: promo.sell_refill_period,
-            level: promo.sell_capacity, // starts full
+            level: initial_level(promo.sell_capacity),
             last_update: current_slot,
         };
     }
@@ -363,7 +368,7 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
         key_state.borrow_bucket = RateBucket {
             capacity: promo.borrow_capacity,
             refill_period: promo.borrow_refill_period,
-            level: promo.borrow_capacity, // starts full
+            level: initial_level(promo.borrow_capacity),
             last_update: current_slot,
         };
     }

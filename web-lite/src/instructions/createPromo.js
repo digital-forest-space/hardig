@@ -34,6 +34,16 @@ function encodeU64(value) {
 }
 
 /**
+ * Encode a u16 as 2 bytes LE.
+ */
+function encodeU16(value) {
+  const buf = new Uint8Array(2);
+  const view = new DataView(buf.buffer);
+  view.setUint16(0, value, true);
+  return buf;
+}
+
+/**
  * Encode a u32 as 4 bytes LE.
  */
 function encodeU32(value) {
@@ -56,6 +66,7 @@ export async function buildCreatePromo(
   totalSellLimit,
   minDepositLamports,
   maxClaims,
+  initialFillBps,
   imageUri,
   marketName = ''
 ) {
@@ -69,12 +80,13 @@ export async function buildCreatePromo(
   // discriminator(8) + name_suffix(String) + permissions(u8) + borrow_capacity(u64) +
   // borrow_refill_period(u64) + sell_capacity(u64) + sell_refill_period(u64) +
   // total_borrow_limit(u64) + total_sell_limit(u64) +
-  // min_deposit_lamports(u64) + max_claims(u32) + image_uri(String) + market_name(String)
+  // min_deposit_lamports(u64) + max_claims(u32) + initial_fill_bps(u16) +
+  // image_uri(String) + market_name(String)
   const nameSuffixBytes = encodeBorshString(nameSuffix);
   const imageUriBytes = encodeBorshString(imageUri);
   const marketNameBytes = encodeBorshString(marketName);
 
-  const dataLen = 8 + nameSuffixBytes.length + 1 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 4 + imageUriBytes.length + marketNameBytes.length;
+  const dataLen = 8 + nameSuffixBytes.length + 1 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 4 + 2 + imageUriBytes.length + marketNameBytes.length;
   const data = new Uint8Array(dataLen);
   let offset = 0;
 
@@ -89,6 +101,7 @@ export async function buildCreatePromo(
   data.set(encodeU64(totalSellLimit), offset); offset += 8;
   data.set(encodeU64(minDepositLamports), offset); offset += 8;
   data.set(encodeU32(maxClaims), offset); offset += 4;
+  data.set(encodeU16(initialFillBps), offset); offset += 2;
   data.set(imageUriBytes, offset); offset += imageUriBytes.length;
   data.set(marketNameBytes, offset); offset += marketNameBytes.length;
 

@@ -979,6 +979,7 @@ impl App {
             ("Sell Refill Minutes".into(), "0".into()),
             ("Min Deposit (SOL)".into(), "0.02".into()),
             ("Max Claims (0=unlimited)".into(), "0".into()),
+            ("Initial Fill %".into(), "100".into()),
             ("Image URI (optional)".into(), String::new()),
         ];
         self.input_field = 0;
@@ -2300,6 +2301,14 @@ impl App {
         let max_claims: u32 = self.find_field_value("Max Claims")
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(0);
+        let initial_fill_pct: f64 = self.find_field_value("Initial Fill")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(100.0);
+        if !(0.0..=100.0).contains(&initial_fill_pct) {
+            self.push_log("Initial Fill % must be between 0 and 100");
+            return;
+        }
+        let initial_fill_bps: u16 = (initial_fill_pct * 100.0) as u16;
         let image_uri = self.find_field_value("Image URI")
             .unwrap_or_default()
             .trim()
@@ -2353,6 +2362,8 @@ impl App {
         data.extend_from_slice(&min_deposit.to_le_bytes());
         // max_claims: u32
         data.extend_from_slice(&max_claims.to_le_bytes());
+        // initial_fill_bps: u16
+        data.extend_from_slice(&initial_fill_bps.to_le_bytes());
         // image_uri: String (4-byte len + utf8)
         let uri_bytes = image_uri.as_bytes();
         data.extend_from_slice(&(uri_bytes.len() as u32).to_le_bytes());
@@ -2393,6 +2404,9 @@ impl App {
             desc.push(format!("Max claims: {}", max_claims));
         } else {
             desc.push("Max claims: unlimited".into());
+        }
+        if initial_fill_bps < 10_000 {
+            desc.push(format!("Initial fill: {}%", initial_fill_bps as f64 / 100.0));
         }
         desc.push(format!("Promo PDA: {}", short_pubkey(&promo_pda)));
 

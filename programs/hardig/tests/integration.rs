@@ -3616,6 +3616,7 @@ fn ix_create_promo(
     total_sell_limit: u64,
     min_deposit_lamports: u64,
     max_claims: u32,
+    initial_fill_bps: u16,
     image_uri: &str,
     market_name: &str,
 ) -> Instruction {
@@ -3638,6 +3639,7 @@ fn ix_create_promo(
     data.extend_from_slice(&total_sell_limit.to_le_bytes());
     data.extend_from_slice(&min_deposit_lamports.to_le_bytes());
     data.extend_from_slice(&max_claims.to_le_bytes());
+    data.extend_from_slice(&initial_fill_bps.to_le_bytes());
     // image_uri: String
     data.extend_from_slice(&(image_uri.len() as u32).to_le_bytes());
     data.extend_from_slice(image_uri.as_bytes());
@@ -3845,6 +3847,7 @@ fn test_create_promo() {
         0, 0,
         min_deposit,
         max_claims,
+        10_000, // initial_fill_bps: 100% full
         image_uri,
         "navSOL",
     );
@@ -3940,7 +3943,7 @@ fn test_create_multiple_promos_per_position() {
         &admin_asset.pubkey(),
         "Promo A",
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 5_000_000, 50, "", "navSOL",
+        0, 0, 0, 0, 0, 0, 5_000_000, 50, 10_000, "", "navSOL",
     );
     send_tx(&mut svm, &[ix_a], &[&admin]).unwrap();
 
@@ -3950,7 +3953,7 @@ fn test_create_multiple_promos_per_position() {
         &admin_asset.pubkey(),
         "Promo B",
         PERM_BUY | PERM_LIMITED_BORROW,
-        10_000_000, 500, 0, 0, 0, 0, 1_000_000, 200, "https://example.com/b.png", "navSOL",
+        10_000_000, 500, 0, 0, 0, 0, 1_000_000, 200, 10_000, "https://example.com/b.png", "navSOL",
     );
     send_tx(&mut svm, &[ix_b], &[&admin]).unwrap();
 
@@ -3990,7 +3993,7 @@ fn test_update_promo() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 0, 100, "", "",
+        0, 0, 0, 0, 0, 0, 0, 100, 10_000, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4051,7 +4054,7 @@ fn test_update_promo_max_below_current_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 0, 0, "", "",
+        0, 0, 0, 0, 0, 0, 0, 0, 10_000, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4117,6 +4120,7 @@ fn test_claim_promo_key() {
         0, 0,
         10_000_000,
         100,
+        10_000, // initial_fill_bps: 100% full
         "https://example.com/img.png",
         "navSOL",
     );
@@ -4188,7 +4192,7 @@ fn test_claim_promo_key_duplicate_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 0, 0, "", "",
+        0, 0, 0, 0, 0, 0, 0, 0, 10_000, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4240,7 +4244,7 @@ fn test_claim_promo_key_inactive_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 0, 0, "", "",
+        0, 0, 0, 0, 0, 0, 0, 0, 10_000, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4290,7 +4294,7 @@ fn test_claim_promo_key_max_claims_reached() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 0, 1, "", "",
+        0, 0, 0, 0, 0, 0, 0, 1, 10_000, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4355,6 +4359,7 @@ fn test_promo_key_can_buy() {
         0, 0,       // no total limits
         0,          // min_deposit_lamports = 0 (allow any amount)
         100,
+        10_000, // initial_fill_bps: 100% full
         "",
         "navSOL",
     );
@@ -4421,6 +4426,7 @@ fn test_promo_key_cannot_sell() {
         0, 0,
         0,
         100,
+        10_000, // initial_fill_bps: 100% full
         "",
         "navSOL",
     );
@@ -4490,6 +4496,7 @@ fn test_claim_promo_below_min_deposit_rejected() {
         0, 0,
         min_deposit,
         100,
+        10_000, // initial_fill_bps: 100% full
         "",
         "navSOL",
     );
@@ -4536,6 +4543,7 @@ fn test_claim_promo_deposited_nav_updated() {
         0, 0,
         0, // no minimum
         100,
+        10_000, // initial_fill_bps: 100% full
         "",
         "navSOL",
     );
@@ -4593,6 +4601,7 @@ fn test_claim_promo_slippage_rejected() {
         0, 0,
         0,
         100,
+        10_000, // initial_fill_bps: 100% full
         "",
         "navSOL",
     );
@@ -4637,7 +4646,7 @@ fn test_update_promo_non_admin_rejected() {
         &admin_asset.pubkey(),
         name_suffix,
         PERM_BUY,
-        0, 0, 0, 0, 0, 0, 0, 100, "", "",
+        0, 0, 0, 0, 0, 0, 0, 100, 10_000, "", "",
     );
     send_tx(&mut svm, &[ix], &[&admin]).unwrap();
 
@@ -4688,7 +4697,7 @@ fn test_create_promo_invalid_permissions_rejected() {
         &admin_asset.pubkey(),
         "Bad Perms",
         PERM_SELL, // invalid for promo origin
-        0, 0, 0, 0, 0, 0, 0, 100, "", "",
+        0, 0, 0, 0, 0, 0, 0, 100, 10_000, "", "",
     );
     let result = send_tx(&mut svm, &[ix], &[&admin]);
     assert!(result.is_err(), "creating promo with PERM_SELL should fail (not in Promo allowed set)");

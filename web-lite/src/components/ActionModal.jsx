@@ -73,6 +73,7 @@ export function ActionModal({ action, actionData, onClose, onRefresh }) {
   const [promoSellMinutes, setPromoSellMinutes] = useState('');
   const [promoMinDeposit, setPromoMinDeposit] = useState('0.02');
   const [promoMaxClaims, setPromoMaxClaims] = useState('0');
+  const [promoInitialFillBps, setPromoInitialFillBps] = useState('10000');
   const [promoImageUri, setPromoImageUri] = useState('');
   const [editMaxClaims, setEditMaxClaims] = useState('');
 
@@ -192,10 +193,12 @@ export function ActionModal({ action, actionData, onClose, onRefresh }) {
           if ((pp & PERM_LIMITED_BORROW) && (pbc === 0 || pbr === 0)) { setError('Borrow capacity and refill period must be nonzero'); setPhase('form'); return; }
           const pmd = parseSolToLamports(promoMinDeposit) || 0;
           const pmc = parseInt(promoMaxClaims) || 0;
+          const pifb = parseInt(promoInitialFillBps) || 0;
+          if (pifb < 0 || pifb > 10000) { setError('Initial fill must be between 0 and 10000 bps (0-100%)'); setPhase('form'); return; }
           const piu = promoImageUri.trim();
           if (piu.length > 128) { setError('Image URI must be 128 characters or less'); setPhase('form'); return; }
           const promoMarketName = marketConfig.value?.navMint ? navTokenName(marketConfig.value.navMint) : '';
-          built = await buildCreatePromo(program, walletPk, ns, pp, pbc, pbr, psc, psr, pmd, pmc, piu, promoMarketName);
+          built = await buildCreatePromo(program, walletPk, ns, pp, pbc, pbr, psc, psr, pmd, pmc, pifb, piu, promoMarketName);
           break;
         }
         case 'togglePromo': {
@@ -613,6 +616,20 @@ export function ActionModal({ action, actionData, onClose, onRefresh }) {
                     onInput={(e) => setPromoMaxClaims(e.target.value)}
                     placeholder="0"
                   />
+                </div>
+                <div class="form-group">
+                  <label>Initial Bucket Fill (bps)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10000"
+                    value={promoInitialFillBps}
+                    onInput={(e) => setPromoInitialFillBps(e.target.value)}
+                    placeholder="10000"
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                    How full the rate-limit bucket starts. 10000 = 100%, 5000 = 50%, 0 = empty.
+                  </div>
                 </div>
                 <div class="form-group">
                   <label>Image URI (optional)</label>

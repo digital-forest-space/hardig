@@ -454,14 +454,14 @@ export async function selectActivePosition(index, connection) {
 
 /**
  * Discover PromoConfig accounts for the active position's authority_seed.
- * PromoConfig layout (343 bytes total):
+ * PromoConfig layout (345 bytes total):
  *   discriminator(8) + authority_seed(32) + permissions(1) + borrow_capacity(8) +
  *   borrow_refill_period(8) + sell_capacity(8) + sell_refill_period(8) +
  *   min_deposit_lamports(8) + max_claims(4) + claims_count(4) + active(1) +
- *   total_borrow_limit(8) + total_sell_limit(8) +
+ *   total_borrow_limit(8) + total_sell_limit(8) + initial_fill_bps(2) +
  *   name_suffix: String(4+max64) + image_uri: String(4+max128) + market_name: String(4+max32) + bump(1)
  */
-const PROMO_CONFIG_SIZE = 343;
+const PROMO_CONFIG_SIZE = 345;
 
 function parseBorshString(data, offset) {
   if (offset + 4 > data.length) return { value: '', bytesRead: 4 };
@@ -533,6 +533,9 @@ export async function discoverPromos(connection) {
       const totalSellLimit = Number(view.getBigUint64(offset, true));
       offset += 8;
 
+      const initialFillBps = view.getUint16(offset, true); // u16 LE
+      offset += 2;
+
       const nameSuffixResult = parseBorshString(data, offset);
       const nameSuffix = nameSuffixResult.value;
       offset += nameSuffixResult.bytesRead;
@@ -558,6 +561,7 @@ export async function discoverPromos(connection) {
           sellRefillPeriod,
           totalBorrowLimit,
           totalSellLimit,
+          initialFillBps,
           minDepositLamports,
           claimsCount,
           maxClaims,

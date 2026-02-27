@@ -128,12 +128,13 @@ Per-position promotional campaign configuration. Allows permissionless key claim
 | 89 | 1 | `active` | Whether claiming is enabled |
 | 90 | 8 | `total_borrow_limit` | Lifetime borrow cap for claimed keys in lamports (0 = no cap) |
 | 98 | 8 | `total_sell_limit` | Lifetime sell cap for claimed keys in navSOL shares (0 = no cap) |
-| 106 | 4+N | `name_suffix` | NFT name suffix (Borsh string: 4-byte LE length + UTF-8, max 64 bytes content) |
+| 106 | 2 | `initial_fill_bps` | Initial bucket fill level in basis points (0 = empty, 10000 = full) |
+| 108 | 4+N | `name_suffix` | NFT name suffix (Borsh string: 4-byte LE length + UTF-8, max 64 bytes content) |
 | ... | 4+N | `image_uri` | Custom NFT image URL (Borsh string, max 128 bytes content) |
 | ... | 4+N | `market_name` | Market name for NFT metadata (Borsh string, max 32 bytes content) |
 | ... | 1 | `bump` | PDA bump seed |
 
-**Max size:** 345 bytes (with max-length strings)
+**Max size:** 347 bytes (with max-length strings)
 
 **PDA seeds:** `["promo", authority_seed, name_suffix_bytes]`
 
@@ -289,7 +290,7 @@ Permissions are stored as a single `u8` bitmask on each key NFT's MPL-Core `Attr
 | `execute_recovery` | Recovery key holder | -- | Claim admin control after lockout expires |
 | `transfer_admin` | Protocol admin | `new_admin: Pubkey` | Transfer protocol admin rights |
 | `accept_admin` | Pending admin | -- | Accept a pending protocol admin transfer |
-| `create_promo` | `PERM_MANAGE_KEYS` | `name_suffix`, `permissions`, rate-limit params, `total_borrow_limit`, `total_sell_limit`, `min_deposit_lamports`, `max_claims`, `image_uri`, `market_name` | Create a promotional campaign for a position |
+| `create_promo` | `PERM_MANAGE_KEYS` | `name_suffix`, `permissions`, rate-limit params, `total_borrow_limit`, `total_sell_limit`, `min_deposit_lamports`, `max_claims`, `initial_fill_bps`, `image_uri`, `market_name` | Create a promotional campaign for a position |
 | `update_promo` | `PERM_MANAGE_KEYS` | `active: Option<bool>`, `max_claims: Option<u32>` | Toggle promo active state or update max claims |
 | `claim_promo_key` | Any signer | `amount: u64`, `min_out: u64` | Claim a promo key NFT (deposits SOL via Mayflower buy) |
 | `add_trusted_provider` | Protocol admin | `program_id: Pubkey` | Register a trusted artwork provider program |
@@ -647,6 +648,7 @@ The `HardigError` enum defines all program errors. The Anchor IDL maps these to 
 | `WrongPosition` | Key's `position` attribute does not match the target position |
 | `RateLimitExceeded` | Rate-limited key has insufficient bucket tokens |
 | `TotalLimitExceeded` | Lifetime cap on sell or borrow exceeded |
+| `InvalidInitialFill` | Initial fill basis points must be 0-10000 |
 | `BorrowCapacityExceeded` | Borrow amount exceeds available capacity |
 | `SlippageExceeded` | Output amount below `min_out` parameter |
 | `InsufficientFunds` | Not enough funds for the operation |
