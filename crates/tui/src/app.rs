@@ -1577,6 +1577,9 @@ impl App {
             0u64 // floor price unavailable; no slippage protection
         };
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let mut data = sighash("buy");
         data.extend_from_slice(&amount.to_le_bytes());
         data.extend_from_slice(&min_out.to_le_bytes());
@@ -1585,6 +1588,7 @@ impl App {
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
             AccountMeta::new_readonly(key_asset, false),            // key_asset
             AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(config_pda, false),           // config
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
             AccountMeta::new(self.program_pda, false),              // program_pda
@@ -1682,6 +1686,9 @@ impl App {
             0u64 // floor price unavailable; no slippage protection
         };
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let mut data = sighash("withdraw");
         data.extend_from_slice(&amount.to_le_bytes());
         data.extend_from_slice(&min_out.to_le_bytes());
@@ -1702,6 +1709,7 @@ impl App {
         }
         accounts.extend_from_slice(&[
             AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(config_pda, false),           // config
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
             AccountMeta::new(self.program_pda, false),              // program_pda
@@ -1774,6 +1782,9 @@ impl App {
             None => { self.push_log("No market config loaded"); return; }
         };
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let mut data = sighash("borrow");
         data.extend_from_slice(&amount.to_le_bytes());
 
@@ -1792,6 +1803,7 @@ impl App {
         }
         accounts.extend_from_slice(&[
             AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(config_pda, false),           // config
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
             AccountMeta::new(self.program_pda, false),              // program_pda
@@ -1857,6 +1869,9 @@ impl App {
             None => { self.push_log("No market config loaded"); return; }
         };
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let mut data = sighash("repay");
         data.extend_from_slice(&amount.to_le_bytes());
 
@@ -1864,6 +1879,7 @@ impl App {
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
             AccountMeta::new_readonly(key_asset, false),            // key_asset
             AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(config_pda, false),           // config
             AccountMeta::new_readonly(mc_pda, false),               // market_config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
             AccountMeta::new(self.program_pda, false),              // program_pda
@@ -1944,6 +1960,9 @@ impl App {
             0u64 // floor price or capacity unavailable; no slippage protection
         };
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let mut data = sighash("reinvest");
         data.extend_from_slice(&min_out.to_le_bytes());
 
@@ -1952,6 +1971,7 @@ impl App {
             AccountMeta::new_readonly(key_asset, false),            // key_asset
             AccountMeta::new(position_pda, false),                  // position
             AccountMeta::new_readonly(mc_pda, false),               // market_config
+            AccountMeta::new_readonly(config_pda, false),           // config
             AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),    // system_program
             AccountMeta::new(self.program_pda, false),              // program_pda
             AccountMeta::new(self.pp_pda, false),                   // personal_position
@@ -2014,11 +2034,15 @@ impl App {
             }
         };
 
+        let (config_pda, _) =
+            Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
+
         let data = sighash("heartbeat");
         let accounts = vec![
             AccountMeta::new_readonly(self.keypair.pubkey(), true), // admin
             AccountMeta::new_readonly(key_asset, false),            // admin_key_asset
             AccountMeta::new(position_pda, false),                  // position
+            AccountMeta::new_readonly(config_pda, false),           // config
         ];
 
         self.goto_confirm(PendingAction {
@@ -2262,8 +2286,8 @@ impl App {
             self.push_log("Name suffix is required");
             return;
         }
-        if name_suffix.len() > 64 {
-            self.push_log(format!("Name suffix too long ({} chars, max 64)", name_suffix.len()));
+        if name_suffix.len() > 32 {
+            self.push_log(format!("Name suffix too long ({} bytes, max 32)", name_suffix.len()));
             return;
         }
 
