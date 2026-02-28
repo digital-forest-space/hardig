@@ -587,7 +587,7 @@ fn run_oneshot(
 ) {
     let mut app = app::App::new(rpc_url, keypair, verbose);
 
-    // If --position specified, select that specific position
+    // If --position specified, select that specific position; otherwise auto-select first
     if let Some(ref pos_str) = position_filter {
         use std::str::FromStr;
         match solana_sdk::pubkey::Pubkey::from_str(pos_str) {
@@ -613,6 +613,12 @@ fn run_oneshot(
                 std::process::exit(1);
             }
         }
+    } else if app.discovered_positions.len() > 1 && app.position_pda.is_none() {
+        // Multiple positions found but none selected (discover_position only
+        // auto-selects when there's exactly one). Pick the first one so oneshot
+        // commands don't fail with "No position loaded".
+        app.reselect_position(0);
+        app.refresh_mayflower_state();
     }
 
     let action_name = action_to_name(&action);
