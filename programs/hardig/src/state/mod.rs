@@ -36,8 +36,8 @@ pub struct PositionState {
     pub deposited_nav: u64,
     /// Total SOL borrowed (user + reinvest). Mayflower is source of truth.
     pub user_debt: u64,
-    /// Max market/floor spread ratio (in bps) allowed for reinvest.
-    pub max_reinvest_spread_bps: u16,
+    /// Reserved (was max_reinvest_spread_bps, now a runtime arg on reinvest).
+    pub _reserved_u16: u16,
     /// Last time the admin signed an instruction (unix timestamp).
     /// Used for future time-locked recovery mechanism.
     pub last_admin_activity: i64,
@@ -60,7 +60,7 @@ pub struct PositionState {
 impl PositionState {
     pub const SEED: &'static [u8] = b"position";
     // discriminator(8) + authority_seed(32) + position_pda(32) + market_config(32)
-    // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
+    // + deposited_nav(8) + user_debt(8) + _reserved(2)
     // + last_admin_activity(8) + bump(1) + authority_bump(1)
     // + current_admin_asset(32) + recovery_asset(32) + recovery_lockout_secs(8)
     // + recovery_config_locked(1) + artwork_id(1+32)

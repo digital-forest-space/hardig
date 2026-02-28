@@ -32,12 +32,11 @@ pub mod hardig {
     /// Create a new position with an admin key NFT.
     pub fn create_position(
         ctx: Context<CreatePosition>,
-        max_reinvest_spread_bps: u16,
         name: Option<String>,
         market_name: String,
         artwork_id: Option<Pubkey>,
     ) -> Result<()> {
-        instructions::create_position::handler(ctx, max_reinvest_spread_bps, name, market_name, artwork_id)
+        instructions::create_position::handler(ctx, name, market_name, artwork_id)
     }
 
     /// Authorize a new key NFT for a position (admin only).
@@ -94,8 +93,9 @@ pub mod hardig {
 
     /// Reinvest new borrow capacity into more navSOL (admin, operator, or keeper).
     /// `min_out`: minimum navSOL shares to receive from the buy (slippage protection, 0 = no check).
-    pub fn reinvest(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
-        instructions::reinvest::handler(ctx, min_out)
+    /// `max_spread_bps`: maximum market/floor spread in basis points (0 = no check).
+    pub fn reinvest(ctx: Context<Reinvest>, min_out: u64, max_spread_bps: u16) -> Result<()> {
+        instructions::reinvest::handler(ctx, min_out, max_spread_bps)
     }
 
     /// Nominate a new protocol admin (current admin only). The nominated key

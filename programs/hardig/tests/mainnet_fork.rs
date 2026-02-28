@@ -192,7 +192,7 @@ fn ix_create_collection(admin: &Pubkey) -> (Instruction, Keypair) {
     (ix, collection_kp)
 }
 
-fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16, collection: &Pubkey) -> Instruction {
+fn ix_create_position(admin: &Pubkey, asset: &Pubkey, collection: &Pubkey) -> Instruction {
     let (pos_pda, _) =
         Pubkey::find_program_address(&[PositionState::SEED, asset.as_ref()], &program_id());
     let (prog_pda, _) = authority_pda(asset);
@@ -203,7 +203,6 @@ fn ix_create_position(admin: &Pubkey, asset: &Pubkey, spread_bps: u16, collectio
     let (log_pda, _) = mayflower::derive_log_account();
 
     let mut data = sighash("create_position");
-    data.extend_from_slice(&spread_bps.to_le_bytes());
     // name: Option<String> = None
     data.push(0);
     // market_name: String = "navSOL"
@@ -427,6 +426,7 @@ fn ix_reinvest_with_cpi(
 
     let mut data = sighash("reinvest");
     data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0
+    data.extend_from_slice(&500u16.to_le_bytes()); // max_spread_bps = 5%
 
     Instruction::new_with_bytes(
         program_id(),
@@ -493,7 +493,6 @@ fn full_fork_setup(client: &RpcClient) -> ForkHarness {
         &[ix_create_position(
             &admin.pubkey(),
             &admin_asset.pubkey(),
-            500, // max_reinvest_spread_bps
             &collection,
         )],
         &[&admin, &admin_asset],
@@ -542,7 +541,6 @@ fn test_mainnet_fork_init_protocol_and_position() {
 
     let pos = get_position(&client, &harness.position_pda);
     assert_eq!(pos.authority_seed, harness.admin_asset.pubkey());
-    assert_eq!(pos.max_reinvest_spread_bps, 500);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
     assert!(pos.last_admin_activity > 0);

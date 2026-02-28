@@ -13,7 +13,7 @@ use anchor_lang::AccountDeserialize;
 use hardig::mayflower::{
     self, DEFAULT_FEE_VAULT, DEFAULT_MARKET_BASE_VAULT, DEFAULT_MARKET_GROUP, DEFAULT_MARKET_META,
     DEFAULT_MARKET_NAV_VAULT, DEFAULT_MAYFLOWER_MARKET, DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT,
-    MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, PP_DISCRIMINATOR,
+    MAYFLOWER_PROGRAM_ID, MAYFLOWER_TENANT, PP_DISCRIMINATOR, MARKET_DISCRIMINATOR,
 };
 use hardig::artwork::ARTWORK_RECEIPT_DISCRIMINATOR;
 use hardig::state::{
@@ -99,13 +99,14 @@ fn plant_mayflower_stubs(svm: &mut LiteSVM) {
 
     // Mutable constant addresses
     for addr in [
-        DEFAULT_MAYFLOWER_MARKET,
         DEFAULT_MARKET_BASE_VAULT,
         DEFAULT_MARKET_NAV_VAULT,
         DEFAULT_FEE_VAULT,
     ] {
         plant_account(svm, &addr, &owner, 256);
     }
+    // MayflowerMarket needs valid discriminator for floor price reads
+    plant_market_account(svm, &DEFAULT_MAYFLOWER_MARKET, &owner, 256);
 
     // Mints (owned by token program)
     for addr in [DEFAULT_NAV_SOL_MINT, DEFAULT_WSOL_MINT] {
@@ -155,6 +156,20 @@ fn plant_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usiz
 fn plant_pp_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usize) {
     let mut data = vec![0u8; size];
     data[..8].copy_from_slice(&PP_DISCRIMINATOR);
+    let account = Account {
+        lamports: 1_000_000_000,
+        data,
+        owner: *owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(*address, account).unwrap();
+}
+
+/// Plant a MayflowerMarket stub with the correct discriminator.
+fn plant_market_account(svm: &mut LiteSVM, address: &Pubkey, owner: &Pubkey, size: usize) {
+    let mut data = vec![0u8; size];
+    data[..8].copy_from_slice(&MARKET_DISCRIMINATOR);
     let account = Account {
         lamports: 1_000_000_000,
         data,
@@ -259,16 +274,14 @@ fn ix_create_collection(admin: &Pubkey) -> (Instruction, Keypair) {
 fn ix_create_position(
     admin: &Pubkey,
     asset: &Pubkey,
-    spread_bps: u16,
     collection: &Pubkey,
 ) -> Instruction {
-    ix_create_position_with_market(admin, asset, spread_bps, collection, None, "navSOL")
+    ix_create_position_with_market(admin, asset, collection, None, "navSOL")
 }
 
 fn ix_create_position_with_market(
     admin: &Pubkey,
     asset: &Pubkey,
-    spread_bps: u16,
     collection: &Pubkey,
     name: Option<&str>,
     market_name: &str,
@@ -284,7 +297,6 @@ fn ix_create_position_with_market(
     let (log_pda, _) = mayflower::derive_log_account();
 
     let mut data = sighash("create_position");
-    data.extend_from_slice(&spread_bps.to_le_bytes());
     // name: Option<String>
     match name {
         Some(n) => {
@@ -330,11 +342,10 @@ fn ix_create_position_with_market(
 fn ix_create_position_named(
     admin: &Pubkey,
     asset: &Pubkey,
-    spread_bps: u16,
     collection: &Pubkey,
     name: &str,
 ) -> Instruction {
-    ix_create_position_with_market(admin, asset, spread_bps, collection, Some(name), "navSOL")
+    ix_create_position_with_market(admin, asset, collection, Some(name), "navSOL")
 }
 
 fn ix_authorize_key(
@@ -613,12 +624,14 @@ fn ix_reinvest(
     key_asset: &Pubkey,
     position_pda: &Pubkey,
     admin_asset: &Pubkey,
+    max_spread_bps: u16,
 ) -> Instruction {
     let (program_pda, pp_pda, escrow_pda, log_pda, wsol_ata, nav_sol_ata) = mayflower_addrs(admin_asset);
     let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
 
     let mut data = sighash("reinvest");
     data.extend_from_slice(&0u64.to_le_bytes()); // min_out = 0 (no slippage check)
+    data.extend_from_slice(&max_spread_bps.to_le_bytes());
 
     Instruction::new_with_bytes(
         program_id(),
@@ -737,7 +750,6 @@ fn full_setup(svm: &mut LiteSVM) -> TestHarness {
         &[ix_create_position(
             &admin.pubkey(),
             &admin_asset.pubkey(),
-            500,
             &collection,
         )],
         &[&admin, &admin_asset],
@@ -1224,7 +1236,7 @@ fn test_reinvest_admin_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.admin.pubkey(), &h.admin_asset.pubkey(),
-        &h.position_pda, &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 0,
     );
     // Reinvest with zero capacity should succeed (early return)
     send_tx(&mut svm, &[ix], &[&h.admin]).unwrap();
@@ -1236,7 +1248,7 @@ fn test_reinvest_operator_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.operator.pubkey(), &h.operator_asset,
-        &h.position_pda, &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 0,
     );
     send_tx(&mut svm, &[ix], &[&h.operator]).unwrap();
 }
@@ -1247,7 +1259,7 @@ fn test_reinvest_keeper_ok() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.keeper.pubkey(), &h.keeper_asset,
-        &h.position_pda, &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 0,
     );
     send_tx(&mut svm, &[ix], &[&h.keeper]).unwrap();
 }
@@ -1258,7 +1270,7 @@ fn test_reinvest_depositor_denied() {
     let h = full_setup(&mut svm);
     let ix = ix_reinvest(
         &h.depositor.pubkey(), &h.depositor_asset,
-        &h.position_pda, &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 0,
     );
     assert!(send_tx(&mut svm, &[ix], &[&h.depositor]).is_err());
 }
@@ -1352,7 +1364,7 @@ fn test_wrong_position_key_rejected() {
     plant_position_stubs(&mut svm, &asset2.pubkey());
     send_tx(
         &mut svm,
-        &[ix_create_position(&admin2.pubkey(), &asset2.pubkey(), 300, &h.collection)],
+        &[ix_create_position(&admin2.pubkey(), &asset2.pubkey(), &h.collection)],
         &[&admin2, &asset2],
     )
     .unwrap();
@@ -1401,7 +1413,7 @@ fn test_create_position_and_admin_asset() {
     plant_position_stubs(&mut svm, &asset_kp.pubkey());
     send_tx(
         &mut svm,
-        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 750, &collection)],
+        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), &collection)],
         &[&admin, &asset_kp],
     )
     .unwrap();
@@ -1410,7 +1422,6 @@ fn test_create_position_and_admin_asset() {
     let (pos_pda, _) = position_pda(&asset_kp.pubkey());
     let pos = read_position(&svm, &pos_pda);
     assert_eq!(pos.authority_seed, asset_kp.pubkey());
-    assert_eq!(pos.max_reinvest_spread_bps, 750);
     assert_eq!(pos.deposited_nav, 0);
     assert_eq!(pos.user_debt, 0);
     let (mc_pda, _) = market_config_pda(&DEFAULT_NAV_SOL_MINT);
@@ -1581,7 +1592,7 @@ fn test_custom_bitmask_buy_reinvest() {
     // Custom key can reinvest
     let reinvest_ix = ix_reinvest(
         &custom_user.pubkey(), &custom_asset.pubkey(),
-        &h.position_pda, &h.admin_asset.pubkey(),
+        &h.position_pda, &h.admin_asset.pubkey(), 0,
     );
     send_tx(&mut svm, &[reinvest_ix], &[&custom_user]).unwrap();
 
@@ -2452,7 +2463,7 @@ fn test_create_position_creates_mpl_core_asset() {
     plant_position_stubs(&mut svm, &asset_kp.pubkey());
     send_tx(
         &mut svm,
-        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 500, &collection)],
+        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), &collection)],
         &[&admin, &asset_kp],
     )
     .unwrap();
@@ -2575,7 +2586,7 @@ fn test_create_position_without_collection_rejected() {
     let dummy_collection = Pubkey::new_unique();
     let result = send_tx(
         &mut svm,
-        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), 500, &dummy_collection)],
+        &[ix_create_position(&admin.pubkey(), &asset_kp.pubkey(), &dummy_collection)],
         &[&admin, &asset_kp],
     );
     assert!(result.is_err());
@@ -2606,7 +2617,6 @@ fn test_create_position_custom_name() {
         &[ix_create_position_named(
             &admin.pubkey(),
             &asset_kp.pubkey(),
-            500,
             &collection,
             "My Vault",
         )],
@@ -2671,7 +2681,6 @@ fn test_admin_key_has_market_attribute() {
         &[ix_create_position_with_market(
             &admin.pubkey(),
             &asset_kp.pubkey(),
-            500,
             &collection,
             Some("My Vault"),
             "navSOL",
@@ -2715,7 +2724,6 @@ fn test_admin_key_market_attribute_custom_value() {
         &[ix_create_position_with_market(
             &admin.pubkey(),
             &asset_kp.pubkey(),
-            500,
             &collection,
             None,
             "navETH",
@@ -2750,7 +2758,6 @@ fn test_delegated_key_has_market_and_position_attributes() {
         &[ix_create_position_with_market(
             &admin.pubkey(),
             &admin_asset.pubkey(),
-            500,
             &collection,
             Some("My Vault"),
             "navSOL",
@@ -3804,7 +3811,6 @@ fn promo_setup(svm: &mut LiteSVM) -> (Keypair, Keypair, Pubkey, Pubkey) {
         &[ix_create_position(
             &admin.pubkey(),
             &admin_asset.pubkey(),
-            500,
             &collection,
         )],
         &[&admin, &admin_asset],
@@ -4819,7 +4825,7 @@ fn plant_fake_receipt(
 }
 
 /// Build a fake ArtworkImage account data blob.
-/// Layout: disc(8) + artwork_set(32) + artist(32) + key_type(1) + permissions(1) + image_uri(4+N) + bump(1)
+/// Layout: disc(8) + artwork_set(32) + artist(32) + key_type(1) + permissions(1) + bump(1) + image_uri(4+N)
 fn build_fake_artwork_image_data(
     artwork_set: &Pubkey,
     key_type: u8,
@@ -4839,11 +4845,11 @@ fn build_fake_artwork_image_data(
     data.push(key_type);
     // permissions (1)
     data.push(permissions);
+    // bump (1) — must come before image_uri (ARTWORK_IMAGE_URI_OFFSET = 75)
+    data.push(0);
     // image_uri borsh string (4 + N)
     data.extend_from_slice(&(image_uri.len() as u32).to_le_bytes());
     data.extend_from_slice(image_uri.as_bytes());
-    // bump (1)
-    data.push(0);
     data
 }
 
@@ -4885,7 +4891,6 @@ fn artwork_image_pda(
 fn ix_create_position_with_artwork(
     admin: &Pubkey,
     asset: &Pubkey,
-    spread_bps: u16,
     collection: &Pubkey,
     artwork_id: &Pubkey,
     receipt: &Pubkey,
@@ -4903,7 +4908,6 @@ fn ix_create_position_with_artwork(
     let (log_pda, _) = mayflower::derive_log_account();
 
     let mut data = sighash("create_position");
-    data.extend_from_slice(&spread_bps.to_le_bytes());
     // name: Option<String> = None
     data.push(0);
     // market_name: String = "navSOL"
@@ -5052,7 +5056,6 @@ fn test_create_position_with_artwork_receipt() {
     let ix = ix_create_position_with_artwork(
         &admin.pubkey(),
         &admin_asset.pubkey(),
-        500,
         &collection,
         &receipt_address,
         &receipt_address,
@@ -5117,7 +5120,6 @@ fn test_create_position_with_fake_receipt_rejected() {
     let ix = ix_create_position_with_artwork(
         &admin.pubkey(),
         &admin_asset.pubkey(),
-        500,
         &collection,
         &receipt_address,
         &receipt_address,
@@ -5174,7 +5176,6 @@ fn test_create_position_with_wrong_position_seed_rejected() {
     let ix = ix_create_position_with_artwork(
         &admin.pubkey(),
         &admin_asset.pubkey(),
-        500,
         &collection,
         &receipt_address,
         &receipt_address,
@@ -5232,7 +5233,6 @@ fn test_create_position_with_deactivated_provider_rejected() {
     let ix = ix_create_position_with_artwork(
         &admin.pubkey(),
         &admin_asset.pubkey(),
-        500,
         &collection,
         &receipt_address,
         &receipt_address,

@@ -468,7 +468,7 @@ impl App {
             // Role-gated actions
             KeyCode::Char('b') if self.can_buy() => self.enter_buy(),
             KeyCode::Char('p') if self.can_repay() => self.enter_repay(),
-            KeyCode::Char('i') if self.can_reinvest() => self.build_reinvest(),
+            KeyCode::Char('i') if self.can_reinvest() => self.build_reinvest(0),
 
             // Navigate keyring
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1261,7 +1261,6 @@ impl App {
             .unwrap_or_else(|| nav_token_name(&mc.nav_mint).to_string());
 
         let mut data = sighash("create_position");
-        data.extend_from_slice(&0u16.to_le_bytes());
         data.extend_from_slice(&name_bytes);
         // Borsh String: 4-byte LE length prefix + UTF-8 bytes
         let market_name_bytes = market_name.as_bytes();
@@ -1923,7 +1922,7 @@ impl App {
         });
     }
 
-    pub fn build_reinvest(&mut self) {
+    pub fn build_reinvest(&mut self, max_spread_bps: u16) {
         let position_pda = match self.position_pda {
             Some(p) => p,
             None => {
@@ -1945,26 +1944,17 @@ impl App {
             None => { self.push_log("No market config loaded"); return; }
         };
 
-        // Slippage protection: reinvest borrows max capacity then buys navSOL.
-        // We can't easily predict the exact output here since the borrow amount
-        // depends on on-chain state at execution time. Use floor price to estimate
-        // min_out from the borrow capacity we see locally.
-        let min_out = if self.mf_floor_price > 0 && self.mf_borrow_capacity > 0 {
-            let expected_nav = (self.mf_borrow_capacity as u128)
-                .saturating_mul(1_000_000_000)
-                / (self.mf_floor_price as u128);
-            // Apply 2% slippage tolerance (wider than buy/sell since borrow capacity
-            // may shift between our read and tx execution)
-            (expected_nav * 98 / 100) as u64
-        } else {
-            0u64 // floor price or capacity unavailable; no slippage protection
-        };
+        // Reinvest slippage: pass min_out = 0 and rely on the spread check.
+        // The buy executes at market price (higher than floor), so a floor-based
+        // min_out estimate would always be too high.
+        let min_out = 0u64;
 
         let (config_pda, _) =
             Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
 
         let mut data = sighash("reinvest");
         data.extend_from_slice(&min_out.to_le_bytes());
+        data.extend_from_slice(&max_spread_bps.to_le_bytes());
 
         let accounts = vec![
             AccountMeta::new(self.keypair.pubkey(), true),          // signer
@@ -1994,7 +1984,8 @@ impl App {
         ];
 
         // Reinvest does borrow + buy CPIs in one tx — needs extra compute
-        let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+        // Mayflower's upgraded program uses ~116k for borrow + ~200k for buy
+        let compute_ix = solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(600_000);
 
         // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell/borrow)
         let create_ata_ix = create_ata_idempotent_ix(

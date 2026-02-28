@@ -792,7 +792,7 @@ fn populate_and_build(app: &mut app::App, action: &Action, markets_file: Option<
             app.build_repay();
         }
         Action::Reinvest => {
-            app.build_reinvest();
+            app.build_reinvest(0);
         }
         Action::Heartbeat => {
             app.build_heartbeat();

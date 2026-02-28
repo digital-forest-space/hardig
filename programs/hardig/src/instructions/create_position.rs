@@ -98,7 +98,7 @@ pub struct CreatePosition<'info> {
     pub mayflower_program: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name: Option<String>, market_name: String, artwork_id: Option<Pubkey>) -> Result<()> {
+pub fn handler(ctx: Context<CreatePosition>, name: Option<String>, market_name: String, artwork_id: Option<Pubkey>) -> Result<()> {
     let mc = &ctx.accounts.market_config;
 
     // --- Validate Mayflower account addresses against MarketConfig ---
@@ -246,7 +246,7 @@ pub fn handler(ctx: Context<CreatePosition>, max_reinvest_spread_bps: u16, name:
     position.market_config = ctx.accounts.market_config.key();
     position.deposited_nav = 0;
     position.user_debt = 0;
-    position.max_reinvest_spread_bps = max_reinvest_spread_bps;
+    position._reserved_u16 = 0;
     position.last_admin_activity = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;
     position.authority_bump = ctx.bumps.program_pda;

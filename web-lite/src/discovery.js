@@ -268,7 +268,7 @@ export async function discoverPosition(connection, wallet) {
     if (posInfo) {
       const data = posInfo.data;
       // Parse PositionState: discriminator(8) + admin_asset(32) + position_pda(32) + market_config(32)
-      // + deposited_nav(8) + user_debt(8) + max_reinvest_spread_bps(2)
+      // + deposited_nav(8) + user_debt(8) + _reserved(2)
       // + last_admin_activity(8) + bump(1) + authority_bump(1)
       const view = new DataView(data.buffer, data.byteOffset);
       const adminAsset = new PublicKey(data.slice(8, 40));
@@ -276,7 +276,7 @@ export async function discoverPosition(connection, wallet) {
       const mcPda = new PublicKey(data.slice(72, 104));
       const depositedNav = Number(view.getBigUint64(104, true));
       const userDebt = Number(view.getBigUint64(112, true));
-      // bytes 120-121: max_reinvest_spread_bps (unused, skip)
+      // bytes 120-121: _reserved_u16 (skip)
       const lastAdminActivity = Number(view.getBigInt64(122, true));
       const bump = data[130];
 

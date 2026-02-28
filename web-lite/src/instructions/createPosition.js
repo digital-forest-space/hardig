@@ -49,7 +49,7 @@ export async function buildCreatePosition(program, wallet, name = null, marketEn
   const [logPda] = deriveLogAccount();
 
   const ix = await program.methods
-    .createPosition(0, name, marketName)
+    .createPosition(name, marketName)
     .accounts({
       admin: wallet,
       adminAsset: adminAsset,

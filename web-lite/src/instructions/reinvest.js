@@ -47,7 +47,7 @@ export async function buildReinvest(program, wallet) {
   }
 
   const ix = await program.methods
-    .reinvest(minOut)
+    .reinvest(minOut, 0)
     .accounts({
       signer: wallet,
       keyAsset: keyAsset,

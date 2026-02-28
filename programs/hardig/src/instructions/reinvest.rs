@@ -123,7 +123,7 @@ pub struct Reinvest<'info> {
     pub log_account: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
+pub fn handler(ctx: Context<Reinvest>, min_out: u64, max_spread_bps: u16) -> Result<()> {
     validate_key(
         &ctx.accounts.signer,
         &ctx.accounts.key_asset.to_account_info(),
@@ -315,7 +315,7 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
     require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
     // Enforce reinvest spread limit
-    if ctx.accounts.position.max_reinvest_spread_bps > 0 && floor_price > 0 && shares_received > 0 {
+    if max_spread_bps > 0 && floor_price > 0 && shares_received > 0 {
         // effective_price = actual_amount * 1e9 / shares_received (lamports per share, 1e9 scaled)
         let effective_price = (actual_amount as u128)
             .checked_mul(1_000_000_000u128)
@@ -328,7 +328,7 @@ pub fn handler(ctx: Context<Reinvest>, min_out: u64) -> Result<()> {
                 .ok_or(HardigError::InsufficientFunds)?
                 / (floor_price as u128);
             require!(
-                spread_bps <= ctx.accounts.position.max_reinvest_spread_bps as u128,
+                spread_bps <= max_spread_bps as u128,
                 HardigError::ReinvestSpreadTooHigh
             );
         }

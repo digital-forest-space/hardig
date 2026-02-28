@@ -31,7 +31,7 @@ pub enum HardigError {
     InsufficientFunds,
     #[msg("Borrow amount exceeds available capacity")]
     BorrowCapacityExceeded,
-    #[msg("Market/floor spread exceeds max_reinvest_spread_bps")]
+    #[msg("Market/floor spread exceeds max_spread_bps")]
     ReinvestSpreadTooHigh,
 
     // Nirvana CPI errors

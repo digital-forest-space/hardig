@@ -8,6 +8,132 @@
   },
   "instructions": [
     {
+      "name": "accept_admin",
+      "docs": [
+        "Accept a pending admin transfer (must be called by the nominated key)."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "add_trusted_provider",
+      "docs": [
+        "Register a trusted artwork provider program (protocol admin only)."
+      ],
+      "discriminator": [
+        106,
+        77,
+        95,
+        167,
+        1,
+        175,
+        58,
+        3
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "trusted_provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  117,
+                  115,
+                  116,
+                  101,
+                  100,
+                  95,
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "program_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "program_id",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "authorize_key",
       "docs": [
         "Authorize a new key NFT for a position (admin only)."
@@ -37,8 +163,9 @@
         {
           "name": "position",
           "docs": [
-            "The position to authorize a key for."
-          ]
+            "The position to authorize a key for. Mutable to update last_admin_activity."
+          ],
+          "writable": true
         },
         {
           "name": "new_key_asset",
@@ -140,13 +267,27 @@
         {
           "name": "borrow_refill_period_slots",
           "type": "u64"
+        },
+        {
+          "name": "total_sell_limit",
+          "type": "u64"
+        },
+        {
+          "name": "total_borrow_limit",
+          "type": "u64"
+        },
+        {
+          "name": "name",
+          "type": {
+            "option": "string"
+          }
         }
       ]
     },
     {
       "name": "borrow",
       "docs": [
-        "Borrow SOL against the navSOL floor (admin only)."
+        "Borrow SOL against the navSOL floor (borrow or limited-borrow key)."
       ],
       "discriminator": [
         228,
@@ -160,7 +301,7 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "signer",
           "writable": true,
           "signer": true
         },
@@ -184,6 +325,27 @@
             "The position to borrow against."
           ],
           "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "market_config",
@@ -219,7 +381,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_asset",
+                "path": "position.authority_seed",
                 "account": "PositionState"
               }
             ]
@@ -319,6 +481,27 @@
           "writable": true
         },
         {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "market_config",
           "docs": [
             "The MarketConfig for this position's market."
@@ -353,7 +536,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_asset",
+                "path": "position.authority_seed",
                 "account": "PositionState"
               }
             ]
@@ -472,6 +655,434 @@
         {
           "name": "min_out",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_promo_key",
+      "docs": [
+        "Claim a promo key NFT from a PromoConfig (permissionless — anyone can call).",
+        "`amount`: lamports to deposit via Mayflower buy CPI (must be >= promo.min_deposit_lamports).",
+        "`min_out`: minimum navSOL shares to receive (slippage protection, 0 = no check)."
+      ],
+      "discriminator": [
+        67,
+        40,
+        211,
+        157,
+        85,
+        162,
+        243,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "claimer",
+          "docs": [
+            "The user claiming the promo key. Pays rent for ClaimReceipt + KeyState + NFT."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "promo",
+          "docs": [
+            "The PromoConfig PDA — read params, increment claims_count."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  109,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "promo.authority_seed",
+                "account": "PromoConfig"
+              },
+              {
+                "kind": "account",
+                "path": "promo.name_suffix",
+                "account": "PromoConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claim_receipt",
+          "docs": [
+            "One-per-wallet guard. Init fails if PDA already exists."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "promo"
+              },
+              {
+                "kind": "account",
+                "path": "claimer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position this promo is for. Mutable because deposited_nav updates."
+          ],
+          "writable": true
+        },
+        {
+          "name": "key_asset",
+          "docs": [
+            "The new MPL-Core asset for the key NFT."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "key_state",
+          "docs": [
+            "KeyState PDA for rate limiting."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  101,
+                  121,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "key_asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — collection address + CPI signer."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collection",
+          "docs": [
+            "The MPL-Core collection asset."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mpl_core_program",
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "market_config",
+          "docs": [
+            "The MarketConfig for this position's market."
+          ]
+        },
+        {
+          "name": "program_pda",
+          "docs": [
+            "Program PDA (authority) that owns the Mayflower PersonalPosition."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position.authority_seed",
+                "account": "PositionState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "personal_position",
+          "docs": [
+            "Mayflower PersonalPosition PDA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_shares",
+          "docs": [
+            "Mayflower user shares escrow."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_nav_sol_ata",
+          "docs": [
+            "Program PDA's navSOL ATA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_wsol_ata",
+          "docs": [
+            "Program PDA's wSOL ATA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "tenant",
+          "docs": [
+            "Mayflower tenant."
+          ]
+        },
+        {
+          "name": "market_group",
+          "docs": [
+            "Mayflower market group."
+          ]
+        },
+        {
+          "name": "market_meta",
+          "docs": [
+            "Mayflower market metadata."
+          ]
+        },
+        {
+          "name": "mayflower_market",
+          "docs": [
+            "Mayflower market."
+          ],
+          "writable": true
+        },
+        {
+          "name": "nav_sol_mint",
+          "docs": [
+            "navSOL mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "market_base_vault",
+          "docs": [
+            "Mayflower market base vault."
+          ],
+          "writable": true
+        },
+        {
+          "name": "market_nav_vault",
+          "docs": [
+            "Mayflower market nav vault."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "docs": [
+            "Mayflower fee vault."
+          ],
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "docs": [
+            "wSOL mint (baseMint for Mayflower CPI)."
+          ]
+        },
+        {
+          "name": "mayflower_program",
+          "docs": [
+            "Mayflower program."
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "log_account",
+          "docs": [
+            "Mayflower log account."
+          ],
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "min_out",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "configure_recovery",
+      "docs": [
+        "Configure a recovery key for dead-man's switch protection (admin only)."
+      ],
+      "discriminator": [
+        172,
+        122,
+        73,
+        237,
+        58,
+        153,
+        104,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_key_asset",
+          "docs": [
+            "The admin's key NFT (MPL-Core asset)."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to configure recovery for."
+          ],
+          "writable": true
+        },
+        {
+          "name": "recovery_asset",
+          "docs": [
+            "The new MPL-Core asset for the recovery key. Created by MPL-Core CPI."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "target_wallet",
+          "docs": [
+            "The wallet that will hold the recovery key (should differ from admin)."
+          ]
+        },
+        {
+          "name": "old_recovery_asset",
+          "docs": [
+            "Existing recovery key asset to burn (if replacing). Optional."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — needed to read the collection address and sign."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collection",
+          "docs": [
+            "The MPL-Core collection asset for Härdig key NFTs."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mpl_core_program",
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "lockout_secs",
+          "type": "i64"
+        },
+        {
+          "name": "lock_config",
+          "type": "bool"
+        },
+        {
+          "name": "name",
+          "type": {
+            "option": "string"
+          }
         }
       ]
     },
@@ -826,10 +1437,312 @@
       ],
       "args": [
         {
-          "name": "max_reinvest_spread_bps",
-          "type": "u16"
+          "name": "name",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "market_name",
+          "type": "string"
+        },
+        {
+          "name": "artwork_id",
+          "type": {
+            "option": "pubkey"
+          }
         }
       ]
+    },
+    {
+      "name": "create_promo",
+      "docs": [
+        "Create a PromoConfig PDA for a position (admin only)."
+      ],
+      "discriminator": [
+        135,
+        231,
+        68,
+        194,
+        63,
+        31,
+        192,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_key_asset",
+          "docs": [
+            "The admin's key NFT (MPL-Core asset)."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position this promo is for."
+          ]
+        },
+        {
+          "name": "promo",
+          "docs": [
+            "The PromoConfig PDA to create. Seeds include name_suffix to allow multiple promos per position."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  109,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position.authority_seed",
+                "account": "PositionState"
+              },
+              {
+                "kind": "arg",
+                "path": "name_suffix"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name_suffix",
+          "type": "string"
+        },
+        {
+          "name": "permissions",
+          "type": "u8"
+        },
+        {
+          "name": "borrow_capacity",
+          "type": "u64"
+        },
+        {
+          "name": "borrow_refill_period",
+          "type": "u64"
+        },
+        {
+          "name": "sell_capacity",
+          "type": "u64"
+        },
+        {
+          "name": "sell_refill_period",
+          "type": "u64"
+        },
+        {
+          "name": "total_borrow_limit",
+          "type": "u64"
+        },
+        {
+          "name": "total_sell_limit",
+          "type": "u64"
+        },
+        {
+          "name": "min_deposit_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "max_claims",
+          "type": "u32"
+        },
+        {
+          "name": "initial_fill_bps",
+          "type": "u16"
+        },
+        {
+          "name": "image_uri",
+          "type": "string"
+        },
+        {
+          "name": "market_name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "execute_recovery",
+      "docs": [
+        "Execute recovery after lockout period has expired (recovery key holder only)."
+      ],
+      "discriminator": [
+        203,
+        133,
+        133,
+        228,
+        153,
+        121,
+        182,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "recovery_holder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "recovery_key_asset",
+          "docs": [
+            "The recovery key NFT (MPL-Core asset). Mutable because it gets burned."
+          ],
+          "writable": true
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to recover."
+          ],
+          "writable": true
+        },
+        {
+          "name": "old_admin_asset",
+          "docs": [
+            "The old admin's MPL-Core asset (to burn)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "new_admin_asset",
+          "docs": [
+            "The new MPL-Core asset for the new admin key. Created by MPL-Core CPI."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — needed to sign as collection authority."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "collection",
+          "docs": [
+            "The MPL-Core collection asset for Härdig key NFTs."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mpl_core_program",
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "heartbeat",
+      "docs": [
+        "No-op liveness proof. Updates last_admin_activity to prove admin is active."
+      ],
+      "discriminator": [
+        202,
+        104,
+        56,
+        6,
+        240,
+        170,
+        63,
+        134
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "admin_key_asset",
+          "docs": [
+            "The admin's key NFT (MPL-Core asset). Must be the current admin key."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to update activity for."
+          ],
+          "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "initialize_protocol",
@@ -933,7 +1846,8 @@
       "name": "reinvest",
       "docs": [
         "Reinvest new borrow capacity into more navSOL (admin, operator, or keeper).",
-        "`min_out`: minimum navSOL shares to receive from the buy (slippage protection, 0 = no check)."
+        "`min_out`: minimum navSOL shares to receive from the buy (slippage protection, 0 = no check).",
+        "`max_spread_bps`: maximum market/floor spread in basis points (0 = no check)."
       ],
       "discriminator": [
         107,
@@ -971,6 +1885,27 @@
           ]
         },
         {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -998,7 +1933,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_asset",
+                "path": "position.authority_seed",
                 "account": "PositionState"
               }
             ]
@@ -1079,8 +2014,88 @@
         {
           "name": "min_out",
           "type": "u64"
+        },
+        {
+          "name": "max_spread_bps",
+          "type": "u16"
         }
       ]
+    },
+    {
+      "name": "remove_trusted_provider",
+      "docs": [
+        "Deactivate a trusted artwork provider program (protocol admin only)."
+      ],
+      "discriminator": [
+        91,
+        89,
+        161,
+        190,
+        240,
+        45,
+        164,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "trusted_provider",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  117,
+                  115,
+                  116,
+                  101,
+                  100,
+                  95,
+                  112,
+                  114,
+                  111,
+                  118,
+                  105,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "trusted_provider.program_id",
+                "account": "TrustedProvider"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "repay",
@@ -1117,6 +2132,27 @@
           "writable": true
         },
         {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "market_config",
           "docs": [
             "The MarketConfig for this position's market."
@@ -1150,7 +2186,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_asset",
+                "path": "position.authority_seed",
                 "account": "PositionState"
               }
             ]
@@ -1233,8 +2269,9 @@
         {
           "name": "position",
           "docs": [
-            "The position."
-          ]
+            "The position. Mutable to update last_admin_activity."
+          ],
+          "writable": true
         },
         {
           "name": "target_asset",
@@ -1291,9 +2328,75 @@
       "args": []
     },
     {
+      "name": "set_position_artwork",
+      "docs": [
+        "Set or clear custom artwork on a position (admin key required).",
+        "When setting, pass receipt + TrustedProvider PDA as remaining_accounts."
+      ],
+      "discriminator": [
+        153,
+        38,
+        208,
+        173,
+        10,
+        201,
+        104,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "admin_key_asset",
+          "docs": [
+            "The admin's key NFT (MPL-Core asset)."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position to update artwork for. Mutable to update artwork_id + last_admin_activity."
+          ],
+          "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — needed to read the collection address for validate_key."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "artwork_id",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
       "name": "transfer_admin",
       "docs": [
-        "Transfer protocol admin rights to a new pubkey (current admin only)."
+        "Nominate a new protocol admin (current admin only). The nominated key",
+        "must call `accept_admin` to complete the transfer."
       ],
       "discriminator": [
         42,
@@ -1338,9 +2441,107 @@
       ]
     },
     {
+      "name": "update_promo",
+      "discriminator": [
+        27,
+        234,
+        19,
+        191,
+        30,
+        2,
+        27,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "admin_key_asset",
+          "docs": [
+            "The admin's key NFT (MPL-Core asset)."
+          ]
+        },
+        {
+          "name": "position",
+          "docs": [
+            "The position this promo belongs to."
+          ]
+        },
+        {
+          "name": "promo",
+          "docs": [
+            "The PromoConfig PDA to update."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  109,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "position.authority_seed",
+                "account": "PositionState"
+              },
+              {
+                "kind": "account",
+                "path": "promo.name_suffix",
+                "account": "PromoConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "active",
+          "type": {
+            "option": "bool"
+          }
+        },
+        {
+          "name": "max_claims",
+          "type": {
+            "option": "u32"
+          }
+        }
+      ]
+    },
+    {
       "name": "withdraw",
       "docs": [
-        "Withdraw SOL/navSOL from the position (admin only).",
+        "Withdraw SOL/navSOL from the position (sell or limited-sell key).",
         "`min_out`: minimum wSOL to receive (slippage protection, 0 = no check)."
       ],
       "discriminator": [
@@ -1355,7 +2556,7 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "signer",
           "writable": true,
           "signer": true
         },
@@ -1379,6 +2580,27 @@
             "The position to withdraw from."
           ],
           "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config PDA — provides collection pubkey for key validation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "market_config",
@@ -1414,7 +2636,7 @@
               },
               {
                 "kind": "account",
-                "path": "position.admin_asset",
+                "path": "position.authority_seed",
                 "account": "PositionState"
               }
             ]
@@ -1494,6 +2716,19 @@
   ],
   "accounts": [
     {
+      "name": "ClaimReceipt",
+      "discriminator": [
+        223,
+        233,
+        11,
+        229,
+        124,
+        165,
+        207,
+        28
+      ]
+    },
+    {
       "name": "KeyState",
       "discriminator": [
         210,
@@ -1522,14 +2757,27 @@
     {
       "name": "PositionState",
       "discriminator": [
-        110,
-        231,
-        174,
-        81,
-        107,
-        90,
-        24,
-        208
+        154,
+        47,
+        151,
+        70,
+        8,
+        128,
+        206,
+        231
+      ]
+    },
+    {
+      "name": "PromoConfig",
+      "discriminator": [
+        125,
+        147,
+        195,
+        173,
+        142,
+        167,
+        11,
+        213
       ]
     },
     {
@@ -1543,6 +2791,19 @@
         179,
         215,
         209
+      ]
+    },
+    {
+      "name": "TrustedProvider",
+      "discriminator": [
+        168,
+        96,
+        96,
+        192,
+        220,
+        124,
+        6,
+        204
       ]
     }
   ],
@@ -1610,7 +2871,7 @@
     {
       "code": 6012,
       "name": "ReinvestSpreadTooHigh",
-      "msg": "Market/floor spread exceeds max_reinvest_spread_bps"
+      "msg": "Market/floor spread exceeds max_spread_bps"
     },
     {
       "code": 6013,
@@ -1634,36 +2895,144 @@
     },
     {
       "code": 6017,
+      "name": "TotalLimitExceeded",
+      "msg": "Total lifetime limit exceeded"
+    },
+    {
+      "code": 6018,
       "name": "CollectionNotCreated",
       "msg": "Collection has not been created yet"
     },
     {
-      "code": 6018,
+      "code": 6019,
       "name": "CollectionAlreadyCreated",
       "msg": "Collection has already been created"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "AlreadyMigrated",
       "msg": "Config account already has the expected size"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "InvalidNftMint",
       "msg": "Invalid NFT mint"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "InvalidPositionPda",
       "msg": "Invalid position PDA"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "PositionAlreadyExists",
       "msg": "Position already exists for this admin key"
+    },
+    {
+      "code": 6024,
+      "name": "NameTooLong",
+      "msg": "Custom name suffix exceeds 32 characters"
+    },
+    {
+      "code": 6025,
+      "name": "ImageUriTooLong",
+      "msg": "Image URI exceeds maximum allowed length"
+    },
+    {
+      "code": 6026,
+      "name": "RecoveryNotConfigured",
+      "msg": "No recovery key is configured for this position"
+    },
+    {
+      "code": 6027,
+      "name": "RecoveryLockoutNotExpired",
+      "msg": "Admin has been active within the lockout period"
+    },
+    {
+      "code": 6028,
+      "name": "RecoveryConfigLocked",
+      "msg": "Recovery configuration is locked and cannot be changed"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidLockout",
+      "msg": "Lockout period must be greater than zero"
+    },
+    {
+      "code": 6030,
+      "name": "OldRecoveryAssetRequired",
+      "msg": "Must provide old_recovery_asset to replace an existing recovery key"
+    },
+    {
+      "code": 6031,
+      "name": "MaxClaimsBelowCurrent",
+      "msg": "Max claims cannot be less than current claims count"
+    },
+    {
+      "code": 6032,
+      "name": "PromoInactive",
+      "msg": "Promo is not active"
+    },
+    {
+      "code": 6033,
+      "name": "PromoMaxClaimsReached",
+      "msg": "Promo has reached maximum claims"
+    },
+    {
+      "code": 6034,
+      "name": "InvalidInitialFill",
+      "msg": "Initial fill must be 0-10000 basis points"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidArtworkReceipt",
+      "msg": "Invalid artwork receipt account (bad discriminator, length, or data)"
+    },
+    {
+      "code": 6036,
+      "name": "UntrustedProvider",
+      "msg": "Artwork receipt is not owned by a trusted provider program"
+    },
+    {
+      "code": 6037,
+      "name": "ArtworkReceiptPositionMismatch",
+      "msg": "Artwork receipt position_seed does not match this position"
     }
   ],
   "types": [
+    {
+      "name": "ClaimReceipt",
+      "docs": [
+        "One-time claim receipt preventing double-claims.",
+        "PDA seeds = [b\"claim\", promo_pda, claimer_pubkey]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "claimer",
+            "docs": [
+              "The wallet that claimed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "promo",
+            "docs": [
+              "The PromoConfig PDA this receipt belongs to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for this PDA."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "KeyState",
       "docs": [
@@ -1673,6 +3042,14 @@
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "authority_seed",
+            "docs": [
+              "The position's authority_seed this key belongs to.",
+              "First field after discriminator (offset 8) for memcmp filtering."
+            ],
+            "type": "pubkey"
+          },
           {
             "name": "asset",
             "docs": [
@@ -1708,6 +3085,34 @@
                 "name": "RateBucket"
               }
             }
+          },
+          {
+            "name": "total_sell_limit",
+            "docs": [
+              "Optional lifetime sell cap (0 = no cap). Units: navSOL shares."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_sold",
+            "docs": [
+              "Accumulator of total navSOL shares sold via this key."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_borrow_limit",
+            "docs": [
+              "Optional lifetime borrow cap (0 = no cap). Units: lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_borrowed",
+            "docs": [
+              "Accumulator of total lamports borrowed via this key."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1791,15 +3196,15 @@
       "name": "PositionState",
       "docs": [
         "A navSOL position controlled by an NFT keyring.",
-        "PDA seeds = [b\"position\", admin_asset]."
+        "PDA seeds = [b\"position\", authority_seed]."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "admin_asset",
+            "name": "authority_seed",
             "docs": [
-              "The admin key NFT (MPL-Core asset pubkey, master key, only one per position)."
+              "Permanent PDA seed (first admin asset pubkey). Never changes after creation."
             ],
             "type": "pubkey"
           },
@@ -1832,9 +3237,9 @@
             "type": "u64"
           },
           {
-            "name": "max_reinvest_spread_bps",
+            "name": "_reserved_u16",
             "docs": [
-              "Max market/floor spread ratio (in bps) allowed for reinvest."
+              "Reserved (was max_reinvest_spread_bps, now a runtime arg on reinvest)."
             ],
             "type": "u16"
           },
@@ -1856,7 +3261,175 @@
           {
             "name": "authority_bump",
             "docs": [
-              "Bump seed for the per-position authority PDA (seeds = [b\"authority\", admin_asset])."
+              "Bump seed for the per-position authority PDA (seeds = [b\"authority\", authority_seed])."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "current_admin_asset",
+            "docs": [
+              "The current admin key NFT (MPL-Core asset). Updated on recovery."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "recovery_asset",
+            "docs": [
+              "The recovery key NFT (MPL-Core asset). Pubkey::default() = no recovery configured."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "recovery_lockout_secs",
+            "docs": [
+              "Inactivity threshold in seconds before recovery can execute."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "recovery_config_locked",
+            "docs": [
+              "If true, recovery config cannot be changed."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "artwork_id",
+            "docs": [
+              "Optional artwork set ID for custom key visuals. None = default artwork."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PromoConfig",
+      "docs": [
+        "Per-position promo configuration.",
+        "PDA seeds = [b\"promo\", authority_seed, name_suffix]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority_seed",
+            "docs": [
+              "Which position this promo is for (the position's authority_seed)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "permissions",
+            "docs": [
+              "Key permissions bitmask granted to claimed promo keys."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "borrow_capacity",
+            "docs": [
+              "LimitedBorrow bucket capacity (lamports)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "borrow_refill_period",
+            "docs": [
+              "LimitedBorrow refill period (slots)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sell_capacity",
+            "docs": [
+              "LimitedSell bucket capacity (0 if N/A)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sell_refill_period",
+            "docs": [
+              "LimitedSell refill period (0 if N/A)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_deposit_lamports",
+            "docs": [
+              "Suggested deposit amount in lamports (frontend reads)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_claims",
+            "docs": [
+              "Max total keys that can be claimed (0 = unlimited)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "claims_count",
+            "docs": [
+              "Current number of claimed keys."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "active",
+            "docs": [
+              "Admin can pause/resume claiming."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "total_borrow_limit",
+            "docs": [
+              "Optional lifetime borrow cap for claimed keys (0 = no cap). Units: lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_sell_limit",
+            "docs": [
+              "Optional lifetime sell cap for claimed keys (0 = no cap). Units: navSOL shares."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "initial_fill_bps",
+            "docs": [
+              "Initial bucket fill level in basis points (0 = empty, 10000 = full)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "name_suffix",
+            "docs": [
+              "NFT name suffix (e.g. \"Promo Borrow\")."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "image_uri",
+            "docs": [
+              "Custom NFT image URL (max 128 bytes)."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "market_name",
+            "docs": [
+              "Market name for NFT metadata (e.g. \"navSOL\")."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for this PDA."
             ],
             "type": "u8"
           }
@@ -1882,6 +3455,13 @@
             "name": "collection",
             "docs": [
               "The MPL-Core collection for all Härdig key NFTs (Pubkey::default() = not yet created)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Pending admin for two-step transfer (Pubkey::default() = no pending transfer)."
             ],
             "type": "pubkey"
           },
@@ -1930,6 +3510,46 @@
               "Slot of last update."
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TrustedProvider",
+      "docs": [
+        "Marker PDA for a trusted artwork provider program.",
+        "PDA seeds = [b\"trusted_provider\", program_id]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program_id",
+            "docs": [
+              "The trusted provider program ID."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "added_by",
+            "docs": [
+              "Protocol admin who added it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "active",
+            "docs": [
+              "Can be deactivated without deleting."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed."
+            ],
+            "type": "u8"
           }
         ]
       }
