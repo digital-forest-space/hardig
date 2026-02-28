@@ -1563,18 +1563,9 @@ impl App {
             None => { self.push_log("No market config loaded"); return; }
         };
 
-        // Slippage protection: estimate min_out using floor price.
-        // buy: input SOL lamports -> output navSOL lamports
-        // expected_nav = amount * 1e9 / floor_price, then apply 1% slippage
-        let min_out = if self.mf_floor_price > 0 {
-            let expected = (amount as u128)
-                .saturating_mul(1_000_000_000)
-                / (self.mf_floor_price as u128);
-            // Apply 1% slippage tolerance (99% of expected)
-            (expected * 99 / 100) as u64
-        } else {
-            0u64 // floor price unavailable; no slippage protection
-        };
+        // min_out = 0: floor price != market price, so floor-based estimates
+        // are always too optimistic (buy executes at market price > floor).
+        let min_out = 0u64;
 
         let (config_pda, _) =
             Pubkey::find_program_address(&[ProtocolConfig::SEED], &hardig::ID);
@@ -1610,10 +1601,17 @@ impl App {
         ];
 
         // Ensure PDA's wSOL ATA exists (may have been closed by a previous sell)
-        let create_ata_ix = create_ata_idempotent_ix(
+        let create_wsol_ata_ix = create_ata_idempotent_ix(
             &self.keypair.pubkey(),
             &self.program_pda,
             &mc.base_mint,
+        );
+
+        // Ensure PDA's navSOL ATA exists (Mayflower mints shares into it)
+        let create_nav_ata_ix = create_ata_idempotent_ix(
+            &self.keypair.pubkey(),
+            &self.program_pda,
+            &mc.nav_mint,
         );
 
         // Wrap SOL → wSOL ATA, then sync_native
@@ -1638,7 +1636,7 @@ impl App {
                     permissions_name(self.my_permissions.unwrap_or(0))
                 ),
             ],
-            instructions: vec![create_ata_ix, transfer_ix, sync_ix, buy_ix],
+            instructions: vec![create_wsol_ata_ix, create_nav_ata_ix, transfer_ix, sync_ix, buy_ix],
             extra_signers: vec![],
         });
     }
