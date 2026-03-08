@@ -19,7 +19,7 @@ use crate::state::{
 use super::super::{format_sol_amount, metadata_uri, permission_attributes, slots_to_duration};
 
 #[derive(Accounts)]
-#[instruction(amount: u64, min_out: u64)]
+#[instruction(amount: u64)]
 pub struct ClaimPromoKey<'info> {
     /// The user claiming the promo key. Pays rent for ClaimReceipt + KeyState + NFT.
     #[account(mut)]
@@ -209,7 +209,7 @@ pub struct ClaimPromoKey<'info> {
     pub log_account: UncheckedAccount<'info>,
 }
 
-pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result<()> {
+pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64) -> Result<()> {
     let promo = &ctx.accounts.promo;
 
     // 1. Check promo is active
@@ -471,9 +471,6 @@ pub fn handler(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result
         let shares_received = shares_after
             .checked_sub(shares_before)
             .ok_or(HardigError::InsufficientFunds)?;
-
-        // Slippage check: verify navSOL shares received >= min_out
-        require!(shares_received >= min_out, HardigError::SlippageExceeded);
 
         ctx.accounts.position.deposited_nav = ctx
             .accounts

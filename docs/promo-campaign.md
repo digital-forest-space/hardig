@@ -218,9 +218,9 @@ Handler:
 #### Deposit via Embedded Buy CPI
 
 The claim instruction includes a Mayflower buy CPI directly. The `amount`
-and `min_out` parameters control the deposit and slippage protection:
+parameter controls the deposit:
 
-    claim_promo_key(amount: u64, min_out: u64)
+    claim_promo_key(amount: u64)
 
 When `amount > 0`, the handler performs a Mayflower buy CPI using the
 position's program PDA as signer, converting the deposited SOL into navSOL.

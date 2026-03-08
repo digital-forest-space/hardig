@@ -3723,18 +3723,6 @@ fn ix_claim_promo_key(
     collection: &Pubkey,
     amount: u64,
 ) -> Instruction {
-    ix_claim_promo_key_with_min_out(claimer, promo_pda_key, admin_asset, key_asset, collection, amount, 0)
-}
-
-fn ix_claim_promo_key_with_min_out(
-    claimer: &Pubkey,
-    promo_pda_key: &Pubkey,
-    admin_asset: &Pubkey,
-    key_asset: &Pubkey,
-    collection: &Pubkey,
-    amount: u64,
-    min_out: u64,
-) -> Instruction {
     let (pos_pda, _) = position_pda(admin_asset);
     let (claim_receipt, _) = claim_receipt_pda(promo_pda_key, claimer);
     let (ks_pda, _) = key_state_pda(key_asset);
@@ -3744,7 +3732,6 @@ fn ix_claim_promo_key_with_min_out(
 
     let mut data = sighash("claim_promo_key");
     data.extend_from_slice(&amount.to_le_bytes());
-    data.extend_from_slice(&min_out.to_le_bytes());
 
     Instruction::new_with_bytes(
         program_id(),
@@ -4586,56 +4573,8 @@ fn test_claim_promo_deposited_nav_updated() {
 }
 
 // ---------------------------------------------------------------------------
-// 14. test_claim_promo_slippage_rejected
 // ---------------------------------------------------------------------------
-
-#[test]
-fn test_claim_promo_slippage_rejected() {
-    let (mut svm, _) = setup();
-    let (admin, admin_asset, _pos_pda, collection) = promo_setup(&mut svm);
-
-    let authority_seed = admin_asset.pubkey();
-    let name_suffix = "Slippage";
-
-    // Create promo
-    let ix = ix_create_promo(
-        &admin.pubkey(),
-        &admin_asset.pubkey(),
-        name_suffix,
-        PERM_BUY,
-        0, 0, 0, 0,
-        0, 0,
-        0,
-        100,
-        10_000, // initial_fill_bps: 100% full
-        "",
-        "navSOL",
-    );
-    send_tx(&mut svm, &[ix], &[&admin]).unwrap();
-
-    let (pda, _) = promo_pda(&authority_seed, name_suffix);
-
-    // Claim with amount = 1_000_000 but min_out = 1_000_001 (impossible)
-    let claimer = Keypair::new();
-    svm.airdrop(&claimer.pubkey(), 5_000_000_000).unwrap();
-    let key_asset = Keypair::new();
-    let amount: u64 = 1_000_000;
-
-    let ix_claim = ix_claim_promo_key_with_min_out(
-        &claimer.pubkey(),
-        &pda,
-        &admin_asset.pubkey(),
-        &key_asset.pubkey(),
-        &collection,
-        amount,
-        amount + 1, // min_out higher than what mock returns (1:1)
-    );
-    let result = send_tx(&mut svm, &[ix_claim], &[&claimer, &key_asset]);
-    assert!(result.is_err(), "claim with min_out exceeding actual output should fail with SlippageExceeded");
-}
-
-// ---------------------------------------------------------------------------
-// 15. test_update_promo_non_admin_rejected
+// 14. test_update_promo_non_admin_rejected
 // ---------------------------------------------------------------------------
 
 #[test]

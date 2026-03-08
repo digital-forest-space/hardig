@@ -159,9 +159,8 @@ pub mod hardig {
 
     /// Claim a promo key NFT from a PromoConfig (permissionless — anyone can call).
     /// `amount`: lamports to deposit via Mayflower buy CPI (must be >= promo.min_deposit_lamports).
-    /// `min_out`: minimum navSOL shares to receive (slippage protection, 0 = no check).
-    pub fn claim_promo_key(ctx: Context<ClaimPromoKey>, amount: u64, min_out: u64) -> Result<()> {
-        instructions::claim_promo_key::handler(ctx, amount, min_out)
+    pub fn claim_promo_key(ctx: Context<ClaimPromoKey>, amount: u64) -> Result<()> {
+        instructions::claim_promo_key::handler(ctx, amount)
     }
 
     /// Register a trusted artwork provider program (protocol admin only).

@@ -662,8 +662,7 @@
       "name": "claim_promo_key",
       "docs": [
         "Claim a promo key NFT from a PromoConfig (permissionless — anyone can call).",
-        "`amount`: lamports to deposit via Mayflower buy CPI (must be >= promo.min_deposit_lamports).",
-        "`min_out`: minimum navSOL shares to receive (slippage protection, 0 = no check)."
+        "`amount`: lamports to deposit via Mayflower buy CPI (must be >= promo.min_deposit_lamports)."
       ],
       "discriminator": [
         67,
@@ -968,10 +967,6 @@
       "args": [
         {
           "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "min_out",
           "type": "u64"
         }
       ]

@@ -292,7 +292,7 @@ Permissions are stored as a single `u8` bitmask on each key NFT's MPL-Core `Attr
 | `accept_admin` | Pending admin | -- | Accept a pending protocol admin transfer |
 | `create_promo` | `PERM_MANAGE_KEYS` | `name_suffix`, `permissions`, rate-limit params, `total_borrow_limit`, `total_sell_limit`, `min_deposit_lamports`, `max_claims`, `initial_fill_bps`, `image_uri`, `market_name` | Create a promotional campaign for a position |
 | `update_promo` | `PERM_MANAGE_KEYS` | `active: Option<bool>`, `max_claims: Option<u32>` | Toggle promo active state or update max claims |
-| `claim_promo_key` | Any signer | `amount: u64`, `min_out: u64` | Claim a promo key NFT (deposits SOL via Mayflower buy) |
+| `claim_promo_key` | Any signer | `amount: u64` | Claim a promo key NFT (deposits SOL via Mayflower buy) |
 | `add_trusted_provider` | Protocol admin | `program_id: Pubkey` | Register a trusted artwork provider program |
 | `remove_trusted_provider` | Protocol admin | -- | Deactivate a trusted artwork provider (closes PDA) |
 | `set_position_artwork` | `PERM_MANAGE_KEYS` | `artwork_id: Option<Pubkey>` | Set or clear custom artwork on a position (affects future keys) |
@@ -468,6 +468,42 @@ In addition to rate buckets, keys may have optional lifetime caps:
 - **`total_borrowed`** (offset 161): Accumulator of lamports borrowed so far.
 
 When a lifetime limit is nonzero and the accumulator would exceed it, the transaction fails with `TotalLimitExceeded`. Both rate-bucket and total-limit checks are enforced post-CPI using the actual delta (not the requested amount).
+
+### Effective Borrow Capacity for a Rate-Limited Key
+
+A rate-limited key (e.g., a promo-claimed key with `PERM_LIMITED_BORROW`) is constrained by three independent caps. The effective borrow capacity is the minimum of all three:
+
+1. **Position borrow capacity** — how much the underlying Mayflower position can actually borrow (see "Computing Borrow Capacity" above).
+2. **Bucket allowance** — how many tokens the key's borrow bucket currently has (refills over time).
+3. **Lifetime remaining** — if `total_borrow_limit > 0`, the difference `total_borrow_limit - total_borrowed`.
+
+```js
+import { getKeyAllowance } from './rateLimits.js';
+
+// 1. Position-level capacity (from Mayflower PersonalPosition + Market)
+const floorValue = BigInt(depositedShares) * BigInt(floorPriceLamports) / BigInt(1_000_000_000);
+const positionCapacity = Number(floorValue - BigInt(debt));
+
+// 2. Bucket allowance (from KeyState)
+const allowance = await getKeyAllowance(connection, assetPubkey);
+const bucketAvailable = allowance.borrowAvailable;
+
+// 3. Lifetime remaining (from KeyState)
+const keyStateInfo = await connection.getAccountInfo(keyStatePda);
+const ksView = new DataView(keyStateInfo.data.buffer, keyStateInfo.data.byteOffset);
+const totalBorrowLimit  = Number(ksView.getBigUint64(153, true));
+const totalBorrowed     = Number(ksView.getBigUint64(161, true));
+const lifetimeRemaining = totalBorrowLimit > 0
+  ? totalBorrowLimit - totalBorrowed
+  : Infinity;
+
+// Effective = min of all three, clamped to 0
+const effectiveBorrowCapacity = Math.max(0,
+  Math.min(positionCapacity, bucketAvailable, lifetimeRemaining)
+);
+```
+
+This differs from admin/operator keys which have unrestricted `PERM_BORROW` — those are limited only by the position-level Mayflower capacity.
 
 ### Units
 
