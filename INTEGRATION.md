@@ -774,6 +774,64 @@ An immutable ALT cannot be deactivated or extended. This prevents a compromised 
 - Per-position accounts (authority PDA, PersonalPosition, token accounts) can be added to a second ALT if needed, but the static ALT alone typically provides enough savings.
 - CPI depth: if your program calls Hardig via CPI, and Hardig calls Mayflower, that is 2 CPI levels. Solana allows up to 4 levels of CPI depth.
 
+## Local Testing Setup
+
+After building and starting a local validator with cloned Mayflower accounts (`./scripts/start-mainnet-fork.sh --reset`), the local environment is ready for `create-position`, `buy`, `borrow`, and all other non-admin instructions.
+
+The fork script clones the `ProtocolConfig`, MPL-Core collection, and `MarketConfig` accounts from mainnet, so no setup instructions are needed. The cloned `ProtocolConfig` retains the mainnet admin key, which means admin-only instructions (`create-collection`, `create-market-config`, etc.) cannot be called with a local keypair — but this is fine because the cloned state already satisfies their purpose.
+
+### Fresh-State Testing (Without Mainnet Clone)
+
+If you need a clean environment with your own admin key (e.g., to test admin instructions or start from scratch), run three one-time setup instructions:
+
+#### 1. Initialize the Protocol
+
+Creates the singleton `ProtocolConfig` PDA. The signing keypair becomes the protocol admin.
+
+```sh
+cargo run -p hardig-tui -- <KEYPAIR> init-protocol
+```
+
+The `--cluster` flag defaults to `localnet` (`http://localhost:8899`), so it can be omitted for local testing.
+
+#### 2. Create the Collection
+
+Creates the MPL-Core collection that all key NFTs belong to. Requires the protocol admin keypair. The `--uri` should point to a collection metadata JSON; for local testing any valid URI works (e.g. a placeholder or an Arweave link).
+
+```sh
+cargo run -p hardig-tui -- <KEYPAIR> create-collection --uri "https://example.com/collection.json"
+```
+
+Both `init-protocol` and `create-collection` are idempotent — rerunning them when the state already exists prints a message and exits without sending a transaction.
+
+#### 3. Create a Market Config
+
+Registers a Mayflower market so positions can be created against it. The `--market` flag resolves market addresses from a JSON file or API:
+
+```sh
+# From a local markets file
+cargo run -p hardig-tui -- <KEYPAIR> --markets-file markets.json create-market-config --market navSOL
+
+# From the Mayflower API
+cargo run -p hardig-tui -- <KEYPAIR> create-market-config --market navSOL --markets-url https://api.example.com/markets
+```
+
+Alternatively, pass all 8 market pubkeys explicitly:
+
+```sh
+cargo run -p hardig-tui -- <KEYPAIR> create-market-config \
+    --nav-mint <NAV_MINT> \
+    --base-mint <BASE_MINT> \
+    --market-group <MARKET_GROUP> \
+    --market-meta <MARKET_META> \
+    --mayflower-market <MAYFLOWER_MARKET> \
+    --market-base-vault <MARKET_BASE_VAULT> \
+    --market-nav-vault <MARKET_NAV_VAULT> \
+    --fee-vault <FEE_VAULT>
+```
+
+After these three steps the local environment is ready for all instructions including admin operations.
+
 ## External Dependencies
 
 | Dependency | Program ID | Purpose |
