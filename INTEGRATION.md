@@ -691,6 +691,89 @@ The `HardigError` enum defines all program errors. The Anchor IDL maps these to 
 
 Full error enum: `programs/hardig/src/errors.rs`
 
+## Transaction Size and Address Lookup Tables
+
+Hardig instructions involve many accounts (program PDAs, Mayflower market accounts, token accounts, sysvars). When calling Hardig via CPI from another program, the combined account list can exceed Solana's 1232-byte transaction size limit even though the account count stays under 64.
+
+**Address Lookup Tables (ALTs)** solve this by compressing account references from 32 bytes to 1 byte in v0 transactions. No on-chain program changes are required — ALTs are handled entirely by the client when constructing the transaction.
+
+### Recommended ALT Setup
+
+Create a **static ALT** containing accounts that are constant across transactions:
+
+```js
+import { AddressLookupTableProgram, PublicKey } from '@solana/web3.js';
+
+// Accounts to include in the static ALT
+const staticAccounts = [
+  new PublicKey('4U2Pgjdq51NXUEDVX4yyFNMdg6PuLHs9ikn9JThkn21p'), // Hardig program
+  new PublicKey('AVMmmRzwc2kETQNhPiFVnyu62HrgsQXTD6D7SnSfEz7v'), // Mayflower program
+  new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d'), // MPL-Core program
+  new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),   // SPL Token program
+  new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),  // Associated Token program
+  // Add Mayflower market PDAs, vaults, fee accounts from your MarketConfig
+  // Add the Hardig ProtocolConfig PDA
+  // Add sysvars (clock, rent, etc.) if used
+];
+
+// 1. Create the ALT
+const slot = await connection.getSlot('finalized');
+const [createIx, lookupTableAddress] = AddressLookupTableProgram.createLookupTable({
+  authority: payer.publicKey,
+  payer: payer.publicKey,
+  recentSlot: slot,
+});
+
+// 2. Extend with addresses (max 30 per extend call)
+const extendIx = AddressLookupTableProgram.extendLookupTable({
+  payer: payer.publicKey,
+  authority: payer.publicKey,
+  lookupTable: lookupTableAddress,
+  addresses: staticAccounts,
+});
+
+// 3. Send both in one transaction
+// After ~1 slot, the ALT is active and can be referenced in v0 transactions
+```
+
+### Using the ALT in Transactions
+
+```js
+// Fetch the ALT account
+const lookupTableAccount = (
+  await connection.getAddressLookupTable(lookupTableAddress)
+).value;
+
+// Build a v0 transaction referencing the ALT
+const messageV0 = new TransactionMessage({
+  payerKey: payer.publicKey,
+  recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+  instructions: [/* your instructions here */],
+}).compileToV0Message([lookupTableAccount]);
+
+const transaction = new VersionedTransaction(messageV0);
+```
+
+### Immutability
+
+Once populated, consider making the ALT immutable to prevent tampering:
+
+```js
+const freezeIx = AddressLookupTableProgram.freezeLookupTable({
+  lookupTable: lookupTableAddress,
+  authority: payer.publicKey,
+});
+```
+
+An immutable ALT cannot be deactivated or extended. This prevents a compromised authority from removing entries and causing transaction failures, at the cost of needing a new ALT if accounts change.
+
+### Notes
+
+- ALTs are resolved by the Solana runtime before program execution — programs are completely unaware of them. All account validation (ownership, PDA derivation, signer checks) works identically.
+- ALTs reduce transaction **size**, not account **count**. The 64-account-per-transaction limit still applies.
+- Per-position accounts (authority PDA, PersonalPosition, token accounts) can be added to a second ALT if needed, but the static ALT alone typically provides enough savings.
+- CPI depth: if your program calls Hardig via CPI, and Hardig calls Mayflower, that is 2 CPI levels. Solana allows up to 4 levels of CPI depth.
+
 ## External Dependencies
 
 | Dependency | Program ID | Purpose |
